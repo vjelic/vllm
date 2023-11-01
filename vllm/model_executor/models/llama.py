@@ -178,7 +178,7 @@ class LlamaAttention(nn.Module):
         attn_output = self.attn(positions, q, k, v, k_cache, v_cache,
                                 input_metadata, cache_event)
         if input_metadata.num_generation_tokens > 0:
-            output, _ = self.o_proj(attn_output, grpahx=self.graphx)#,call_hipblaslt=hacks.get('decode_oproj_call_hipblaslt',0),
+            output, _ = self.o_proj(attn_output, graphx=self.graphx)#,call_hipblaslt=hacks.get('decode_oproj_call_hipblaslt',0),
                                     #splitm=hacks.get('decode_oproj_splitm',1),
                                     #splitk=hacks.get('decode_oproj_splitk',1),
                                     #splits=hacks.get('decode_oproj_splits',None),
