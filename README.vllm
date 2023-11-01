@@ -1,0 +1,24 @@
+Using the VLLM/LLamav2 projects from SLOT(https://github.com/ROCmSoftwarePlatform/SLOT/tree/vllm_mi300/projects/vllm)
+
+1. Get vllm image (docker pull pytorch-private:rocm_6.0_12660_vllm)
+1. Make sure you are on a gfx94x machine. These libraries are compiled for those versions only.
+2. Make sure you have access to a LLamav2 Model with 4k sequence lengths.  7B/13B/70B
+2a. We use the ones available here(https://huggingface.co/TheBloke/Llama-2-13B-Chat-fp16 or https://huggingface.co/NousResearch/Llama-2-13b-hf)
+3. That's it!  The rest is up to you!
+
+
+How to run
+
+# Use the run_vllm.sh script at /var/lib/jenkins/run_vllm.sh  to execute a sweep of prefill and decode benchmarks.  
+# The input lengths are 512, 1024, 2048, 3072
+# The output lengths are 1, 32.  Where 1 will be the prefill test.
+./run_vllm.sh 
+
+
+# Use the run_gemm.sh script at /var/lib/jenkins/run_vllm.sh to execute a sweep of rocblas and hipblaslt gemm benchmarks
+# For the gemm sizes used in the prefill stage for the 3072 input length.
+./run_gemm.sh
+
+# Use run_stream.sh script at /var/lib/jenkins/run_stream.sh to execute the babel stream benchmarks on the given SUT.
+# The output logs will be in /var/lib/jenkins/babel/*.log for the given sizes
+./run_steam.sh 

@@ -1,0 +1,3 @@
+prefill_mlpup_call_hipblaslt: 1
+prefill_qkv_call_hipblaslt: 1
+decode_qkv_splitk: 2

@@ -1,0 +1,8 @@
+prefill_mlpup_call_hipblaslt: 1
+prefill_mlpdown_call_hipblaslt: 0
+prefill_qkv_call_hipblaslt: 1
+prefill_oproj_call_hipblaslt: 0
+decode_mlpup_call_hipblaslt: 1
+decode_mlpdown_call_hipblaslt: 1
+decode_qkv_call_hipblaslt: 1
+decode_oproj_call_hipblaslt: 1
