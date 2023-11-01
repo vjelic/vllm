@@ -1,10 +1,11 @@
 #!/bin/bash
-SLOT_DIR=/workspace
+SLOT_DIR=/var/lib/jenkins/
 VLLM_DIR=$SLOT_DIR/vllm
 GRAD_DIR=$SLOT_DIR/gradlib
-MODEL=/data/llama-2-13b-chat-hf
+MODEL=/data/llama2-70b-chat
 #enable to use triton flash attention
-VLLM_USE_TRITON=
+export VLLM_USE_TRITON=1
+export VLLM_USE_HIPGRAPH=1
 #set Tensor Parallelism
 for tp in 8;
 do
