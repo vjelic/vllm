@@ -4,11 +4,11 @@ RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 RUN apt install -y rocblas-benchmarks hipblaslt-benchmarks
 COPY fa_arch.patch $WORKSPACE_DIR
-# Is this needed?
-RUN cd $WORKSPACE_DIR &&\
-    git clone --recursive -b junhzhan/fa-mi300 https://github.com/ROCmSoftwarePlatform/flash-attention &&\
-    cd flash-attention && git apply ../fa_arch.patch &&\
-    python setup.py install
+# Using triton for FA, its better on everything but 3k.
+#RUN cd $WORKSPACE_DIR &&\
+#    git clone --recursive -b junhzhan/fa-mi300 https://github.com/ROCmSoftwarePlatform/flash-attention &&\
+#    cd flash-attention && git apply ../fa_arch.patch &&\
+#    python setup.py install
 
 # TODO: Copy rather than reclone
 RUN git clone -b vllm_mi300_v4 https://streamhsa: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@github.com/ROCmSoftwarePlatform/vllm.git
