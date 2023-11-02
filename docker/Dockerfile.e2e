@@ -1,0 +1,34 @@
+FROM <E2E_IMAGE_HERE>
+ENV WORKSPACE_DIR=/workspace
+RUN mkdir -p $WORKSPACE_DIR
+WORKDIR $WORKSPACE_DIR
+RUN apt install -y rocblas-benchmarks hipblaslt-benchmarks
+COPY fa_arch.patch $WORKSPACE_DIR
+# Using triton for FA, its better on everything but 3k.
+#RUN cd $WORKSPACE_DIR &&\
+#    git clone --recursive -b junhzhan/fa-mi300 https://github.com/ROCmSoftwarePlatform/flash-attention &&\
+#    cd flash-attention && git apply ../fa_arch.patch &&\
+#    python setup.py install
+
+# TODO: Copy rather than reclone
+RUN git clone -b vllm_mi300_v4 https://streamhsa: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@github.com/ROCmSoftwarePlatform/vllm.git
+
+RUN git clone https://streamhsa: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@github.com/ROCmSoftwarePlatform/gradlib.git
+
+RUN cd $WORKSPACE_DIR/gradlib &&\
+    python setup.py develop
+
+RUN cd $WORKSPACE_DIR/vllm/ &&\
+    pip install -r requirements.txt &&\
+    pip install typing-extensions==4.8.0 &&\
+    python setup.py build && python setup.py develop; exit 0
+
+ENV PYTHONPATH=$WORKSPACE_DIR/gradlib
+
+RUN pip install pandas Ray pyarrow
+
+COPY run_vllm.sh $WORKSPACE_DIR/
+COPY run_vllm_tp1.sh $WORKSPACE_DIR/
+COPY run_vllm_tp2.sh $WORKSPACE_DIR/
+COPY run_vllm_tp4.sh $WORKSPACE_DIR/
+COPY run_vllm_tp8.sh $WORKSPACE_DIR/

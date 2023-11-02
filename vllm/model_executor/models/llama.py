@@ -79,6 +79,10 @@ class LlamaMLP(nn.Module):
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
+        if os.environ.get('VLLM_USE_HIPGRAPH'):
+            self.graphx = 1
+        else:
+            self.graphx = 0
 
     def forward(self, x, num_generation_tokens):
         if num_generation_tokens>0:
@@ -92,7 +96,7 @@ class LlamaMLP(nn.Module):
             gate_up, _ = self.gate_up_proj(x)#,call_hipblaslt=hacks.get('prefill_mlpup_call_hipblaslt',0),call_rocsolidx=hacks.get('prefill_mlpup_call_rocsolidx',0))
         x = self.act_fn(gate_up)
         if num_generation_tokens>0:
-            x, _ = self.down_proj(x)#,call_hipblaslt=hacks.get('decode_mlpdown_call_hipblaslt',0),
+            x, _ = self.down_proj(x, graphx=self.graphx)#,call_hipblaslt=hacks.get('decode_mlpdown_call_hipblaslt',0),
                                   #splitm=hacks.get('decode_mlpdown_splitm',1),
                                   #splitk=hacks.get('decode_mlpdown_splitk',1),
                                   #splits=hacks.get('decode_mlpdown_splits',None),
@@ -125,6 +129,10 @@ class LlamaAttention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
+        if os.environ.get('VLLM_USE_HIPGRAPH'):
+            self.graphx = 1
+        else:
+            self.graphx = 0
 
         self.qkv_proj = ColumnParallelLinear(
             hidden_size,
@@ -170,7 +178,7 @@ class LlamaAttention(nn.Module):
         attn_output = self.attn(positions, q, k, v, k_cache, v_cache,
                                 input_metadata, cache_event)
         if input_metadata.num_generation_tokens > 0:
-            output, _ = self.o_proj(attn_output)#,call_hipblaslt=hacks.get('decode_oproj_call_hipblaslt',0),
+            output, _ = self.o_proj(attn_output, graphx=self.graphx)#,call_hipblaslt=hacks.get('decode_oproj_call_hipblaslt',0),
                                     #splitm=hacks.get('decode_oproj_splitm',1),
                                     #splitk=hacks.get('decode_oproj_splitk',1),
                                     #splits=hacks.get('decode_oproj_splits',None),

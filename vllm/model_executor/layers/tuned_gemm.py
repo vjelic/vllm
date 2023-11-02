@@ -9,8 +9,9 @@ import pandas as pd
 
 class TunedGemm:
     def __init__(self):
-        rocb_create_extension()
-        hipb_create_extension()
+        #rocb_create_extension()
+        #hipb_create_extension()
+        self.extensions_created = False
         self.bestsols = {}
         self.load_best_sols()
         self.create_ds()
@@ -39,12 +40,17 @@ class TunedGemm:
     def query_sol(self,m,n,k):
         return self.solids.get((m,n,k),(0,0))
     def mm(self,inp,weights):
+        if self.extensions_created == False:
+            rocb_create_extension()
+            hipb_create_extension()
+            self.extensions_created = True
         soltype,solidx = self.query_sol(m=weights.shape[0],n=inp.shape[0],k=inp.shape[1])
         if soltype==1:
             out = hipb_mm(inp,weights.t(),solidx)
         elif soltype==2:
             out = rocb_mm(inp,weights.t(),solidx)
         else:
+            #print('>>>Tgemm Default',inp.shape,weights.shape,soltype,solidx)
             out = F.linear(inp,weights)
         return out
 

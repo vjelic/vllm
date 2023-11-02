@@ -4,7 +4,8 @@ VLLM_DIR=$SLOT_DIR/vllm
 GRAD_DIR=$SLOT_DIR/gradlib
 MODEL=/data/llama-2-13b-chat-hf
 #enable to use triton flash attention
-VLLM_USE_TRITON=
+export VLLM_USE_TRITON=1
+export VLLM_USE_HIPGRAPH=1
 #set Tensor Parallelism
 for tp in 1;
 do
