@@ -31,7 +31,8 @@ RUN git clone https://streamhsa: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@github.
     pip install -r requirements.txt &&\
     pip install typing-extensions==4.8.0 &&\
     python setup.py build && python setup.py develop; exit 0
-
+RUN pip install pyarrow Ray
+RUN pip install pandas
 
 # RUN git clone -b N1 https://streamhsa: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@github.com/amgddm/rocBLAS-internal.git && \
 #     cd rocBLAS-internal && ./install.sh -idc -a gfx942 &&\
