@@ -49,7 +49,7 @@ for gen_len in 1 32;
 do
     for input_len in 512 1024 2048 3072;
     do
-        echo "================================= RUNNING $MODEL $input_len $gen_len ==============================================="
+        echo "================================= RUNNING $MODEL tp$tp $input_len $gen_len ==============================================="
         python benchmarks/benchmark_latency.py --model $MODEL --input-len $input_len --output-len $gen_len --batch-size 1  --tensor-parallel-size $tp --num-iters 5
     done
 done
