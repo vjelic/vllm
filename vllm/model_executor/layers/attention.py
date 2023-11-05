@@ -17,7 +17,8 @@ import triton
 import triton.language as tl
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
-
+# Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
+_PARTITION_SIZE = 1024
 
 class PagedAttention(nn.Module):
     # pylint: disable=line-too-long
@@ -374,6 +375,14 @@ class PagedAttention(nn.Module):
         out = torch.einsum('hqk,khd->qhd', attn, value)
         return out
 
+    def get_alibi_slopes(self) -> Optional[torch.Tensor]:
+        """Returns the slopes for the alibi attention bias.
+
+        Returns:
+            slopes: shape = [num_heads]
+        """
+        return None
+
     def single_query_cached_kv_attention(
         self,
         output: torch.Tensor,
@@ -381,6 +390,7 @@ class PagedAttention(nn.Module):
         key_cache: torch.Tensor,
         value_cache: torch.Tensor,
         input_metadata: InputMetadata,
+        alibi_slopes: Optional[torch.Tensor],
     ) -> None:
         """PagedAttention for the generation tokens.
 
@@ -394,19 +404,19 @@ class PagedAttention(nn.Module):
             input_metadata: metadata for paged attention.
         """
         block_size = value_cache.shape[3]
-        attention_ops.single_query_cached_kv_attention(
-            output,
-            query,
-            key_cache,
-            value_cache,
-            self.head_mapping,
-            self.scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
-            block_size,
-            input_metadata.max_context_len,
-            None,  # alibi_slopes
-        )
+        #attention_ops.single_query_cached_kv_attention(
+        #    output,
+        #    query,
+        #    key_cache,
+        #    value_cache,
+        #    self.head_mapping,
+        #    self.scale,
+        #    input_metadata.block_tables,
+        #    input_metadata.context_lens,
+        #    block_size,
+        #    input_metadata.max_context_len,
+        #    None,  # alibi_slopes
+        #)
         #print('>>>single query',input_metadata.context_lens,query.shape,output.shape,self.keyc.shape,self.valc.shape)
         #self.ref_single_query_cached_kv_attention(
         #    output,
@@ -416,6 +426,64 @@ class PagedAttention(nn.Module):
         #    input_metadata.block_tables,
         #    input_metadata.context_lens,
         #)
+
+        num_seqs, num_heads, head_size = query.shape
+        max_num_partitions = (
+            (input_metadata.max_context_len + _PARTITION_SIZE - 1) //
+            _PARTITION_SIZE)
+        # NOTE(woosuk): We use a simple heuristic to decide whether to use
+        # PagedAttention V1 or V2. If the number of partitions is 1, we use
+        # V1 to avoid the overhead of reduction. Also, if the number of
+        # sequences or heads is large, we use V1 since there is enough work
+        # to parallelize.
+        # TODO(woosuk): Tune this heuristic.
+        use_v1 = max_num_partitions == 1 or num_seqs * num_heads > 512
+        if use_v1:
+            # Run PagedAttention V1.
+            attention_ops.paged_attention_v1(
+                output,
+                query,
+                key_cache,
+                value_cache,
+                self.head_mapping,
+                self.scale,
+                input_metadata.block_tables,
+                input_metadata.context_lens,
+                block_size,
+                input_metadata.max_context_len,
+                alibi_slopes,
+            )
+        else:
+            # Run PagedAttention V2.
+            assert _PARTITION_SIZE % block_size == 0
+            tmp_output = torch.empty(
+                size=(num_seqs, num_heads, max_num_partitions, head_size),
+                dtype=output.dtype,
+                device=output.device,
+            )
+            exp_sums = torch.empty(
+                size=(num_seqs, num_heads, max_num_partitions),
+                dtype=torch.float32,
+                device=output.device,
+            )
+            max_logits = torch.empty_like(exp_sums)
+            attention_ops.paged_attention_v2(
+                output,
+                exp_sums,
+                max_logits,
+                tmp_output,
+                query,
+                key_cache,
+                value_cache,
+                self.head_mapping,
+                self.scale,
+                input_metadata.block_tables,
+                input_metadata.context_lens,
+                block_size,
+                input_metadata.max_context_len,
+                alibi_slopes,
+            )
+
 
     def ref_multi_query_kv_attention(
         self,
@@ -551,7 +619,7 @@ class PagedAttention(nn.Module):
             self.single_query_cached_kv_attention(
                 output[num_prompt_tokens:num_valid_tokens],
                 query[num_prompt_tokens:num_valid_tokens], key_cache,
-                value_cache, input_metadata)
+                value_cache, input_metadata, self.get_alibi_slopes())
 
         # Reshape the output tensor.
         # NOTE(woosuk): The output tensor may include paddings.
@@ -567,7 +635,7 @@ class PagedAttentionWithRoPE(PagedAttention):
         head_size: int,
         scale: float,
         rotary_dim: int,
-        max_position: int = 8192,
+        max_position: int = 8192*4,
         base: int = 10000,
         num_kv_heads: Optional[int] = None,
     ) -> None:
