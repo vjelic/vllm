@@ -1,11 +1,12 @@
 #!/bin/bash
-SLOT_DIR=/var/lib/jenkins/
-VLLM_DIR=$SLOT_DIR/vllm
+SLOT_DIR=/workspace
+VLLM_DIR=$SLOT_DIR/vllm-private
 GRAD_DIR=$SLOT_DIR/gradlib
 MODEL=/data/llama2-70b-chat
 #enable to use triton flash attention
 export VLLM_USE_TRITON=1
 export VLLM_USE_HIPGRAPH=1
+#export LD_LIBRARY_PATH=/var/lib/jenkins/rccl/build
 #set Tensor Parallelism
 for tp in 2;
 do
@@ -14,7 +15,7 @@ do
     then
             echo "INFO: No Tuned configs detected. Generating now"
             cd $GRAD_DIR
-            python gemm_tuner.py --model_dir $MODEL --output ../vllm/tuned_tp$tp.csv --tp $tp
+            python gemm_tuner.py --model_dir $MODEL --output $VLLM_DIR/tuned_tp$tp.csv --tp $tp
     fi
     export VLLM_PERF_YAML=./tuned_perf_tp$tp.yaml
 

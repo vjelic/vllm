@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # parameter defalt values
 tp=1
 VLLM_DIR=$HOME/vllm
@@ -33,8 +32,8 @@ echo "model: $MODEL"
 #enable to use triton flash attention
 export VLLM_USE_TRITON=1
 export VLLM_USE_HIPGRAPH=1
-#set Tensor Parallelism
 
+#set Tensor Parallelism
 echo "tuned_gemm_csv: ./tuned_tp$tp.csv" > $VLLM_DIR/tuned_perf_tp$tp.yaml
 if [ ! -f  $VLLM_DIR/tuned_tp$tp.csv ] ;
 then
@@ -53,3 +52,4 @@ do
         python benchmarks/benchmark_latency.py --model $MODEL --input-len $input_len --output-len $gen_len --batch-size 1  --tensor-parallel-size $tp --num-iters 5
     done
 done
+
