@@ -5,7 +5,7 @@ GRAD_DIR=$SLOT_DIR/gradlib
 MODEL=/data/llama2-70b-chat
 #enable to use triton flash attention
 export VLLM_USE_TRITON=1
-export VLLM_USE_HIPGRAPH=1
+export VLLM_USE_HIPGRAPH=
 #export LD_LIBRARY_PATH=/var/lib/jenkins/rccl/build
 #set Tensor Parallelism
 for tp in 1;

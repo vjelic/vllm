@@ -30,6 +30,7 @@ RUN git clone https://streamhsa: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@github.
     cd vllm-private &&\
     pip install -r requirements.txt &&\
     pip install typing-extensions==4.8.0 &&\
+    sed -i 's/gpu_memory_utilization: float = 0.9/gpu_memory_utilization: float = 0.4/g' vllm/engine/arg_utils.py &&\
     python setup.py build && python setup.py develop; exit 0
 RUN pip install pyarrow Ray pandas==2.0 numpy==1.20.3
 
