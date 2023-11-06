@@ -144,7 +144,8 @@ class LlamaAttention(nn.Module):
                                            self.head_dim,
                                            self.scaling,
                                            rotary_dim=self.head_dim,
-                                           num_kv_heads=self.num_kv_heads)
+                                           num_kv_heads=self.num_kv_heads,
+                                           max_position=self.max_position_embeddings)
 
 
     def forward(
@@ -179,12 +180,12 @@ class LlamaDecoderLayer(nn.Module):
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
+            max_position_embeddings=config.max_position_embeddings
         )
         self.mlp = LlamaMLP(
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
-            hidden_act=config.hidden_act,
-            max_position_embeddings=config.max_position_embeddings
+            hidden_act=config.hidden_act
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
