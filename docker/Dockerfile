@@ -30,13 +30,21 @@ RUN git clone https://streamhsa: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@github.
     cd vllm-private &&\
     pip install -r requirements.txt &&\
     pip install typing-extensions==4.8.0 &&\
+    sed -i 's/gpu_memory_utilization: float = 0.9/gpu_memory_utilization: float = 0.4/g' vllm/engine/arg_utils.py &&\
     python setup.py build && python setup.py develop; exit 0
-RUN pip install pyarrow Ray
-RUN pip install pandas
+RUN pip install pyarrow Ray pandas==2.0 numpy==1.20.3
 
 # RUN git clone -b N1 https://streamhsa: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@github.com/amgddm/rocBLAS-internal.git && \
 #     cd rocBLAS-internal && ./install.sh -idc -a gfx942 &&\
 #     cd ../ && rm -rf rocBLAS-internal
+RUN cd ~ && wget --no-check-certificate \
+    https://compute-artifactory.amd.com/artifactory/list/rocm-osdb-20.04-deb/compute-rocm-dkms-no-npi-hipclang-12845/hsa-rocr_1.12.0.60000-crdnnh.12845%7E20.04_amd64.deb &&\
+    dpkg-deb -x hsa-rocr_1.12.0.60000-crdnnh.12845~20.04_amd64.deb . && \
+    cp opt/rocm-6.0.0-12845/lib/* /opt/rocm-6.0.0-12969/lib/ && rm -rf opt/rocm-6.0.0-12845
+
+ENV HSA_OVERRIDE_GFX_VERSION=9.4.1
+
+RUN rm /opt/rocm/share/rccl/msccl-algorithms/allreduce-allpairs-8n-simple.xml
 
 COPY run_vllm.sh $WORKSPACE_DIR/
 COPY run_vllm_tp1.sh $WORKSPACE_DIR/

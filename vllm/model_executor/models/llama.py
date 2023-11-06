@@ -86,25 +86,14 @@ class LlamaMLP(nn.Module):
 
     def forward(self, x, num_generation_tokens):
         if num_generation_tokens>0:
-            gate_up, _ = self.gate_up_proj(x)#,call_hipblaslt=hacks.get('decode_mlpup_call_hipblaslt',0),
-                                           #splitm=hacks.get('decode_mlpup_splitm',1),
-                                           #splitk=hacks.get('decode_mlpup_splitk',1),
-                                           #splits=hacks.get('decode_mlpup_splits',None),
-                                           #call_rocsolidx=hacks.get('decode_mlpup_call_rocsolidx',0)
-                                          #)
+            gate_up, _ = self.gate_up_proj(x)
         else:
-            gate_up, _ = self.gate_up_proj(x)#,call_hipblaslt=hacks.get('prefill_mlpup_call_hipblaslt',0),call_rocsolidx=hacks.get('prefill_mlpup_call_rocsolidx',0))
+            gate_up, _ = self.gate_up_proj(x)
         x = self.act_fn(gate_up)
         if num_generation_tokens>0:
-            x, _ = self.down_proj(x, graphx=self.graphx)#,call_hipblaslt=hacks.get('decode_mlpdown_call_hipblaslt',0),
-                                  #splitm=hacks.get('decode_mlpdown_splitm',1),
-                                  #splitk=hacks.get('decode_mlpdown_splitk',1),
-                                  #splits=hacks.get('decode_mlpdown_splits',None),
-                                  #call_rocsolidx=hacks.get('decode_mlpdown_call_rocsolidx',0),
-                                  #graphx=hacks.get('decode_mlpdown_graphx',0)
-                                 #)
+            x, _ = self.down_proj(x, graphx=self.graphx)
         else:
-            x, _ = self.down_proj(x)#,call_hipblaslt=hacks.get('prefill_mlpdown_call_hipblaslt',0),call_rocsolidx=hacks.get('prefill_mlpdown_call_rocsolidx',0))
+            x, _ = self.down_proj(x)
         return x
 
 
@@ -115,6 +104,7 @@ class LlamaAttention(nn.Module):
         hidden_size: int,
         num_heads: int,
         num_kv_heads: int,
+        max_position_embeddings: int=8192
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -129,6 +119,7 @@ class LlamaAttention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
+        self.max_position_embeddings = max_position_embeddings
         if os.environ.get('VLLM_USE_HIPGRAPH'):
             self.graphx = 1
         else:
@@ -165,28 +156,17 @@ class LlamaAttention(nn.Module):
         cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         if input_metadata.num_generation_tokens > 0:
-            qkv, _ = self.qkv_proj(hidden_states)#,call_hipblaslt=hacks.get('decode_qkv_call_hipblaslt',0),
-                                   #splitm=hacks.get('decode_qkv_splitm',1),
-                                   #splitk=hacks.get('decode_qkv_splitk',1),
-                                   #splits=hacks.get('decode_qkv_splits',None),
-                                   #call_rocsolidx=hacks.get('decode_qkv_call_rocsolidx',0)
-                                  #)
+            qkv, _ = self.qkv_proj(hidden_states)
         else:
-            qkv, _ = self.qkv_proj(hidden_states)#,call_hipblaslt=hacks.get('prefill_qkv_call_hipblaslt',0),call_rocsolidx=hacks.get('prefill_qkv_call_rocsolidx',0))
+            qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(positions, q, k, v, k_cache, v_cache,
                                 input_metadata, cache_event)
         if input_metadata.num_generation_tokens > 0:
-            output, _ = self.o_proj(attn_output, graphx=self.graphx)#,call_hipblaslt=hacks.get('decode_oproj_call_hipblaslt',0),
-                                    #splitm=hacks.get('decode_oproj_splitm',1),
-                                    #splitk=hacks.get('decode_oproj_splitk',1),
-                                    #splits=hacks.get('decode_oproj_splits',None),
-                                    #call_rocsolidx=hacks.get('decode_oproj_call_rocsolidx',0),
-                                    #graphx=hacks.get('decode_oproj_graphx',0)
-                                   #)
+            output, _ = self.o_proj(attn_output, graphx=self.graphx)
         else:
-            output, _ = self.o_proj(attn_output)#,call_hipblaslt=hacks.get('prefill_oproj_call_hipblaslt',0),call_rocsolidx=hacks.get('prefill_oproj_call_rocsolidx',0))
+            output, _ = self.o_proj(attn_output)
         return output
 
 
@@ -204,6 +184,7 @@ class LlamaDecoderLayer(nn.Module):
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act,
+            max_position_embeddings=config.max_position_embeddings
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
