@@ -30,7 +30,10 @@ class ModelConfig:
         dtype: Data type for model weights and activations. The "auto" option
             will use FP16 precision for FP32 and FP16 models, and BF16 precision
             for BF16 models.
+        use_cuda_graph: Whether to capture and replay CUDA graphs.
         seed: Random seed for reproducibility.
+        max_model_len: Maximum length of a sequence (including prompt and
+            output). If None, will be derived from the model.
     """
 
     def __init__(
@@ -44,6 +47,8 @@ class ModelConfig:
         use_dummy_weights: bool,
         dtype: str,
         seed: int,
+        max_model_len: Optional[int] = None,
+        use_cuda_graph: Optional[bool] = False,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -53,10 +58,13 @@ class ModelConfig:
         self.use_np_weights = use_np_weights
         self.use_dummy_weights = use_dummy_weights
         self.seed = seed
+        self.use_cuda_graph = use_cuda_graph
 
         self.hf_config = get_config(model, trust_remote_code)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
         self._verify_tokenizer_mode()
+        self.max_model_len = _get_and_verify_max_len(self.hf_config,
+                                                     max_model_len)
 
     def _verify_tokenizer_mode(self) -> None:
         tokenizer_mode = self.tokenizer_mode.lower()
@@ -117,6 +125,8 @@ class ModelConfig:
         return total_num_attention_heads // parallel_config.tensor_parallel_size
 
     def get_max_model_len(self) -> int:
+        if self.max_model_len is not None:
+            return self.max_model_len
         max_model_len = float("inf")
         possible_keys = [
             # OPT
@@ -214,7 +224,7 @@ class ParallelConfig:
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
         if self.world_size > 1:
-            self.worker_use_ray = True
+            self.worker_use_ray = False
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -295,3 +305,58 @@ def _get_and_verify_dtype(
                 f"of at least 8.0. Your {gpu_name} GPU has compute capability "
                 f"{compute_capability[0]}.{compute_capability[1]}.")
     return torch_dtype
+
+def _get_and_verify_max_len(
+    hf_config: PretrainedConfig,
+    max_model_len: Optional[int],
+) -> int:
+    """Get and verify the model's maximum length."""
+    derived_max_model_len = float("inf")
+    possible_keys = [
+        # OPT
+        "max_position_embeddings",
+        # GPT-2
+        "n_positions",
+        # MPT
+        "max_seq_len",
+        # Others
+        "max_sequence_length",
+        "max_seq_length",
+        "seq_len",
+    ]
+    for key in possible_keys:
+        max_len_key = getattr(hf_config, key, None)
+        if max_len_key is not None:
+            derived_max_model_len = min(derived_max_model_len, max_len_key)
+    if derived_max_model_len == float("inf"):
+        if max_model_len is not None:
+            # If max_model_len is specified, we use it.
+            return max_model_len
+
+        default_max_len = 2048
+        logger.warning(
+            "The model's config.json does not contain any of the following "
+            "keys to determine the original maximum length of the model: "
+            f"{possible_keys}. Assuming the model's maximum length is "
+            f"{default_max_len}.")
+        derived_max_model_len = default_max_len
+
+    rope_scaling = getattr(hf_config, "rope_scaling", None)
+    if rope_scaling is not None:
+        assert "factor" in rope_scaling
+        scaling_factor = rope_scaling["factor"]
+        if rope_scaling["type"] == "yarn":
+            derived_max_model_len = rope_scaling[
+                "original_max_position_embeddings"]
+        derived_max_model_len *= scaling_factor
+
+    if max_model_len is None:
+        max_model_len = derived_max_model_len
+    elif max_model_len > derived_max_model_len:
+        raise ValueError(
+            f"User-specified max_model_len ({max_model_len}) is greater than "
+            f"the derived max_model_len ({max_len_key}={derived_max_model_len}"
+            " in model's config.json). This may lead to incorrect model "
+            "outputs or CUDA errors. Make sure the value is correct and "
+            "within the model context size.")
+    return int(max_model_len)
