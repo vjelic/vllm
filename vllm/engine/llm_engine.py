@@ -118,8 +118,8 @@ class LLMEngine:
         # before CUDA_VISIBLE_DEVICES is set in the Worker
         from vllm.worker.worker import Worker  # pylint: disable=import-outside-toplevel
 
-        assert self.parallel_config.world_size == 1, (
-            "Ray is required if parallel_config.world_size > 1.")
+        #assert self.parallel_config.world_size == 1, (
+         #   "Ray is required if parallel_config.world_size > 1.")
 
         self.workers: List[Worker] = []
         worker = Worker(
@@ -222,6 +222,21 @@ class LLMEngine:
                      placement_group,
                      log_stats=not engine_args.disable_log_stats)
         return engine
+
+    def warm_up_cuda_graph(self) -> None:
+        """Compiles a CUDA graph with batch size of max sequence num."""
+        if not self.model_config.use_cuda_graph:
+            return
+
+        for i in range(self.scheduler_config.max_num_seqs):
+            self.add_request(str(i), "a",
+                             SamplingParams(temperature=0.0, max_tokens=2))
+
+        self.step()
+        self.step()
+
+        for i in range(self.scheduler_config.max_num_seqs):
+            self.abort_request(str(i))
 
     def add_request(
         self,

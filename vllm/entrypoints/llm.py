@@ -49,6 +49,7 @@ class LLM:
         tensor_parallel_size: int = 1,
         dtype: str = "auto",
         seed: int = 0,
+        use_cuda_graph: Optional[bool] = False,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -61,6 +62,7 @@ class LLM:
             tensor_parallel_size=tensor_parallel_size,
             dtype=dtype,
             seed=seed,
+            use_cuda_graph=use_cuda_graph,
             **kwargs,
         )
         self.llm_engine = LLMEngine.from_engine_args(engine_args)

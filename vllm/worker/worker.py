@@ -232,11 +232,31 @@ class Worker:
         positions_tensor = torch.cuda.LongTensor(input_positions)
         slot_mapping_tensor = torch.cuda.IntTensor(slot_mapping)
         context_lens_tensor = torch.cuda.IntTensor(context_lens)
-        padded_block_tables = [
-            _pad_to_max(block_table, max_num_blocks_per_seq)
-            for block_table in generation_block_tables
-        ]
-        block_tables_tensor = torch.cuda.IntTensor(padded_block_tables)
+        # padded_block_tables = [
+        #     _pad_to_max(block_table, max_num_blocks_per_seq)
+        #     for block_table in generation_block_tables
+        # ]
+        if self.model_config.use_cuda_graph:
+            # Make size of block_tables and max_context_len static
+            # TODO: how to dynamically change shared memory size for kernels with different max_context_len?
+            block_tables_tensor = torch.zeros(
+                (len(generation_block_tables),
+                 self.model_config.max_model_len),
+                dtype=torch.int,
+                device="cuda")
+            for i, block_table in enumerate(generation_block_tables):
+                tensor = torch.tensor(block_table)
+                block_tables_tensor[i, :len(block_table)] = tensor
+
+            max_context_len = self.model_config.max_model_len
+        else:
+            padded_block_tables = [
+                _pad_to_max(block_table, max_num_blocks_per_seq)
+                for block_table in generation_block_tables
+            ]
+            block_tables_tensor = torch.tensor(padded_block_tables,
+                                               dtype=torch.int,
+                                               device="cuda")
 
         seq_data: Dict[int, SequenceData] = {}
         for seq_group_metadata in seq_group_metadata_list:
@@ -250,6 +270,7 @@ class Worker:
             context_lens=context_lens_tensor,
             max_context_len=max_context_len,
             block_tables=block_tables_tensor,
+            use_cuda_graph=self.model_config.use_cuda_graph,
         )
         return tokens_tensor, positions_tensor, input_metadata
 
@@ -323,8 +344,9 @@ def _init_distributed_environment(
         torch.distributed.init_process_group(
             backend="nccl",
             world_size=parallel_config.world_size,
-            rank=rank,
-            init_method=distributed_init_method,
+            #rank=rank,
+            #init_method=distributed_init_method,
+            init_method="env://", #distributed_init_method,
         )
         #    pg_options=options,
         #)

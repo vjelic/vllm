@@ -26,6 +26,7 @@ def main(args: argparse.Namespace):
         max_num_seqs=args.batch_size,
         max_num_batched_tokens=args.batch_size * args.input_len,
         trust_remote_code=args.trust_remote_code,
+        use_cuda_graph=args.use_cuda_graph
     )
 
     sampling_params = SamplingParams(
@@ -68,7 +69,8 @@ def main(args: argparse.Namespace):
     for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
         latencies.append(run_to_completion(profile=False))
     print(latencies)
-    print(f'Avg latency: {np.mean(latencies)} seconds')
+    if torch.distributed.get_rank() == 0:
+        print(f'Avg latency: {np.mean(latencies)} seconds') 
     del llm
     ray.shutdown()
 
@@ -90,6 +92,12 @@ if __name__ == '__main__':
                         help='Number of iterations to run.')
     parser.add_argument('--trust-remote-code', action='store_true',
                         help='trust remote code from huggingface')
+    parser.add_argument(
+        '--use-cuda-graph',
+        action="store_true",
+        default=False,
+        help="Whether to use CUDA graph for inference",
+    )
     args = parser.parse_args()
     main(args)
     #time.sleep(30) #add sleep for profiling
