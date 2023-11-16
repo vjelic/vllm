@@ -33,7 +33,7 @@ from transformers import LlamaConfig
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import SiluAndMul
-from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.layernorm import RMSNorm,ResAddRMSNorm
 from vllm.model_executor.layers.attention import PagedAttentionWithRoPE
 from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.weight_utils import (hf_model_weights_iterator,
@@ -187,22 +187,25 @@ class LlamaDecoderLayer(nn.Module):
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
+        self.input_layernorm = ResAddRMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+        self.post_attention_layernorm = ResAddRMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
     def forward(
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
+        prev_residual: torch.Tensor,
         kv_cache: KVCache,
         input_metadata: InputMetadata,
         cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         # Self Attention
-        residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
+        #hidden_states = prev_residual + hidden_states
+        #residual = hidden_states
+        #hidden_states = self.input_layernorm(hidden_states)
+        hidden_states, residual = self.input_layernorm(prev_residual,hidden_states)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -210,14 +213,15 @@ class LlamaDecoderLayer(nn.Module):
             input_metadata=input_metadata,
             cache_event=cache_event,
         )
-        hidden_states = residual + hidden_states
+        #hidden_states = residual + hidden_states
 
         # Fully Connected
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        #residual = hidden_states
+        #hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states,residual = self.post_attention_layernorm(residual,hidden_states)
         hidden_states = self.mlp(hidden_states,input_metadata.num_generation_tokens)
-        hidden_states = residual + hidden_states
-        return hidden_states
+        #hidden_states = residual + hidden_states
+        return hidden_states,residual
 
 
 class LlamaModel(nn.Module):
@@ -234,7 +238,7 @@ class LlamaModel(nn.Module):
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)
         ])
-        self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = ResAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -245,20 +249,24 @@ class LlamaModel(nn.Module):
         cache_events: Optional[List[torch.cuda.Event]],
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
+        residual = torch.zeros_like(hidden_states)
         for i in range(len(self.layers)):
             if cache_events is None:
                 cache_event = None
             else:
                 cache_event = cache_events[i]
             layer = self.layers[i]
-            hidden_states = layer(
+            hidden_states, residual = layer(
                 positions,
                 hidden_states,
+                residual,
                 kv_caches[i],
                 input_metadata,
                 cache_event,
             )
-        hidden_states = self.norm(hidden_states)
+        #hidden_states = residual + hidden_states
+        #hidden_states = self.norm(hidden_states)
+        hidden_states, residual = self.norm(residual,hidden_states)
         return hidden_states
 
 
