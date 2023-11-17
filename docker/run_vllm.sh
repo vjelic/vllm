@@ -36,7 +36,7 @@ do
     do
         for input_len in $INPUT_LEN;
         do
-            if [ -z ${PROFILE+x} ];
+            if [[ -v $PROFILE ]] ;
             then
                 rm /workspace/trace.rpd
                 python -m rocpd.schema --create /workspace/trace.rpd
@@ -44,7 +44,7 @@ do
             echo "================================= RUNNING $MODEL $input_len $gen_len ==============================================="
             torchrun --standalone --nnodes=1 --nproc-per-node=$tp benchmarks/benchmark_latency.py --model $MODEL --input-len $input_len --output-len $gen_len --batch-size 1  --tensor-parallel-size $tp --num-iters 1 \
             $HIP_GRAPH $PROFILE
-            if [ -z ${PROFILE+x} ];
+            if [[ -v $PROFILE ]] ;
             then
                 python $RPD_DIR/tools/rpd2tracing.py --format object $BASE_DIR/trace.rpd $BASE_DIR/trace_${SIZE}_${input_len}_${gen_len}.json
             fi
