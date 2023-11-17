@@ -28,6 +28,7 @@ ENV MAX_JOBS=32
 RUN git clone https://streamhsa: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@github.com/ROCmSoftwarePlatform/gradlib.git &&\
     cd gradlib &&\
     python setup.py develop
+RUN echo 2
 RUN git clone https://streamhsa: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@github.com/ROCmSoftwarePlatform/vllm-private.git &&\
     cd vllm-private &&\
     pip install -r requirements.txt &&\
@@ -48,5 +49,5 @@ RUN git clone https://github.com/ROCmSoftwarePlatform/rocmProfileData.git &&\
 RUN rm /opt/rocm/share/rccl/msccl-algorithms/allreduce-allpairs-8n-simple.xml
 COPY libamdhip64.so.6 /opt/rocm/lib/
 COPY libfile_plugin.so /opt/rocm/lib/roctracer
-COPY run_vllm.sh $WORKSPACE_DIR/
-COPY run_vllm_tp8.sh $WORKSPACE_DIR/
+COPY run_13b.sh $WORKSPACE_DIR/
+COPY run_70b.sh $WORKSPACE_DIR/
