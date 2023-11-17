@@ -63,11 +63,22 @@ def main(args: argparse.Namespace):
 
     print("Warming up...")
     run_to_completion(profile=False)
+    if (args.profile):
+            from rpdTracerControl import rpdTracerControl
+            rpdTracerControl.setFilename(name = "/workspace/trace.rpd", append=True)
+            profile_rpd = rpdTracerControl()
+            
+            profile_rpd.start()
 
     # Benchmark.
     latencies = []
     for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
-        latencies.append(run_to_completion(profile=False))
+        with torch.autograd.profiler.emit_nvtx(enabled=args.profile):
+            latencies.append(run_to_completion(profile=False))
+            
+    if (args.profile):
+        profile_rpd.stop()
+
     print(latencies)
     if torch.distributed.get_rank() == 0:
         print(f'Avg latency: {np.mean(latencies)} seconds') 
@@ -98,6 +109,8 @@ if __name__ == '__main__':
         default=False,
         help="Whether to use CUDA graph for inference",
     )
+    parser.add_argument('--profile', action='store_true',
+                        help='turn on rpd profiling')
     args = parser.parse_args()
     main(args)
     #time.sleep(30) #add sleep for profiling
