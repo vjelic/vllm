@@ -150,22 +150,24 @@ inline __device__ float block_sum(float* red_smem, float sum) {
 
   // Make sure the data is in shared memory.
   __syncthreads();
-
+    
+  float sum_ret = lane < NUM_WARPS ? red_smem[lane] : 0.f;
   // The warps compute the final sums.
-  if (lane < NUM_WARPS) {
-    sum = red_smem[lane];
-  }
+  //if (lane < NUM_WARPS) {
+  //  sum_ret = red_smem[lane];
+  //}
 
   // Parallel reduction inside the warp.
 #pragma unroll
-  for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
+  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
     //sum += __shfl_xor_sync(uint32_t(-1), sum, mask);
-    sum += __shfl_xor(sum, mask);
+    sum_ret += __shfl_xor(sum_ret, mask);
   }
 
   // Broadcast to other threads.
   //return __shfl_sync(uint32_t(-1), sum, 0);
-  return __shfl(sum, 0);
+  //return __shfl(sum, 0);
+  return sum_ret;
 }
 
 // Grid: (num_heads, num_seqs).
@@ -312,13 +314,13 @@ __global__ void single_query_cached_kv_attention_kernel(
   // Get the max qk value for the sequence.
   qk_max = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
 #pragma unroll
-  for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
+  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
     //qk_max = fmaxf(qk_max, __shfl_xor_sync(uint32_t(-1), qk_max, mask));
     qk_max = fmaxf(qk_max, __shfl_xor(qk_max, mask));
   }
   // Broadcast the max qk value to all threads.
   //qk_max = __shfl_sync(uint32_t(-1), qk_max, 0);
-  qk_max = __shfl(qk_max, 0);
+  //qk_max = __shfl(qk_max, 0);
 
   // Get the sum of the exp values.
   float exp_sum = 0.f;
@@ -602,11 +604,11 @@ __device__ void paged_attention_kernel(
   // Get the max qk value for the sequence.
   qk_max = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
 #pragma unroll
-  for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
+  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
     qk_max = fmaxf(qk_max, __shfl_xor(qk_max, mask));
   }
   // Broadcast the max qk value to all threads.
-  qk_max = __shfl(qk_max, 0);
+  //qk_max = __shfl(qk_max, 0);
 
   // Get the sum of the exp values.
   float exp_sum = 0.f;
@@ -867,11 +869,11 @@ __global__ void paged_attention_v2_reduce_kernel(
   // Reduce across warps.
   max_logit = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
 #pragma unroll
-  for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
+  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
     max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
   }
   // Broadcast the max value to all threads.
-  max_logit = __shfl(max_logit, 0);
+  //max_logit = __shfl(max_logit, 0);
 
   // Load rescaled exp sums to shared memory.
   float* shared_exp_sums = reinterpret_cast<float*>(shared_mem + sizeof(float) * num_partitions);

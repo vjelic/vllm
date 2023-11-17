@@ -11,15 +11,16 @@ import flash_attn_cuda
 import pytest
 
 MAX_SEQ_LEN = 4096*8
+MAX_SEQ_LEN_V1 = 4096*2
 TEST_SEED = 0
 
 
 DTYPES = [torch.float16] # , torch.bfloat16
-NUM_GEN_SEQS = [1]  # Arbitrary values for testing
+NUM_GEN_SEQS = [1,8]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
 NUM_HEADS = [(8, 1), (64, 8)]  # Arbitrary values for testing
-HEAD_SIZES = [128]
-BLOCK_SIZES = [16]
+HEAD_SIZES = [64,80,96,112,128]
+BLOCK_SIZES = [8,16,32]
 USE_ALIBI = [False]
 SEEDS = [0]
 
@@ -199,7 +200,7 @@ def run_single_query_cached_kv_attention(
                               device='cuda')
     value_cache.uniform_(-1e-3, 1e-3)
 
-    context_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_tokens)]
+    context_lens = [random.randint(1, MAX_SEQ_LEN_V1//num_tokens) for _ in range(num_tokens)]
     max_context_len = max(context_lens)
     context_lens = torch.tensor(context_lens, dtype=torch.int, device='cuda')
 
@@ -417,8 +418,7 @@ def ref_single_query_cached_kv_attention_V2(
 NUM_BLOCKS = 128  # Arbitrary values for testing
 PARTITION_SIZE = 512
 
-#@pytest.mark.parametrize("version", ["v1", "v2"])
-@pytest.mark.parametrize("version", ["v2"])
+@pytest.mark.parametrize("version", ["v1", "v2"])
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -460,9 +460,10 @@ def test_paged_attention(
         alibi_slopes = torch.randn(num_query_heads,
                                    dtype=torch.float,
                                    device="cuda")
-
-    context_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
-    context_lens[-1] = MAX_SEQ_LEN
+    max_seqlen = MAX_SEQ_LEN
+    if version == "v1": max_seqlen = MAX_SEQ_LEN_V1
+    context_lens = [random.randint(1, max_seqlen//num_seqs) for _ in range(num_seqs)]
+    context_lens[-1] = max_seqlen//num_seqs
     max_context_len = max(context_lens)
     context_lens = torch.tensor(context_lens, dtype=torch.int, device="cuda")
 
