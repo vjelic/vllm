@@ -5,6 +5,7 @@ from hipbsolidxgemm import hipb_create_extension,hipb_mm
 import os
 import yaml
 import pandas as pd
+from vllm import custom_ops
 
 
 class TunedGemm:
@@ -34,8 +35,8 @@ class TunedGemm:
             key = (ds['M'],ds['N'],ds['K'])
             if ds['libtype']=='hipblaslt': soltype = 1
             elif ds['libtype']=='rocblas': soltype = 2
+            elif ds['libtype']=='custom': soltype = 3
             solds[key] = (soltype,int(ds['solidx']))
-        #print(solds)
         self.solids = solds
     def query_sol(self,m,n,k):
         return self.solids.get((m,n,k),(0,0))
@@ -47,6 +48,11 @@ class TunedGemm:
         soltype,solidx = self.query_sol(m=weights.shape[0],n=inp.shape[0],k=inp.shape[1])
         if soltype==1:
             out = hipb_mm(inp,weights.t(),solidx)
+        elif soltype==3:
+            ##only matvec is supported currently
+            out = torch.empty(inp.shape[0],weights.shape[0],dtype=torch.float16,device='cuda')
+            if solidx<=1:
+                custom_ops.LLMM1(weights,inp,out)
         elif soltype==2:
             out = rocb_mm(inp,weights.t(),solidx)
         else:
