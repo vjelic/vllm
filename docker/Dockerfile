@@ -39,6 +39,9 @@ RUN pip install pyarrow Ray pandas==2.0 numpy==1.20.3
 # RUN git clone -b N1 https://streamhsa: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@github.com/amgddm/rocBLAS-internal.git && \
 #     cd rocBLAS-internal && ./install.sh -idc -a gfx942 &&\
 #     cd ../ && rm -rf rocBLAS-internal
+RUN cd ${WORKSPACE_DIR} && \
+    git clone -b develop https://github.com/ROCmSoftwarePlatform/rccl && \
+    cd rccl && ./install.sh -idf
 RUN cd ~ && wget --no-check-certificate \
     https://compute-artifactory.amd.com/artifactory/list/rocm-osdb-20.04-deb/compute-rocm-dkms-no-npi-hipclang-12845/hsa-rocr_1.12.0.60000-crdnnh.12845%7E20.04_amd64.deb &&\
     dpkg-deb -x hsa-rocr_1.12.0.60000-crdnnh.12845~20.04_amd64.deb . && \
@@ -46,7 +49,7 @@ RUN cd ~ && wget --no-check-certificate \
 RUN git clone https://github.com/ROCmSoftwarePlatform/rocmProfileData.git &&\
     cd rocmProfileData && make; make install
 
-RUN rm /opt/rocm/share/rccl/msccl-algorithms/allreduce-allpairs-8n-simple.xml
+
 COPY libamdhip64.so.6 /opt/rocm/lib/
 COPY libfile_plugin.so /opt/rocm/lib/roctracer
 COPY run_13b.sh $WORKSPACE_DIR/
