@@ -20,6 +20,7 @@ HIP_GRAPH=--use-cuda-graph
 TP=8
 GEN_LEN="1 32"
 INPUT_LEN="512 1024 2048 3072 4096 6144 8192 16384"
+ITER=5
 #INPUT_LEN="512 1024 2048 3072"
 for tp in $TP;
 do
@@ -36,15 +37,15 @@ do
     do
         for input_len in $INPUT_LEN;
         do
-            if [[ -v $PROFILE ]] ;
+            if [[ -v PROFILE ]] ;
             then
                 rm /workspace/trace.rpd
                 python -m rocpd.schema --create /workspace/trace.rpd
             fi
             echo "================================= RUNNING $MODEL $input_len $gen_len ==============================================="
-            torchrun --standalone --nnodes=1 --nproc-per-node=$tp benchmarks/benchmark_latency.py --model $MODEL --input-len $input_len --output-len $gen_len --batch-size 1  --tensor-parallel-size $tp --num-iters 1 \
+            torchrun --standalone --nnodes=1 --nproc-per-node=$tp benchmarks/benchmark_latency.py --model $MODEL --input-len $input_len --output-len $gen_len --batch-size 1  --tensor-parallel-size $tp --num-iters $ITER \
             $HIP_GRAPH $PROFILE
-            if [[ -v $PROFILE ]] ;
+            if [[ -v PROFILE ]] ;
             then
                 python $RPD_DIR/tools/rpd2tracing.py --format object $BASE_DIR/trace.rpd $BASE_DIR/trace_${SIZE}_${input_len}_${gen_len}.json
             fi
