@@ -8,8 +8,8 @@ MODEL=/data/llama2-70b-chat
 SIZE=`echo $MODEL | sed 's/.*\(.[0-9][bB]\).*/\1/'`
 #enable to use triton flash attention
 #export VLLM_USE_TRITON=1
-#export HIP_FORCE_DEV_KERNARG=1
-export RCCL_MSCCL_ENABLE=0
+#export RCCL_MSCCL_ENABLE=0
+export HIP_FORCE_DEV_KERNARG=1
 export DEBUG_CLR_GRAPH_PACKET_CAPTURE=1
 HIP_GRAPH=--use-cuda-graph
 

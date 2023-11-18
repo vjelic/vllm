@@ -8,8 +8,8 @@ MODEL=/data/llama-2-13b-chat-hf
 SIZE=`echo $MODEL | sed 's/.*\(.[0-9][bB]\).*/\1/'`
 #enable to use triton flash attention
 #export VLLM_USE_TRITON=1
-#export HIP_FORCE_DEV_KERNARG=1
-export RCCL_MSCCL_ENABLE=0
+#export RCCL_MSCCL_ENABLE=0
+export HIP_FORCE_DEV_KERNARG=1
 export DEBUG_CLR_GRAPH_PACKET_CAPTURE=1
 HIP_GRAPH=--use-cuda-graph
 
@@ -21,7 +21,6 @@ TP=1
 GEN_LEN="1 32"
 #INPUT_LEN="512 1024 2048 3072 4096 6144 8192 16384"
 INPUT_LEN="512 1024 2048 3072"
-
 ITER=5
 
 for tp in $TP;
