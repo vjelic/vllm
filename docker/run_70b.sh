@@ -21,6 +21,7 @@ TP=8
 GEN_LEN="1 32"
 INPUT_LEN="512 1024 2048 3072 4096 6144 8192 16384"
 ITER=5
+
 #INPUT_LEN="512 1024 2048 3072"
 for tp in $TP;
 do
@@ -37,6 +38,7 @@ do
     do
         for input_len in $INPUT_LEN;
         do
+
             if [[ -v PROFILE ]] ;
             then
                 rm /workspace/trace.rpd
