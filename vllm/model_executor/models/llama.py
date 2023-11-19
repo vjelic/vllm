@@ -51,14 +51,6 @@ import yaml
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
-hacks = {}
-hacks_file = os.environ.get('VLLM_PERF_HACKS_YAML')
-if hacks_file is not None:
-    with open(hacks_file, 'r') as file:
-        hacks = yaml.safe_load(file)
-
-print('>>>Perf Hacks',hacks_file, hacks)
-
 class LlamaMLP(nn.Module):
 
     def __init__(
@@ -308,7 +300,6 @@ class LlamaForCausalLM(nn.Module):
         pool = (None if batch_size == max_batch_size or max_batch_size is None
                 else self._cuda_graph[max_batch_size].pool()
                 )  # reusing memory pool
-        print(">>> Entering _compile_for_batch_size")
         self._cuda_graph[batch_size] = torch.cuda.CUDAGraph()
 
         # The following fields are used in model forward pass
@@ -340,7 +331,6 @@ class LlamaForCausalLM(nn.Module):
                 input_metadata=self._compiled_input_metadata[batch_size],
                 cache_events=None,
             )
-        print(">>> Exiting _compile_for_batch_size")
 
     def compile_and_call_model(
         self,
