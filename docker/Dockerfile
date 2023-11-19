@@ -25,7 +25,6 @@ RUN pip uninstall -y triton
 RUN git clone https://github.com/ROCmSoftwarePlatform/triton.git && \
     cd triton/python && pip3 install -e .
 ENV MAX_JOBS=32
-RUN echo 2
 RUN cd ${WORKSPACE_DIR} && \
     git clone -b exp_bandaid https://github.com/ROCmSoftwarePlatform/rccl && \
     cd rccl && mkdir build && cd build && \

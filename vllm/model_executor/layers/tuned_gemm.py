@@ -26,7 +26,7 @@ class TunedGemm:
         tune_file = perfbits.get('tuned_gemm_csv',None)
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
-            print(self.bestsols)
+
     def create_ds(self):
         df = self.bestsols
         solds = {}
