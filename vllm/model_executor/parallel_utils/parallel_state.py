@@ -149,7 +149,7 @@ def initialize_model_parallel(
                       (i + 1) * tensor_model_parallel_size)
         #options = ProcessGroupNCCL.Options()
         #options.is_high_priority_stream = True
-        print('>>>TP current rank; all ranks',rank,ranks)
+        #print('>>>TP current rank; all ranks',rank,ranks)
         group = torch.distributed.new_group(ranks)#,pg_options=options)
         if rank in ranks:
             _TENSOR_MODEL_PARALLEL_GROUP = group
@@ -158,16 +158,16 @@ def initialize_model_parallel(
             ranks_half2 = range(int(tensor_model_parallel_size/2),tensor_model_parallel_size)
             if rank in ranks_half1:
                 group_half = torch.distributed.new_group(ranks_half1)#,pg_options=options)
-                print('>>>TP current rank; half ranks',rank,ranks_half1)
+                #print('>>>TP current rank; half ranks',rank,ranks_half1)
             elif rank in ranks_half2:
                 group_half = torch.distributed.new_group(ranks_half2)#,pg_options=options)
-                print('>>>TP current rank; half ranks',rank,ranks_half2)
+                #print('>>>TP current rank; half ranks',rank,ranks_half2)
             _TENSOR_MODEL_PARALLEL_GROUP_HALF = group_half
             if rank<int(tensor_model_parallel_size/2):
                 ranks_pair = [rank,rank+int(tensor_model_parallel_size/2)]
             else:
                 ranks_pair = [rank-int(tensor_model_parallel_size/2),rank]
-            print('>>>TP current rank; pair ranks',rank,ranks_pair)
+            #print('>>>TP current rank; pair ranks',rank,ranks_pair)
             group_pair = torch.distributed.new_group(ranks_pair)#,pg_options=options)
             _TENSOR_MODEL_PARALLEL_GROUP_PAIR = group_pair
 
