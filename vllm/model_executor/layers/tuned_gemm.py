@@ -22,12 +22,11 @@ class TunedGemm:
         if perf_file is not None:
             with open(perf_file, 'r') as file:
                 perfbits = yaml.safe_load(file)
-        if torch.distributed.get_rank() == 0:
-            print('>>>Importing Tuned Gemm Solutions',perf_file, perfbits)
+
         tune_file = perfbits.get('tuned_gemm_csv',None)
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
-            print(self.bestsols)
+
     def create_ds(self):
         df = self.bestsols
         solds = {}
