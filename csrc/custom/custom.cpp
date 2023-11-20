@@ -24,6 +24,15 @@ void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
                              out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream());
 }
 
+void LLGemmZZ(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream, const int solidx);
+
+void LLZZ(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c, const int solidx=0) {
+      int M = in_a.size(0);
+      int K = in_a.size(1);
+
+           LLGemmZZ(in_a.data_ptr(), in_b.data_ptr(),
+                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream(),solidx);
+}
 // instantiate the CPP template for T=float:
 //template void AddGPU<float>(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c);
 
@@ -50,5 +59,6 @@ void MMCustomGPU(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
       m.doc() = "pybind11 example plugin";
         m.def("LLMM1", &LLMM1);
+        m.def("LLZZ", &LLZZ);
 //m.def("MMCustomGPU", &MMCustomGPU);
 }
