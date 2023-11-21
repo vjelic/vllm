@@ -22,11 +22,11 @@ class TunedGemm:
         if perf_file is not None:
             with open(perf_file, 'r') as file:
                 perfbits = yaml.safe_load(file)
-        print('>>>Perf Bits',perf_file, perfbits)
+
         tune_file = perfbits.get('tuned_gemm_csv',None)
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
-            print(self.bestsols)
+
     def create_ds(self):
         df = self.bestsols
         solds = {}
@@ -53,6 +53,10 @@ class TunedGemm:
             out = torch.empty(inp.shape[0],weights.shape[0],dtype=torch.float16,device='cuda')
             if solidx<=1:
                 custom_ops.LLMM1(weights,inp,out)
+            elif solidx==2:
+                custom_ops.LLZZ(weights,inp,out,0)
+            elif solidx==3:
+                custom_ops.LLZZ(weights,inp,out,1)
         elif soltype==2:
             out = rocb_mm(inp,weights.t(),solidx)
         else:

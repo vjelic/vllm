@@ -344,15 +344,15 @@ void LLGemmZZ(void *in_a, void *in_b, void *out_c, const int M, const int K, cud
       dim3 grid(1024);
       dim3 block(64, 8); 
       if (solidx==0) {
-        HGEMV_WFPerRow<64, 512, 4, 8><<<grid, block>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
+        HGEMV_WFPerRow<64, 512, 4, 8><<<grid, block,0,stream>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
               reinterpret_cast<const _Float16*>(in_b),reinterpret_cast<_Float16*>(out_c));
       }
       else if (solidx==1) {
-        HGEMV_WFPerRow<64, 512, 2, 8><<<grid, block>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
+        HGEMV_WFPerRow<64, 512, 2, 8><<<grid, block,0,stream>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
               reinterpret_cast<const _Float16*>(in_b),reinterpret_cast<_Float16*>(out_c));
       }
       else {
-        HGEMV_WFPerRow<64, 512, 4, 8><<<grid, block>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
+        HGEMV_WFPerRow<64, 512, 4, 8><<<grid, block,0,stream>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
               reinterpret_cast<const _Float16*>(in_b),reinterpret_cast<_Float16*>(out_c));
       }
         cudaError_t err = cudaGetLastError();
