@@ -8,7 +8,7 @@ from vllm import pos_encoding_ops
 from vllm import custom_ops
 
 @torch.inference_mode()
-def run_custom_llgemm(M,K,N=1,dtype=torch.float16,NB=1,iters=2000,warmup=1000,measure=100):
+def run_custom_llgemm(M,K,N=1,dtype=torch.float16,NB=1,iters=2000,warmup=500,measure=1000):
     inp = 0.25*torch.randn(N,K, dtype=dtype, device='cuda')
     weights = 0.25*torch.randn(NB,M,K, dtype=dtype, device='cuda')
     out = torch.empty(NB,N,M,dtype=dtype,device='cuda')
@@ -37,3 +37,4 @@ def test_custom() -> None:
         for M,K in LL13_mk:
             print(f'Running tests for M={M} K={K} and dtype={dtype}')
             run_custom_llgemm(M,K,N=1,dtype=dtype)
+

@@ -72,6 +72,7 @@ __global__ void LLGemm1_kernel(float4 *af4, __half2 *bf4, __half2 *c) {
       #pragma unroll
       for (int i=0; i<NUM_A_ROWS_PER_BLOCK; i++) {        
         rowA_elem4[i] = load_ntmprl(&af4[row_addr + i*blockDim.x + threadid]);
+        //rowA_elem4[i] = af4[row_addr + i*blockDim.x + threadid];
        //__syncthreads();
       }
       colB_elem4x = bf4[threadid*4+0];
@@ -125,22 +126,23 @@ __global__ void LLGemm1_kernel(float4 *af4, __half2 *bf4, __half2 *c) {
 
         // Make sure the data is in shared memory.
         __syncthreads();
-      //if (threadid<WARP_SIZE) {
-      if (threadid<64) {
+      if (qwarpid<NUM_A_ROWS_PER_BLOCK) {
+      //if (threadid<64) {
         //#pragma unroll
         //for (int i=0; i<NUM_A_ROWS_PER_BLOCK/2; i++) {        
         //    acc[i+2*qwarpid] = 0.0;
         //}
-        acc[qwarpid] = 0.0;
+        ////acc[qwarpid] = 0.0;
 
-      if (qthreadid<num_warps) {
+      ////if (qthreadid<num_warps) {
         //#pragma unroll
         //  for (int i=0; i<NUM_A_ROWS_PER_BLOCK/2; i++) {        
         //    acc[i+2*qwarpid] = red_smem[i+2*qwarpid][qthreadid];
         //  }
-        acc[qwarpid] = red_smem[qwarpid][qthreadid];
+        ////acc[qwarpid] = red_smem[qwarpid][qthreadid];
           
-      }
+      ////}
+      acc[qwarpid] = qthreadid<num_warps ? red_smem[qwarpid][qthreadid] : 0.f;
       //if (threadid<32) {
         #pragma unroll
         for (int mask = 16 / 2; mask >= 1; mask /= 2) {
@@ -156,7 +158,7 @@ __global__ void LLGemm1_kernel(float4 *af4, __half2 *bf4, __half2 *c) {
       //}
       //  __syncthreads();
       //if (threadid < NUM_A_ROWS_PER_BLOCK/2) {
-      if (threadid ==0 or threadid==32) {
+      if (threadid%WARP_SIZE ==0 or threadid%WARP_SIZE==32) {
             //oval = __float22half2_rn(make_float2(acc[2*threadid],acc[2*threadid+1])); 
             //oval = __float22half2_rn(make_float2(acc[2*qwarpid],acc[2*qwarpid+1])); 
             //oval = __float22half2_rn(make_float2(acc[qwarpid],acc[qwarpid+1])); 
