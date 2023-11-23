@@ -3,17 +3,7 @@
 #include <stdexcept>
 #include <algorithm>
 
-constexpr int CUDA_NUM_THREADS = 640; // 5K*2B/16B
-constexpr int NUM_THREADS_K = 640; // 5K*2B/16B
-
-constexpr int MAXIMUM_NUM_BLOCKS = 1024*1024;
-
-constexpr int NUM_A_ROWS_PER_BLOCK = 4;
 constexpr int WARP_SIZE = 64;
-inline int GET_BLOCKS(const int M) {
-      return M/NUM_A_ROWS_PER_BLOCK;
-}
-
 
 template <typename T>
 __device__ __forceinline__ T loadnt(T* addr) {
@@ -33,17 +23,9 @@ __device__ __forceinline__ float4 load_ntmprl(const float4* addr) {
           return make_float4(dat0,dat1,dat2,dat3);
 }
 
-__device__ __forceinline__ __half2  f_to_2h_to_f2(float *inp) {
-    auto ptr = reinterpret_cast<__half2 *>(inp);
-    //auto h2 = reinterpret_cast<__half2>(inp);
-    //return __half22float2(*ptr);
-    return *ptr;
-}
-
-// define the kernel function:
 //TBlock fetches entire rows of A, and entire col of B (K dimension); assume N=1 for time being
-//grid is M blocks
-//template <typename T>
+//grid is M/A_NUM_ROWS blocks
+template <int NUM_A_ROWS_PER_BLOCK>
 __global__ void LLGemm1_kernel(float4 *af4, __half2 *bf4, __half2 *c) {
       __shared__ float red_smem[NUM_A_ROWS_PER_BLOCK][WARP_SIZE];
       const int row_addr = blockIdx.x * NUM_A_ROWS_PER_BLOCK * blockDim.x;
@@ -191,12 +173,30 @@ __global__ void LLGemm1_kernel(float4 *af4, __half2 *bf4, __half2 *c) {
 }
 // define the kernel calling code:
 //template <typename T>
-void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream) {
+void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream, const int rows_per_block=4) {
       float4 *af4 = reinterpret_cast<float4*>(in_a);
       auto *bf4 = reinterpret_cast<__half2*>(in_b);
       auto *c = reinterpret_cast<__half2*>(out_c);
-      int NUM_THREADS = K*2/16;
-      LLGemm1_kernel<<<GET_BLOCKS(M), NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      //constexpr int A_ROWS_PER_BLOCK = 8;
+      const int NUM_THREADS = K*2/16;
+      int NUM_BLOCKS = M/rows_per_block;
+      if (rows_per_block==2) { 
+        LLGemm1_kernel<2><<<NUM_BLOCKS, NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      }
+      else if (rows_per_block==4) { 
+        LLGemm1_kernel<4><<<NUM_BLOCKS, NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      }
+      else if (rows_per_block==8) { 
+        LLGemm1_kernel<8><<<NUM_BLOCKS, NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      }
+      else if (rows_per_block==16) { 
+        LLGemm1_kernel<16><<<NUM_BLOCKS, NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      }
+      else {
+        NUM_BLOCKS = M/4;
+        LLGemm1_kernel<4><<<NUM_BLOCKS, NUM_THREADS, 0, stream>>>(af4, bf4, c);
+      }
+
 
         cudaError_t err = cudaGetLastError();
           if (cudaSuccess != err)
@@ -351,6 +351,10 @@ void LLGemmZZ(void *in_a, void *in_b, void *out_c, const int M, const int K, cud
       }
       else if (solidx==1) {
         HGEMV_WFPerRow<64, 512, 2, 8><<<grid, block,0,stream>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
+              reinterpret_cast<const _Float16*>(in_b),reinterpret_cast<_Float16*>(out_c));
+      }
+      else if (solidx==2) {
+        HGEMV_WFPerRow<64, 512, 1, 8><<<grid, block,0,stream>>>(M, K, reinterpret_cast<const _Float16*>(in_a), K, 
               reinterpret_cast<const _Float16*>(in_b),reinterpret_cast<_Float16*>(out_c));
       }
       else {

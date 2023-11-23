@@ -19,8 +19,8 @@ def run_custom_llgemm(M,K,N=1,dtype=torch.float16,NB=37,iters=2000,warmup=1000,m
         #inp1=inp #+0.001
         if i==warmup: start.record()
         if i==warmup+measure: end.record()
-        custom_ops.LLMM1(weights[i%NB],inp,out[i%NB])
-        #custom_ops.LLZZ(weights[i%NB],inp,out[i%NB],0)
+        custom_ops.LLMM1(weights[i%NB],inp,out[i%NB],2)
+        #custom_ops.LLZZ(weights[i%NB],inp,out[i%NB],1)
     torch.cuda.synchronize()
     gtime = start.elapsed_time(end)/(measure)
     print('>>> GTime',gtime,'ms')
@@ -30,10 +30,10 @@ def run_custom_llgemm(M,K,N=1,dtype=torch.float16,NB=37,iters=2000,warmup=1000,m
 
 def test_custom() -> None:
     for dtype in [torch.float16]:
-        #LL70_mk = [(4000,8192),(1280,8192),(8192,1024),(7168,8192),(8192,3584)]
+        LL70_mk = [(4000,8192),(1280,8192),(8192,1024),(7168,8192),(8192,3584)]
         #LL70_mk = [(4000,8192)]
         #LL13_mk = [(32000,5120),(15360,5120),(5120,5120),(27648,5120),(5120,13824)]
-        LL13_mk = [(27648,5120)]
-        for M,K in LL13_mk:
+        #LL13_mk = [(27648,5120)]
+        for M,K in LL70_mk:
             print(f'Running tests for M={M} K={K} and dtype={dtype}')
             run_custom_llgemm(M,K,N=1,dtype=dtype)

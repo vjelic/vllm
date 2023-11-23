@@ -7,10 +7,10 @@ namespace py = pybind11;
 
 // declare templates for front (cpp) and back (cuda) sides of function:
 //template <typename T>
-void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream);
+void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream,const int rows_per_block);
 
 //template <typename T>
-void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
+void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c, const int rows_per_block=4) {
       int M = in_a.size(0);
       int K = in_a.size(1);
         //if (N != in_b.numel())
@@ -21,7 +21,7 @@ void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
 
           // call the kernel function...
            LLGemm1(in_a.data_ptr(), in_b.data_ptr(),
-                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream());
+                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream(),rows_per_block);
 }
 
 void LLGemmZZ(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream, const int solidx);
