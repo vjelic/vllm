@@ -94,7 +94,7 @@ print("cxx", CXX_FLAGS, "nvcc", NVCC_FLAGS)
 # test operations.
 custom_extension = CUDAExtension(
     name="vllm.custom_ops",
-    sources=["csrc/custom/custom.cpp", "csrc/custom/custom_kernels.cu"],
+    sources=["csrc/custom/custom.cpp", "csrc/custom/custom_kernels.cu", "csrc/custom/fused_kernels.cu"],
     extra_compile_args={"cxx": CXX_FLAGS, "nvcc": NVCC_FLAGS},
 )
 ext_modules.append(custom_extension)
