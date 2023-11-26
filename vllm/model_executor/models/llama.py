@@ -48,16 +48,9 @@ from vllm.model_executor.parallel_utils.tensor_parallel import (
 from vllm.sequence import SequenceOutputs
 import os
 import yaml
+from vllm import custom_ops
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
-
-hacks = {}
-hacks_file = os.environ.get('VLLM_PERF_HACKS_YAML')
-if hacks_file is not None:
-    with open(hacks_file, 'r') as file:
-        hacks = yaml.safe_load(file)
-
-print('>>>Perf Hacks',hacks_file, hacks)
 
 class LlamaMLP(nn.Module):
 
@@ -89,10 +82,19 @@ class LlamaMLP(nn.Module):
 
     def forward(self, x, num_generation_tokens):
         if num_generation_tokens>0:
-            gate_up, _ = self.gate_up_proj(x)
+            if num_generation_tokens==1:
+                #fuse fc1-silu for matvec only
+                out = torch.empty(x.shape[0],self.gate_up_proj.weight.shape[0]//2,dtype=x.dtype,device=x.device)
+                custom_ops.LLMM_Silu(self.gate_up_proj.weight,x,out,8)
+                x = out
+                #gate_up, _ = self.gate_up_proj(x)
+                #x = self.act_fn(gate_up)
+            else:
+                gate_up, _ = self.gate_up_proj(x)
+                x = self.act_fn(gate_up)
         else:
             gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
+            x = self.act_fn(gate_up)
         if num_generation_tokens>0:
             x, _ = self.down_proj(x, graphx=self.graphx)
         else:
@@ -308,7 +310,6 @@ class LlamaForCausalLM(nn.Module):
         pool = (None if batch_size == max_batch_size or max_batch_size is None
                 else self._cuda_graph[max_batch_size].pool()
                 )  # reusing memory pool
-        print(">>> Entering _compile_for_batch_size")
         self._cuda_graph[batch_size] = torch.cuda.CUDAGraph()
 
         # The following fields are used in model forward pass
@@ -340,7 +341,6 @@ class LlamaForCausalLM(nn.Module):
                 input_metadata=self._compiled_input_metadata[batch_size],
                 cache_events=None,
             )
-        print(">>> Exiting _compile_for_batch_size")
 
     def compile_and_call_model(
         self,
