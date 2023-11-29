@@ -48,6 +48,7 @@ from vllm.model_executor.parallel_utils.tensor_parallel import (
 from vllm.sequence import SequenceOutputs
 import os
 import yaml
+from vllm import custom_ops
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -81,10 +82,19 @@ class LlamaMLP(nn.Module):
 
     def forward(self, x, num_generation_tokens):
         if num_generation_tokens>0:
-            gate_up, _ = self.gate_up_proj(x)
+            if num_generation_tokens==1:
+                #fuse fc1-silu for matvec only
+                out = torch.empty(x.shape[0],self.gate_up_proj.weight.shape[0]//2,dtype=x.dtype,device=x.device)
+                custom_ops.LLMM_Silu(self.gate_up_proj.weight,x,out,8)
+                x = out
+                #gate_up, _ = self.gate_up_proj(x)
+                #x = self.act_fn(gate_up)
+            else:
+                gate_up, _ = self.gate_up_proj(x)
+                x = self.act_fn(gate_up)
         else:
             gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
+            x = self.act_fn(gate_up)
         if num_generation_tokens>0:
             x, _ = self.down_proj(x, graphx=self.graphx)
         else:

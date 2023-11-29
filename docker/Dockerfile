@@ -48,7 +48,7 @@ RUN git clone https://github.com/ROCmSoftwarePlatform/rocmProfileData.git &&\
     cd rocmProfileData && make; make install
 
 
-COPY libamdhip64.so.6 /opt/rocm/lib/
+COPY libamdhip64.so.6 /opt/rocm/lib/libamdhip64.so.6.0.60000
 COPY libfile_plugin.so /opt/rocm/lib/roctracer
 COPY run_13b.sh $WORKSPACE_DIR/
 COPY run_70b.sh $WORKSPACE_DIR/

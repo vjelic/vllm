@@ -51,6 +51,7 @@ do
     export VLLM_PERF_YAML=./tuned_perf_tp$tp.yaml
 
     echo "================================= TUNED GEMMS  $tuned_file ==============================================="
+    cat $tuned_file
 
     cd $VLLM_DIR
     for gen_len in $GEN_LEN;
@@ -67,13 +68,13 @@ do
             --tensor-parallel-size $tp --num-iters $ITER $HIP_GRAPH $RPD_PROFILE
             if [[ -v ROCPROF_PROFILE ]] ;
             then
-                TRACE_FILE=$BASE_DIR/trace_${SIZE}_${input_len}_${gen_len}.json
+                TRACE_FILE=$BASE_DIR/trace_${MODEL_SIZE}_${input_len}_${gen_len}.json
                 echo "INFO: Creating Trace JSON file $TRACE_FILE"
                 mv $VLLM_DIR/results.json $TRACE_FILE
             fi
             if [[ -v RPD_PROFILE ]] ;
             then
-                TRACE_FILE=$BASE_DIR/trace_${SIZE}_${input_len}_${gen_len}.json
+                TRACE_FILE=$BASE_DIR/trace_${MODEL_SIZE}_${input_len}_${gen_len}.json
                 echo "INFO: Creating Trace JSON file $TRACE_FILE"
                 python $RPD_DIR/tools/rpd2tracing.py --format object $BASE_DIR/trace.rpd $TRACE_FILE
             fi

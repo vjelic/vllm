@@ -51,8 +51,17 @@ class TunedGemm:
         elif soltype==3:
             ##only matvec is supported currently
             out = torch.empty(inp.shape[0],weights.shape[0],dtype=torch.float16,device='cuda')
+            #print('>>>Matvec',inp.shape,weights.shape,soltype,solidx)
             if solidx<=1:
-                custom_ops.LLMM1(weights,inp,out)
+                custom_ops.LLMM1(weights,inp,out,4)
+            elif solidx==2:
+                custom_ops.LLMM1(weights,inp,out,2)
+            elif solidx==8:
+                custom_ops.LLMM1(weights,inp,out,8)
+            elif solidx==20:
+                custom_ops.LLZZ(weights,inp,out,0)
+            elif solidx==21:
+                custom_ops.LLZZ(weights,inp,out,1)
         elif soltype==2:
             out = rocb_mm(inp,weights.t(),solidx)
         else:
