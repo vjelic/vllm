@@ -37,14 +37,15 @@ def run_rms_norm(
 
     out = torch.empty_like(hidden)
     out_res = torch.empty_like(hidden)
-    layernorm_ops.res_add_rms_norm(
-        out,
-        out_res,
-        residual,
-        hidden,
-        ref.weight.data,
-        ref.variance_epsilon,
-    )
+    for i in range(1000):
+        layernorm_ops.res_add_rms_norm(
+            out,
+            out_res,
+            residual,
+            hidden,
+            ref.weight.data,
+            ref.variance_epsilon
+        )
     ref_out, ref_res = ref(residual,hidden)
     assert torch.allclose(out, ref_out, atol=1e-3, rtol=1e-5)
     assert torch.allclose(out_res, ref_res, atol=1e-3, rtol=1e-5)
@@ -52,8 +53,9 @@ def run_rms_norm(
 
 def test_rms_norm() -> None:
     for dtype in [torch.half, torch.bfloat16, torch.float]:
-        for num_tokens in [1, 7, 128, 2048]:
-            for hidden_size in [13, 64, 1024, 5120, 8192]:
+        for num_tokens in [1,7,128,2048,16384]:
+            #for hidden_size in [13, 64, 1024, 5120, 8192]:
+            for hidden_size in [1024,2048,3072,4096,5120,8192]:
                 print(f'Testing RMS kernel with dtype={dtype}, num_tokens='
                       f'{num_tokens}, hidden_size={hidden_size}')
                 run_rms_norm(
