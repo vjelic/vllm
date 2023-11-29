@@ -7,10 +7,19 @@ namespace py = pybind11;
 
 // declare templates for front (cpp) and back (cuda) sides of function:
 //template <typename T>
-void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream);
+
+void LLGemm_Silu(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream, const int rows_per_block);
+void LLMM_Silu(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c, const int rows_per_block) {
+      int M = in_a.size(0);
+      int K = in_a.size(1);
+      LLGemm_Silu(in_a.data_ptr(), in_b.data_ptr(),
+                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream(),rows_per_block);
+}
+
+void LLGemm1(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream,const int rows_per_block);
 
 //template <typename T>
-void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
+void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c, const int rows_per_block=4) {
       int M = in_a.size(0);
       int K = in_a.size(1);
         //if (N != in_b.numel())
@@ -21,9 +30,18 @@ void LLMM1(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
 
           // call the kernel function...
            LLGemm1(in_a.data_ptr(), in_b.data_ptr(),
-                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream());
+                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream(),rows_per_block);
 }
 
+void LLGemmZZ(void *in_a, void *in_b, void *out_c, const int M, const int K, cudaStream_t stream, const int solidx);
+
+void LLZZ(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c, const int solidx=0) {
+      int M = in_a.size(0);
+      int K = in_a.size(1);
+
+           LLGemmZZ(in_a.data_ptr(), in_b.data_ptr(),
+                             out_c.data_ptr(), M, K, at::cuda::getCurrentCUDAStream(),solidx);
+}
 // instantiate the CPP template for T=float:
 //template void AddGPU<float>(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c);
 
@@ -50,5 +68,7 @@ void MMCustomGPU(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
       m.doc() = "pybind11 example plugin";
         m.def("LLMM1", &LLMM1);
+        m.def("LLMM_Silu", &LLMM_Silu);
+        m.def("LLZZ", &LLZZ);
 //m.def("MMCustomGPU", &MMCustomGPU);
 }
