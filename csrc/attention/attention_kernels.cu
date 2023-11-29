@@ -27,7 +27,7 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
-
+#define MAX_PARTITIONS 32
 ////// Non temporal load stores ///////
 
 #if 1
@@ -166,7 +166,6 @@ inline __device__ float block_sum(float* red_smem, float sum) {
 
   // Broadcast to other threads.
   //return __shfl_sync(uint32_t(-1), sum, 0);
-  //return __shfl(sum, 0);
   return sum_ret;
 }
 
@@ -263,6 +262,7 @@ __global__ void single_query_cached_kv_attention_kernel(
     // For example, if the the thread group size is 4, then the first thread in the group
     // has 0, 4, 8, ... th vectors of the key, and the second thread has 1, 5, 9, ... th
     // vectors of the key, and so on.
+//#pragma unroll
     for (int i = 0; i < NUM_TOKENS_PER_THREAD_GROUP; i++) {
       const int physical_block_offset = (thread_group_idx + i * WARP_SIZE) % BLOCK_SIZE;
       const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
@@ -554,6 +554,7 @@ __device__ void paged_attention_kernel(
     // For example, if the the thread group size is 4, then the first thread in the group
     // has 0, 4, 8, ... th vectors of the key, and the second thread has 1, 5, 9, ... th
     // vectors of the key, and so on.
+//#pragma unroll
     for (int i = 0; i < NUM_TOKENS_PER_THREAD_GROUP; i++) {
       const int physical_block_offset = (thread_group_idx + i * WARP_SIZE) % BLOCK_SIZE;
       const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
@@ -843,18 +844,28 @@ __global__ void paged_attention_v2_reduce_kernel(
   extern __shared__ char shared_mem[];
   // Workspace for reduction.
   __shared__ float red_smem[2 * NUM_WARPS];
+  __shared__ float shared_global_exp_sum;
+  //float reg_max_logits[MAX_PARTITIONS]; //dependent on max_num_partitions: assume 32K max context div 1K Partition size -> TODO: make this proper template param
+  //Assume code below is optimized for MAX_PARTITIONS<=64 TODO: handle larger than warp size cases later
+  float* shared_max_logits = reinterpret_cast<float*>(shared_mem);
+  float* shared_exp_sums = reinterpret_cast<float*>(shared_mem + sizeof(float) * num_partitions);
+  scalar_t tmp_outs[MAX_PARTITIONS];
 
   // Load max logits to shared memory.
-  float* shared_max_logits = reinterpret_cast<float*>(shared_mem);
   const float* max_logits_ptr = max_logits + seq_idx * num_heads * max_num_partitions
                                            + head_idx * max_num_partitions;
-  float max_logit = -FLT_MAX;
-  for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
-    const float l = max_logits_ptr[i];
-    shared_max_logits[i] = l;
-    max_logit = fmaxf(max_logit, l);
-  }
-  __syncthreads();
+  ////float max_logit = -FLT_MAX;
+  //for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
+  ////for (int i = threadIdx.x; i < MAX_PARTITIONS; i += blockDim.x) {
+    //const float l = max_logits_ptr[i];
+    //shared_max_logits[i] = l;
+    ////reg_max_logits[i] =  max_logits_ptr[i];  //TODO: review this -> right now num_partitions is very small <=32
+    //max_logit = fmaxf(max_logit, l);
+    ////max_logit = fmaxf(max_logit, reg_max_logits[i]);
+  ////}
+  //__syncthreads();
+  float max_logit = (threadIdx.x < num_partitions) ? max_logits_ptr[threadIdx.x]:-FLT_MAX;
+  float reg_max_logit =  max_logit;
 
   // Get the global max logit.
   // Reduce within the warp.
@@ -862,46 +873,66 @@ __global__ void paged_attention_v2_reduce_kernel(
   for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
     max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
   }
-  if (lane == 0) {
-    red_smem[warp_idx] = max_logit;
-  }
-  __syncthreads();
-  // Reduce across warps.
-  max_logit = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
-#pragma unroll
-  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-    max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
-  }
-  // Broadcast the max value to all threads.
-  //max_logit = __shfl(max_logit, 0);
+//  if (lane == 0) {
+//    red_smem[warp_idx] = max_logit;
+//  }
 
+//  if (num_partitions >= WARP_SIZE) {
+//  __syncthreads();
+//  // Reduce across warps.
+//  max_logit = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
+//#pragma unroll
+//  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+//    max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
+//  }
+//  // Broadcast the max value to all threads.
+//  //max_logit = __shfl(max_logit, 0);
+//  }
   // Load rescaled exp sums to shared memory.
-  float* shared_exp_sums = reinterpret_cast<float*>(shared_mem + sizeof(float) * num_partitions);
   const float* exp_sums_ptr = exp_sums + seq_idx * num_heads * max_num_partitions
                                        + head_idx * max_num_partitions;
   float global_exp_sum = 0.0f;
-  for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
-    float l = shared_max_logits[i];
-    float rescaled_exp_sum = exp_sums_ptr[i] * expf(l - max_logit);
-    global_exp_sum += rescaled_exp_sum;
-    shared_exp_sums[i] = rescaled_exp_sum;
+
+  //for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
+  //  //float l = shared_max_logits[i];
+  //  //float l = reg_max_logits[i];
+  //  float rescaled_exp_sum = exp_sums_ptr[i] * expf(reg_max_logits[i] - max_logit);
+  //  global_exp_sum += rescaled_exp_sum;
+  //  shared_exp_sums[i] = rescaled_exp_sum;
+  //}
+  float rescaled_exp_sum = (threadIdx.x < num_partitions) ? exp_sums_ptr[threadIdx.x] * expf(reg_max_logit - max_logit) : 0.0f;
+  global_exp_sum += rescaled_exp_sum;
+  //if (threadIdx.x < num_partitions) {
+    //shared_exp_sums[threadIdx.x] = (threadIdx.x < num_partitions) ? rescaled_exp_sum : 0.0f;
+    shared_exp_sums[threadIdx.x] = rescaled_exp_sum;
+  //}
+
+#pragma unroll
+  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+    global_exp_sum += __shfl_xor(global_exp_sum, mask);
+  }
+  if (threadIdx.x==0) {
+    shared_global_exp_sum = global_exp_sum;
   }
   __syncthreads();
-  global_exp_sum = block_sum<NUM_WARPS>(&red_smem[NUM_WARPS], global_exp_sum);
-  const float inv_global_exp_sum = __fdividef(1.0f, global_exp_sum + 1e-6f);
+
+  //global_exp_sum = block_sum<NUM_WARPS>(&red_smem[NUM_WARPS], global_exp_sum);
+  const float inv_global_exp_sum = __fdividef(1.0f, shared_global_exp_sum + 1e-6f);
 
   // Aggregate tmp_out to out.
-  const scalar_t* tmp_out_ptr = tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE
-                                        + head_idx * max_num_partitions * HEAD_SIZE;
   scalar_t* out_ptr = out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
-#pragma unroll
-  for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+    const scalar_t* tmp_out_ptr = tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE
+                                        + head_idx * max_num_partitions * HEAD_SIZE;
+//#pragma unroll
+  //for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+  //if (threadIdx.x < HEAD_SIZE) { //TODO: assume HEAD_SIZE < NUM_THREADS, revisit this assumption later
     float acc = 0.0f;
     for (int j = 0; j < num_partitions; ++j) {
-      acc += to_float(tmp_out_ptr[j * HEAD_SIZE + i]) * shared_exp_sums[j] * inv_global_exp_sum;
+      //acc += to_float(tmp_out_ptr[j * HEAD_SIZE + i]) * shared_exp_sums[j] * inv_global_exp_sum;
+      acc += to_float(tmp_out_ptr[j * HEAD_SIZE + threadIdx.x]) * shared_exp_sums[j] * inv_global_exp_sum;
     }
-    from_float(out_ptr[i], acc);
-  }
+    from_float(out_ptr[threadIdx.x], acc);
+  //}
 }
 
 } // namespace vllm
@@ -1253,7 +1284,7 @@ void paged_attention_v1(
     kv_block_stride,                                                                          \
     kv_head_stride);                                                                          \
   vllm::paged_attention_v2_reduce_kernel<T, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>           \
-  <<<reduce_grid, block, reduce_shared_mem_size, stream>>>(                                   \
+  <<<reduce_grid, reduce_block, reduce_shared_mem_size, stream>>>(                                   \
     out_ptr,                                                                                  \
     exp_sums_ptr,                                                                             \
     max_logits_ptr,                                                                           \
@@ -1309,6 +1340,7 @@ void paged_attention_v2_launcher(
 
   constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
   int max_num_partitions = DIVIDE_ROUND_UP(max_context_len, PARTITION_SIZE);
+  //int max_num_partitions = DIVIDE_ROUND_UP(MAX_ATTENTION_CONTEXT, PARTITION_SIZE);
   int logits_size = PARTITION_SIZE * sizeof(float);
   int outputs_size = (NUM_WARPS / 2) * head_size * sizeof(float);
 
@@ -1316,7 +1348,11 @@ void paged_attention_v2_launcher(
   dim3 grid(num_heads, num_seqs, max_num_partitions);
   int shared_mem_size = std::max(logits_size, outputs_size);
   // For paged attention v2 reduce kernel.
+  assert(max_num_partitions <= MAX_PARTITIONS);
+  assert(MAX_PARTITIONS<=head_size);
   dim3 reduce_grid(num_heads, num_seqs);
+  dim3 reduce_block(head_size); //TODO: assumes max_partitions < head_SIZE
+  //dim3 reduce_block(NUM_THREADS); 
   int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
 
   dim3 block(NUM_THREADS);
