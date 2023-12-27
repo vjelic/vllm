@@ -89,10 +89,10 @@ __global__ void NUQ4MatMulKernel(
       res2 = {};
       tmp2 = {};
 #else
-      res2.x = __half_as_ushort(__float2half(0));
-      res2.y = __half_as_ushort(__float2half(0));
-      tmp2.x = __half_as_ushort(__float2half(0));
-      tmp2.y = __half_as_ushort(__float2half(0));
+      res2.x = (__float2half(0));
+      res2.y = (__float2half(0));
+      tmp2.x = (__float2half(0));
+      tmp2.y = (__float2half(0));
 #endif
 
       lut_index1 = tmp1 & 0xF;
@@ -101,8 +101,8 @@ __global__ void NUQ4MatMulKernel(
       tmp2.x = deq2[lut_index1][off];
       tmp2.y = deq2[lut_index2][off];
 #else
-      tmp2.x = __half_as_ushort(deq2[lut_index1][off]);
-      tmp2.y = __half_as_ushort(deq2[lut_index2][off]);
+      tmp2.x = (deq2[lut_index1][off]);
+      tmp2.y = (deq2[lut_index2][off]);
 #endif
       res2 = __hfma2(tmp2, blockvec[k + 0], res2);
 
@@ -112,8 +112,8 @@ __global__ void NUQ4MatMulKernel(
       tmp2.x = deq2[lut_index1][off];
       tmp2.y = deq2[lut_index2][off];
 #else
-      tmp2.x = __half_as_ushort(deq2[lut_index1][off]);
-      tmp2.y = __half_as_ushort(deq2[lut_index2][off]);
+      tmp2.x = (deq2[lut_index1][off]);
+      tmp2.y = (deq2[lut_index2][off]);
 #endif
       res2 = __hfma2(tmp2, blockvec[k + 1], res2);
 
@@ -123,8 +123,8 @@ __global__ void NUQ4MatMulKernel(
       tmp2.x = deq2[lut_index1][off];
       tmp2.y = deq2[lut_index2][off];
 #else
-      tmp2.x = __half_as_ushort(deq2[lut_index1][off]);
-      tmp2.y = __half_as_ushort(deq2[lut_index2][off]);
+      tmp2.x = (deq2[lut_index1][off]);
+      tmp2.y = (deq2[lut_index2][off]);
 #endif
       res2 = __hfma2(tmp2, blockvec[k + 2], res2);
 
@@ -134,15 +134,15 @@ __global__ void NUQ4MatMulKernel(
       tmp2.x = deq2[lut_index1][off];
       tmp2.y = deq2[lut_index2][off];
 #else
-      tmp2.x = __half_as_ushort(deq2[lut_index1][off]);
-      tmp2.y = __half_as_ushort(deq2[lut_index2][off]);
+      tmp2.x = (deq2[lut_index1][off]);
+      tmp2.y = (deq2[lut_index2][off]);
 #endif
       res2 = __hfma2(tmp2, blockvec[k + 3], res2);
 
 #ifndef USE_ROCM
       res = __hadd(__hadd(res2.x, res2.y), res);
 #else
-      res = __hadd(__hadd(__ushort_as_half(res2.x), __ushort_as_half(res2.y)), res);
+      res = __hadd(__hadd((res2.x), (res2.y)), res);
 #endif
 
       i += width;
@@ -159,12 +159,12 @@ __global__ void NUQ4MatMulKernel(
     }
 #else
     __half2 res3;
-    res3.x = __half_as_ushort(__float2half(0));
-    res3.y = __half_as_ushort(__float2half(0));
+    res3.x = (__float2half(0));
+    res3.y = (__float2half(0));
     if (col % 2 == 0) {
-      res3.x = __half_as_ushort(res);
+      res3.x = (res);
     } else {
-      res3.y = __half_as_ushort(res);
+      res3.y = (res);
     }
 #endif
 
