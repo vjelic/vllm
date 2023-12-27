@@ -16,7 +16,7 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
-ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"}
+ROCM_SUPPORTED_ARCHS = {"gfx940", "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"}
 # SUPPORTED_ARCHS = NVIDIA_SUPPORTED_ARCHS.union(ROCM_SUPPORTED_ARCHS)
 
 
@@ -50,19 +50,19 @@ NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 
 
 def get_amdgpu_offload_arch():
-    command = "/opt/rocm/llvm/bin/amdgpu-offload-arch"
-    try:
-        output = subprocess.check_output([command])
-        return output.decode('utf-8').strip()
-    except subprocess.CalledProcessError as e:
-        error_message = f"Error: {e}"
-        raise RuntimeError(error_message) from e
-    except FileNotFoundError as e:
-        # If the command is not found, print an error message
-        error_message = f"The command {command} was not found."
-        raise RuntimeError(error_message) from e
+    #command = "/opt/rocm/llvm/bin/amdgpu-offload-arch"
+    #try:
+    #    output = subprocess.check_output([command])
+    #    return output.decode('utf-8').strip()
+    #except subprocess.CalledProcessError as e:
+    #    error_message = f"Error: {e}"
+    #    raise RuntimeError(error_message) from e
+    #except FileNotFoundError as e:
+    #    # If the command is not found, print an error message
+    #    error_message = f"The command {command} was not found."
+    #    raise RuntimeError(error_message) from e
 
-    return None
+    return "gfx940"
 
 
 def get_hipcc_rocm_version():
