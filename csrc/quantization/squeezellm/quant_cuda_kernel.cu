@@ -172,8 +172,8 @@ __global__ void NUQ4MatMulKernel(
     atomicAdd(&mul[b * width / 2 + col / 2], res3);
 #else
     int tmp_addr = b * width / 2 + col / 2;
-    atomicAdd(&(mul[tmp_addr].x), __half2float(__ushort_as_half(res3.x)));
-    atomicAdd(&(mul[tmp_addr].y), __half2float(__ushort_as_half(res3.y)));
+    atomicAdd(&(mul[tmp_addr].x), __half2float((res3.x)));
+    atomicAdd(&(mul[tmp_addr].y), __half2float((res3.y)));
 #endif
   }
 }

@@ -524,8 +524,8 @@ __global__ void gemm_half_q_half_alt_kernel(
 #ifndef USE_ROCM
             res2 = {};
 #else
-            res2.x = __half_as_ushort(__float2half(0));
-            res2.y = __half_as_ushort(__float2half(0));
+            res2.x = (__float2half(0));
+            res2.y = (__float2half(0));
 #endif
             res2 = __hfma2(__hfma2(deq2[(tmp >>  0) & 0xff][off], scales_tmp[0], zeros_tmp[0]), blockvec[m][k + 0], res2);
             res2 = __hfma2(__hfma2(deq2[(tmp >>  8) & 0xff][off], scales_tmp[1], zeros_tmp[1]), blockvec[m][k + 1], res2);
@@ -534,7 +534,7 @@ __global__ void gemm_half_q_half_alt_kernel(
 #ifndef USE_ROCM
             res[m] = __hadd(res[m], __hadd(res2.x, res2.y));
 #else
-            res[m] = __hadd(res[m], __hadd(__ushort_as_half(res2.x), __ushort_as_half(res2.y)));
+            res[m] = __hadd(res[m], __hadd((res2.x), (res2.y)));
 #endif
         }
         i += width;
