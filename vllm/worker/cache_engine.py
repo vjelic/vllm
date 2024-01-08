@@ -33,7 +33,7 @@ class CacheEngine:
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
-        self.num_heads = model_config.get_num_kv_heads(parallel_config)
+        self.num_heads = model_config.get_num_heads(parallel_config)
         self.dtype = model_config.dtype
 
         self.block_size = cache_config.block_size
@@ -72,12 +72,12 @@ class CacheEngine:
         key_block_shape = self.get_key_block_shape()
         value_block_shape = self.get_value_block_shape()
         for _ in range(self.num_layers):
-            key_blocks = torch.empty(
+            key_blocks = torch.zeros(
                 size=(self.num_gpu_blocks, *key_block_shape),
                 dtype=self.dtype,
                 device="cuda",
             )
-            value_blocks = torch.empty(
+            value_blocks = torch.zeros(
                 size=(self.num_gpu_blocks, *value_block_shape),
                 dtype=self.dtype,
                 device="cuda",
@@ -96,12 +96,12 @@ class CacheEngine:
             logger.warning("Using 'pin_memory=False' as WSL is detected. "
                            "This may slow down the performance.")
         for _ in range(self.num_layers):
-            key_blocks = torch.empty(
+            key_blocks = torch.zeros(
                 size=(self.num_cpu_blocks, *key_block_shape),
                 dtype=self.dtype,
                 pin_memory=pin_memory,
             )
-            value_blocks = torch.empty(
+            value_blocks = torch.zeros(
                 size=(self.num_cpu_blocks, *value_block_shape),
                 dtype=self.dtype,
                 pin_memory=pin_memory,
@@ -146,7 +146,7 @@ class CacheEngine:
         parallel_config: ParallelConfig,
     ) -> int:
         head_size = model_config.get_head_size()
-        num_heads = model_config.get_num_kv_heads(parallel_config)
+        num_heads = model_config.get_num_heads(parallel_config)
         num_layers = model_config.get_num_layers(parallel_config)
 
         key_cache_block = block_size * num_heads * head_size

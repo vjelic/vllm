@@ -2,9 +2,6 @@ import socket
 from typing import Optional, Tuple, TYPE_CHECKING
 
 from vllm.config import ParallelConfig
-from vllm.logger import init_logger
-
-logger = init_logger(__name__)
 
 try:
     import ray
@@ -14,11 +11,7 @@ try:
         """Ray wrapper for vllm.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
-        def __init__(self, init_cached_hf_modules=False) -> None:
-            if init_cached_hf_modules:
-                # pylint: disable=import-outside-toplevel
-                from transformers.dynamic_module_utils import init_hf_modules
-                init_hf_modules()
+        def __init__(self) -> None:
             self.worker = None
 
         def init_worker(self, worker_init_fn):
@@ -31,10 +24,7 @@ try:
             executor = getattr(self, method)
             return executor(*args, **kwargs)
 
-except ImportError as e:
-    logger.warning(f"Failed to import Ray with {e!r}. "
-                   "For distributed inference, please install Ray with "
-                   "`pip install ray pandas pyarrow`.")
+except ImportError:
     ray = None
     TorchDistributedWorker = None
     RayWorker = None  # pylint: disable=invalid-name
@@ -63,10 +53,11 @@ def initialize_cluster(
             the default Ray cluster address.
 
     Returns:
-        A tuple of (`distributed_init_method`, `placement_group`). The
+        A tuple of (`distributed_init_method`, `all_stage_devices`). The
         `distributed_init_method` is the address for initializing the
-        distributed backend. `placement_group` includes the specification
-        of the resources for each distributed worker.
+        distributed backend. `all_stage_devices` includes device IDs for
+        each worker in each pipeline stage. Each device ID is a tuple of
+        (rank, node resource, device id).
     """
     if parallel_config.worker_use_ray or engine_use_ray:
         if ray is None:
@@ -74,7 +65,7 @@ def initialize_cluster(
                 "Ray is not installed. Please install Ray to use distributed "
                 "serving.")
         # Connect to a ray cluster.
-        ray.init(address=ray_address, ignore_reinit_error=True)
+        ray.init(address=ray_address, num_gpus=parallel_config.world_size, ignore_reinit_error=True)
 
     if not parallel_config.worker_use_ray:
         # Initialize cluster locally.

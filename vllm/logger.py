@@ -48,9 +48,4 @@ _setup_logger()
 
 
 def init_logger(name: str):
-    # Use the same settings as above for root logger
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(_default_handler)
-    logger.propagate = False
-    return logger
+    return logging.getLogger(name)

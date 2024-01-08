@@ -39,7 +39,8 @@ inline __device__ float qk_dot_(const Vec (&q)[N], const Vec (&k)[N]) {
   float qk = sum(qk_vec);
 #pragma unroll
   for (int mask = THREAD_GROUP_SIZE / 2; mask >= 1; mask /= 2) {
-    qk += __shfl_xor_sync(uint32_t(-1), qk, mask);
+    //qk += __shfl_xor_sync(uint32_t(-1), qk, mask);
+    qk += __shfl_xor(qk, mask);
   }
   return qk;
 }

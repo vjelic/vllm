@@ -1,0 +1,12 @@
+diff --git a/setup.py b/setup.py
+index 7396633..2ca5d55 100644
+--- a/setup.py
++++ b/setup.py
+@@ -166,7 +166,6 @@ ext_modules.append(
+                 [
+                     "-O3",
+                     "-std=c++20",
+-                    "--offload-arch=gfx942",
+                     "-DNDEBUG",
+                     "-U__CUDA_NO_HALF_OPERATORS__",
+                     "-U__CUDA_NO_HALF_CONVERSIONS__",

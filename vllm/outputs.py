@@ -1,7 +1,6 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from vllm.sequence import (PromptLogprobs, SampleLogprobs, SequenceGroup,
-                           SequenceStatus)
+from vllm.sequence import SequenceGroup, SequenceStatus
 
 
 class CompletionOutput:
@@ -24,7 +23,7 @@ class CompletionOutput:
         text: str,
         token_ids: List[int],
         cumulative_logprob: float,
-        logprobs: Optional[SampleLogprobs],
+        logprobs: Optional[List[Dict[int, float]]],
         finish_reason: Optional[str] = None,
     ) -> None:
         self.index = index
@@ -62,14 +61,12 @@ class RequestOutput:
         request_id: str,
         prompt: str,
         prompt_token_ids: List[int],
-        prompt_logprobs: Optional[PromptLogprobs],
         outputs: List[CompletionOutput],
         finished: bool,
     ) -> None:
         self.request_id = request_id
         self.prompt = prompt
         self.prompt_token_ids = prompt_token_ids
-        self.prompt_logprobs = prompt_logprobs
         self.outputs = outputs
         self.finished = finished
 
@@ -78,12 +75,10 @@ class RequestOutput:
         # Get the top-n sequences.
         n = seq_group.sampling_params.n
         seqs = seq_group.get_seqs()
-        if seq_group.sampling_params.use_beam_search:
-            sorting_key = lambda seq: seq.get_beam_search_score(
-                seq_group.sampling_params.length_penalty)
-        else:
-            sorting_key = lambda seq: seq.get_cumulative_logprob()
-        sorted_seqs = sorted(seqs, key=sorting_key, reverse=True)
+        assert n <= len(seqs)
+        sorted_seqs = sorted(seqs,
+                             key=lambda seq: seq.get_cumulative_logprob(),
+                             reverse=True)
         top_n_seqs = sorted_seqs[:n]
 
         # Create the outputs.
@@ -94,7 +89,7 @@ class RequestOutput:
                 # NOTE: We need to take care of this case because the sequence
                 # always has the logprobs of the sampled tokens even if the
                 # logprobs are not requested.
-                logprobs = None
+                logprobs = {}
             finshed_reason = SequenceStatus.get_finished_reason(seq.status)
             output = CompletionOutput(seqs.index(seq), seq.output_text,
                                       seq.get_output_token_ids(),
@@ -103,17 +98,15 @@ class RequestOutput:
             outputs.append(output)
 
         # Every sequence in the sequence group should have the same prompt.
-        prompt = seq_group.prompt
-        prompt_token_ids = seq_group.prompt_token_ids
-        prompt_logprobs = seq_group.prompt_logprobs
+        prompt = top_n_seqs[0].prompt
+        prompt_token_ids = top_n_seqs[0].data.prompt_token_ids
         finished = seq_group.is_finished()
-        return cls(seq_group.request_id, prompt, prompt_token_ids,
-                   prompt_logprobs, outputs, finished)
+        return cls(seq_group.request_id, prompt, prompt_token_ids, outputs,
+                   finished)
 
     def __repr__(self) -> str:
         return (f"RequestOutput(request_id={self.request_id}, "
                 f"prompt={self.prompt!r}, "
                 f"prompt_token_ids={self.prompt_token_ids}, "
-                f"prompt_logprobs={self.prompt_logprobs}, "
                 f"outputs={self.outputs}, "
                 f"finished={self.finished})")

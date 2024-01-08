@@ -1,72 +1,51 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS dev
+FROM rocm/pytorch:rocm6.0_ubuntu20.04_py3.9_pytorch_2.1.1
+ENV WORKSPACE_DIR=/workspace
+RUN mkdir -p $WORKSPACE_DIR
+WORKDIR $WORKSPACE_DIR
+# Limit arch's so composable kernel doesn't take days to finish
+ENV PYTORCH_ROCM_ARCH=gfx90a;gfx942
 
-RUN apt-get update -y \
-    && apt-get install -y python3-pip
+COPY fa_arch.patch $WORKSPACE_DIR
+RUN apt update && apt install -y sqlite3 libsqlite3-dev libfmt-dev
+RUN cd ${WORKSPACE_DIR} &&\
+    git clone --recursive -b junhzhan/fa-mi300 https://github.com/ROCmSoftwarePlatform/flash-attention &&\
+    cd flash-attention && git apply ../fa_arch.patch &&\
+    python setup.py install
 
-WORKDIR /workspace
+RUN cd ${WORKSPACE_DIR} && \
+    git clone -b develop https://github.com/ROCmSoftwarePlatform/hipBLASLt && \
+    export GTest_DIR="/usr/local/lib/cmake/GTest/" && \
+    cd hipBLASLt && \
+    ./install.sh -idc &&\
+    ./install.sh -idc --architecture 'gfx90a;gfx942' &&\
+    cd ../ && rm -rf hipBLASLt
 
-# install build and runtime dependencies
-COPY requirements.txt requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
-    
-# install development dependencies
-COPY requirements-dev.txt requirements-dev.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-dev.txt
+RUN pip uninstall -y triton
+RUN git clone https://github.com/ROCmSoftwarePlatform/triton.git && \
+    cd triton/python && pip3 install -e .
 
-# image to build pytorch extensions
-FROM dev AS build
+RUN cd ${WORKSPACE_DIR} && \
+    git clone -b exp_bandaid https://github.com/ROCmSoftwarePlatform/rccl && \
+    cd rccl && mkdir build && cd build && \
+    CXX=/opt/rocm/bin/hipcc cmake -DCMAKE_PREFIX_PATH=/opt/rocm/ .. && make -j
 
-# copy input files
-COPY csrc csrc
-COPY setup.py setup.py
-COPY requirements.txt requirements.txt
-COPY pyproject.toml pyproject.toml
-COPY vllm/__init__.py vllm/__init__.py
 
-# max jobs used by Ninja to build extensions
-ENV MAX_JOBS=$max_jobs 
-RUN python3 setup.py build_ext --inplace
+RUN python3 -m pip install --upgrade pip
+RUN pip install xformers==0.0.23 --no-deps
 
-# image to run unit testing suite
-FROM dev AS test
+COPY ./ /workspace/vllm-private
+RUN cd ${WORKSPACE_DIR} \
+    && cd vllm-private \
+    && cd gradlib \
+    && python setup.py develop \
+    && cd ../ \
+    && pip install -r requirements.txt \
+    && pip install typing-extensions==4.8.0 \
+    && python3 setup.py install \
+    && cd ..
 
-# copy pytorch extensions separately to avoid having to rebuild
-# when python code changes
-COPY --from=build /workspace/vllm/*.so /workspace/vllm/
-COPY tests tests
-COPY vllm vllm
+RUN pip install pyarrow Ray pandas==2.0 numpy==1.20.3
+COPY fa_arch.patch $WORKSPACE_DIR
 
-ENTRYPOINT ["python3", "-m", "pytest", "tests"]
-
-# use CUDA base as CUDA runtime dependencies are already installed via pip
-FROM nvidia/cuda:11.8.0-base-ubuntu22.04 AS vllm-base
-
-# libnccl required for ray
-RUN apt-get update -y \
-    && apt-get install -y python3-pip
-
-WORKDIR /workspace
-COPY requirements.txt requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
-
-FROM vllm-base AS vllm
-COPY --from=build /workspace/vllm/*.so /workspace/vllm/
-COPY vllm vllm
-
-EXPOSE 8000
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.api_server"]
-
-# openai api server alternative
-FROM vllm-base AS vllm-openai
-# install additional dependencies for openai api server
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install accelerate fschat
-
-COPY --from=build /workspace/vllm/*.so /workspace/vllm/
-COPY vllm vllm
-
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-
+COPY run_13b.sh $WORKSPACE_DIR/
+COPY run_70b.sh $WORKSPACE_DIR/

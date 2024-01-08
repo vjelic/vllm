@@ -24,30 +24,16 @@ class ModelConfig:
             downloading the model and tokenizer.
         download_dir: Directory to download and load the weights, default to the
             default cache directory of huggingface.
-        load_format: The format of the model weights to load:
-            "auto" will try to load the weights in the safetensors format and
-                fall back to the pytorch bin format if safetensors format is
-                not available.
-            "pt" will load the weights in the pytorch bin format.
-            "safetensors" will load the weights in the safetensors format.
-            "npcache" will load the weights in pytorch format and store
-                a numpy cache to speed up the loading.
-            "dummy" will initialize the weights with random values, which is
-                mainly for profiling.
+        use_np_weights: Save a numpy copy of model weights for faster loading.
+            This can increase the disk usage by up to 2x.
+        use_dummy_weights: Use dummy values for model weights (for profiling).
         dtype: Data type for model weights and activations. The "auto" option
             will use FP16 precision for FP32 and FP16 models, and BF16 precision
             for BF16 models.
+        use_cuda_graph: Whether to capture and replay CUDA graphs.
         seed: Random seed for reproducibility.
-        revision: The specific model version to use. It can be a branch name,
-            a tag name, or a commit id. If unspecified, will use the default
-            version.
-        tokenizer_revision: The specific tokenizer version to use. It can be a
-            branch name, a tag name, or a commit id. If unspecified, will use
-            the default version.
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
-        quantization: Quantization method that was used to quantize the model
-            weights. If None, we assume the model weights are not quantized.
     """
 
     def __init__(
@@ -57,42 +43,28 @@ class ModelConfig:
         tokenizer_mode: str,
         trust_remote_code: bool,
         download_dir: Optional[str],
-        load_format: str,
+        use_np_weights: bool,
+        use_dummy_weights: bool,
         dtype: str,
         seed: int,
-        revision: Optional[str] = None,
-        tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
-        quantization: Optional[str] = None,
+        use_cuda_graph: Optional[bool] = False,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.tokenizer_mode = tokenizer_mode
         self.trust_remote_code = trust_remote_code
         self.download_dir = download_dir
-        self.load_format = load_format
+        self.use_np_weights = use_np_weights
+        self.use_dummy_weights = use_dummy_weights
         self.seed = seed
-        self.revision = revision
-        self.tokenizer_revision = tokenizer_revision
-        self.quantization = quantization
+        self.use_cuda_graph = use_cuda_graph
 
-        self.hf_config = get_config(model, trust_remote_code, revision)
+        self.hf_config = get_config(model, trust_remote_code)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
+        self._verify_tokenizer_mode()
         self.max_model_len = _get_and_verify_max_len(self.hf_config,
                                                      max_model_len)
-        self._verify_load_format()
-        self._verify_tokenizer_mode()
-        self._verify_quantization()
-
-    def _verify_load_format(self) -> None:
-        load_format = self.load_format.lower()
-        if load_format not in [
-                "auto", "pt", "safetensors", "npcache", "dummy"
-        ]:
-            raise ValueError(
-                f"Unknown load format: {self.load_format}. Must be one of "
-                "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
-        self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
         tokenizer_mode = self.tokenizer_mode.lower()
@@ -101,17 +73,6 @@ class ModelConfig:
                 f"Unknown tokenizer mode: {self.tokenizer_mode}. Must be "
                 "either 'auto' or 'slow'.")
         self.tokenizer_mode = tokenizer_mode
-
-    def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "squeezellm"]
-        if self.quantization is None:
-            return
-        quantization = self.quantization.lower()
-        if quantization not in supported_quantization:
-            raise ValueError(
-                f"Unknown quantization: {self.quantization}. Must be one of "
-                f"{supported_quantization}.")
-        self.quantization = quantization
 
     def verify_with_parallel_config(
         self,
@@ -140,27 +101,21 @@ class ModelConfig:
         # FIXME(woosuk): This may not be true for all models.
         return self.hf_config.hidden_size // self.hf_config.num_attention_heads
 
-    def get_num_kv_heads(self, parallel_config: "ParallelConfig") -> int:
-        """Returns the number of KV heads per GPU worker."""
+    def get_num_heads(self, parallel_config: "ParallelConfig") -> int:
         # For GPTBigCode & Falcon:
-        # NOTE: for falcon, when new_decoder_architecture is True, the
+        # Note: for falcon, when new_decoder_architecture is True, the
         # multi_query flag is ignored and we use n_head_kv for the number of
         # KV heads.
-        falcon_model_types = ["falcon", "RefinedWeb", "RefinedWebModel"]
         new_decoder_arch_falcon = (
-            self.hf_config.model_type in falcon_model_types
+            self.hf_config.model_type == "falcon"
             and getattr(self.hf_config, "new_decoder_architecture", False))
         if not new_decoder_arch_falcon and getattr(self.hf_config,
                                                    "multi_query", False):
             # Multi-query attention, only one KV head.
-            # Currently, tensor parallelism is not supported in this case.
             return 1
         # For Falcon:
         if getattr(self.hf_config, "n_head_kv", None) is not None:
             return (self.hf_config.n_head_kv //
-                    parallel_config.tensor_parallel_size)
-        if getattr(self.hf_config, "num_kv_heads", None) is not None:
-            return (self.hf_config.num_kv_heads //
                     parallel_config.tensor_parallel_size)
         # For LLaMA-2:
         if getattr(self.hf_config, "num_key_value_heads", None) is not None:
@@ -168,6 +123,28 @@ class ModelConfig:
                     parallel_config.tensor_parallel_size)
         total_num_attention_heads = self.hf_config.num_attention_heads
         return total_num_attention_heads // parallel_config.tensor_parallel_size
+
+    def get_max_model_len(self) -> int:
+        if self.max_model_len is not None:
+            return self.max_model_len
+        max_model_len = float("inf")
+        possible_keys = [
+            # OPT
+            "max_position_embeddings",
+            # GPT-2
+            "n_positions",
+            # MPT
+            "max_seq_len",
+            # Others
+            "max_sequence_length",
+            "max_seq_length",
+            "seq_len",
+        ]
+        for key in possible_keys:
+            max_len_key = getattr(self.hf_config, key, None)
+            if max_len_key is not None:
+                max_model_len = min(max_model_len, max_len_key)
+        return max_model_len
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
@@ -189,12 +166,10 @@ class CacheConfig:
         block_size: int,
         gpu_memory_utilization: float,
         swap_space: int,
-        sliding_window: Optional[int] = None,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
-        self.sliding_window = sliding_window
         self._verify_args()
 
         # Will be set after profiling.
@@ -249,7 +224,7 @@ class ParallelConfig:
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
         if self.world_size > 1:
-            self.worker_use_ray = True
+            self.worker_use_ray = False
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -268,41 +243,13 @@ class SchedulerConfig:
             iteration.
         max_model_len: Maximum length of a sequence (including prompt
             and generated text).
-        max_paddings: Maximum number of paddings to be added to a batch.
     """
 
-    def __init__(
-        self,
-        max_num_batched_tokens: Optional[int],
-        max_num_seqs: int,
-        max_model_len: int,
-        max_paddings: int,
-    ) -> None:
-        if max_num_batched_tokens is not None:
-            self.max_num_batched_tokens = max_num_batched_tokens
-        else:
-            # If max_model_len is too short, use 2048 as the default value for
-            # higher throughput.
-            self.max_num_batched_tokens = max(max_model_len, 2048)
+    def __init__(self, max_num_batched_tokens: int, max_num_seqs: int,
+                 max_model_len: int) -> None:
+        self.max_num_batched_tokens = max_num_batched_tokens
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
-        self.max_paddings = max_paddings
-        self._verify_args()
-
-    def _verify_args(self) -> None:
-        if self.max_num_batched_tokens < self.max_model_len:
-            raise ValueError(
-                f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
-                f"smaller than max_model_len ({self.max_model_len}). "
-                "This effectively limits the maximum sequence length to "
-                "max_num_batched_tokens and makes vLLM reject longer "
-                "sequences. Please increase max_num_batched_tokens or "
-                "decrease max_model_len.")
-        if self.max_num_batched_tokens < self.max_num_seqs:
-            raise ValueError(
-                f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
-                "be greater than or equal to max_num_seqs "
-                f"({self.max_num_seqs}).")
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
@@ -348,8 +295,16 @@ def _get_and_verify_dtype(
             # Casting between float16 and bfloat16 is allowed with a warning.
             logger.warning(f"Casting {config_dtype} to {torch_dtype}.")
 
+    # Check if the GPU supports the dtype.
+    if torch_dtype == torch.bfloat16:
+        compute_capability = torch.cuda.get_device_capability()
+        if compute_capability[0] < 8:
+            gpu_name = torch.cuda.get_device_name()
+            raise ValueError(
+                "Bfloat16 is only supported on GPUs with compute capability "
+                f"of at least 8.0. Your {gpu_name} GPU has compute capability "
+                f"{compute_capability[0]}.{compute_capability[1]}.")
     return torch_dtype
-
 
 def _get_and_verify_max_len(
     hf_config: PretrainedConfig,
@@ -390,6 +345,9 @@ def _get_and_verify_max_len(
     if rope_scaling is not None:
         assert "factor" in rope_scaling
         scaling_factor = rope_scaling["factor"]
+        if rope_scaling["type"] == "yarn":
+            derived_max_model_len = rope_scaling[
+                "original_max_position_embeddings"]
         derived_max_model_len *= scaling_factor
 
     if max_model_len is None:

@@ -58,7 +58,7 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
     n: Optional[int] = 1
-    max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = 16
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     stream: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
@@ -70,15 +70,11 @@ class ChatCompletionRequest(BaseModel):
     top_k: Optional[int] = -1
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
-    stop_token_ids: Optional[List[int]] = Field(default_factory=list)
-    skip_special_tokens: Optional[bool] = True
-    spaces_between_special_tokens: Optional[bool] = True
 
 
 class CompletionRequest(BaseModel):
     model: str
-    # a string, array of strings, array of tokens, or array of token arrays
-    prompt: Union[List[int], List[List[int]], str, List[str]]
+    prompt: Union[str, List[str]]
     suffix: Optional[str] = None
     max_tokens: Optional[int] = 16
     temperature: Optional[float] = 1.0
@@ -97,9 +93,6 @@ class CompletionRequest(BaseModel):
     top_k: Optional[int] = -1
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
-    stop_token_ids: Optional[List[int]] = Field(default_factory=list)
-    skip_special_tokens: Optional[bool] = True
-    spaces_between_special_tokens: Optional[bool] = True
 
 
 class LogProbs(BaseModel):

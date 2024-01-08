@@ -1,25 +1,23 @@
 # coding=utf-8
 # Adapted from https://huggingface.co/mosaicml/mpt-7b/tree/main
 import math
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from transformers import MptConfig
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.layers.attention import PagedAttentionWithALiBi
 from vllm.model_executor.layers.sampler import Sampler
-from vllm.model_executor.weight_utils import (convert_pyslice_to_tensor,
-                                              hf_model_weights_iterator,
+from vllm.model_executor.weight_utils import (hf_model_weights_iterator,
                                               load_tensor_parallel_weights)
 from vllm.model_executor.parallel_utils.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from vllm.model_executor.parallel_utils.layers import (VocabParallelEmbedding,
-                                                       ColumnParallelLinear,
-                                                       RowParallelLinear)
-from vllm.sequence import SamplerOutput
+from vllm.model_executor.parallel_utils.tensor_parallel import (
+    VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear)
+from vllm.sequence import SequenceOutputs
+from vllm.transformers_utils.configs.mpt import MPTConfig
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -37,23 +35,24 @@ def _get_alibi_slopes(
     return slopes
 
 
-class MptAttention(nn.Module):
+class MPTAttention(nn.Module):
 
-    def __init__(self, config: MptConfig):
+    def __init__(self, config: MPTConfig):
         super().__init__()
         self.d_model = config.d_model
         self.total_num_heads = config.n_heads
-        self.clip_qkv = config.attn_config.clip_qkv
-        self.qk_ln = config.attn_config.qk_ln
-        self.alibi_bias_max = config.attn_config.alibi_bias_max
-        assert not config.attn_config.prefix_lm
-        assert config.attn_config.alibi
+        self.clip_qkv = config.attn_config["clip_qkv"]
+        self.qk_ln = config.attn_config["qk_ln"]
+        self.alibi_bias_max = config.attn_config["alibi_bias_max"]
+        assert not config.attn_config["prefix_lm"]
+        assert config.attn_config["alibi"]
 
         self.qkv_proj = ColumnParallelLinear(
             self.d_model,
             3 * self.d_model,
             bias=not config.no_bias,
             gather_output=False,
+            perform_initialization=False,
         )
         if self.qk_ln:
             self.q_ln = nn.LayerNorm(self.d_model)
@@ -63,6 +62,7 @@ class MptAttention(nn.Module):
             self.d_model,
             bias=not config.no_bias,
             input_is_parallel=True,
+            perform_initialization=False,
         )
 
         tp_world_size = get_tensor_model_parallel_world_size()
@@ -105,26 +105,24 @@ class MptAttention(nn.Module):
         return output
 
 
-class MptMLP(nn.Module):
+class MPTMLP(nn.Module):
 
-    def __init__(self, config: MptConfig):
+    def __init__(self, config: MPTConfig):
         super().__init__()
         hidden_size = config.d_model
         expansion_ratio = config.expansion_ratio
         intermediate_size = expansion_ratio * hidden_size
-        self.up_proj = ColumnParallelLinear(
-            hidden_size,
-            intermediate_size,
-            bias=not config.no_bias,
-            gather_output=False,
-        )
+        self.up_proj = ColumnParallelLinear(hidden_size,
+                                            intermediate_size,
+                                            bias=not config.no_bias,
+                                            gather_output=False,
+                                            perform_initialization=False)
         self.act = get_act_fn("gelu")
-        self.down_proj = RowParallelLinear(
-            intermediate_size,
-            hidden_size,
-            bias=not config.no_bias,
-            input_is_parallel=True,
-        )
+        self.down_proj = RowParallelLinear(intermediate_size,
+                                           hidden_size,
+                                           bias=not config.no_bias,
+                                           input_is_parallel=True,
+                                           perform_initialization=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, _ = self.up_proj(x)
@@ -133,15 +131,15 @@ class MptMLP(nn.Module):
         return x
 
 
-class MptBlock(nn.Module):
+class MPTBlock(nn.Module):
 
-    def __init__(self, config: MptConfig):
+    def __init__(self, config: MPTConfig):
         super().__init__()
         hidden_size = config.d_model
         self.norm_1 = nn.LayerNorm(hidden_size)
-        self.attn = MptAttention(config)
+        self.attn = MPTAttention(config)
         self.norm_2 = nn.LayerNorm(hidden_size)
-        self.ffn = MptMLP(config)
+        self.ffn = MPTMLP(config)
 
     def forward(
         self,
@@ -166,19 +164,18 @@ class MptBlock(nn.Module):
         return hidden_states
 
 
-class MptModel(nn.Module):
+class MPTModel(nn.Module):
 
-    def __init__(self, config: MptConfig):
+    def __init__(self, config: MPTConfig):
         super().__init__()
         assert config.embedding_fraction == 1.0
         assert config.norm_type == "low_precision_layernorm"
 
-        self.wte = VocabParallelEmbedding(
-            config.vocab_size,
-            config.d_model,
-        )
+        self.wte = VocabParallelEmbedding(config.vocab_size,
+                                          config.d_model,
+                                          perform_initialization=False)
         self.blocks = nn.ModuleList(
-            [MptBlock(config) for _ in range(config.n_layers)])
+            [MPTBlock(config) for _ in range(config.n_layers)])
         self.norm_f = nn.LayerNorm(config.d_model)
         if config.no_bias:
             for module in self.modules():
@@ -213,14 +210,14 @@ class MptModel(nn.Module):
         return hidden_states
 
 
-class MptForCausalLM(nn.Module):
+class MPTForCausalLM(nn.Module):
 
-    def __init__(self, config: MptConfig):
+    def __init__(self, config: MPTConfig):
         super().__init__()
         self.config = config
         assert config.tie_word_embeddings
 
-        self.transformer = MptModel(config)
+        self.transformer = MPTModel(config)
         # TODO(zhuohan): create a new weight after implementing pipeline
         #                parallelism
         self.lm_head_weight = self.transformer.wte.weight
@@ -233,7 +230,7 @@ class MptForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> Dict[int, SequenceOutputs]:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          input_metadata, cache_events)
         next_tokens = self.sampler(self.lm_head_weight, hidden_states,
@@ -246,13 +243,12 @@ class MptForCausalLM(nn.Module):
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     use_np_cache: bool = False):
         tp_world_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
         state_dict = self.state_dict()
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+                model_name_or_path, cache_dir, use_np_cache):
             if "Wqkv" in name:
                 # NOTE(woosuk): MPT's fused QKV has the shape of
                 # [3 * num_heads * head_size, hidden_size].
@@ -264,7 +260,7 @@ class MptForCausalLM(nn.Module):
                 num_heads = total_num_heads // tp_world_size
                 head_start = tp_rank * num_heads
                 head_end = (tp_rank + 1) * num_heads
-                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+
                 if name.endswith(".weight"):
                     loaded_weight = loaded_weight.view(3, total_num_heads,
                                                        head_size, hidden_size)

@@ -21,7 +21,7 @@
 The input of the model is flattened to a 1D tensor of tokens. The model uses
 InputMetadata to extract the original 2D shape of the input.
 """
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -35,10 +35,9 @@ from vllm.model_executor.weight_utils import (hf_model_weights_iterator,
                                               load_tensor_parallel_weights)
 from vllm.model_executor.parallel_utils.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from vllm.model_executor.parallel_utils.layers import (VocabParallelEmbedding,
-                                                       ColumnParallelLinear,
-                                                       RowParallelLinear)
-from vllm.sequence import SamplerOutput
+from vllm.model_executor.parallel_utils.tensor_parallel import (
+    VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear)
+from vllm.sequence import SequenceOutputs
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -74,18 +73,16 @@ class OPTAttention(nn.Module):
         self.head_dim = embed_dim // total_num_heads
         self.scaling = self.head_dim**-0.5
 
-        self.qkv_proj = ColumnParallelLinear(
-            embed_dim,
-            3 * embed_dim,
-            bias=bias,
-            gather_output=False,
-        )
-        self.out_proj = RowParallelLinear(
-            embed_dim,
-            embed_dim,
-            bias=bias,
-            input_is_parallel=True,
-        )
+        self.qkv_proj = ColumnParallelLinear(embed_dim,
+                                             3 * embed_dim,
+                                             bias=bias,
+                                             gather_output=False,
+                                             perform_initialization=False)
+        self.out_proj = RowParallelLinear(embed_dim,
+                                          embed_dim,
+                                          bias=bias,
+                                          input_is_parallel=True,
+                                          perform_initialization=False)
         self.attn = PagedAttention(self.num_heads,
                                    self.head_dim,
                                    scale=self.scaling)
@@ -123,18 +120,16 @@ class OPTDecoderLayer(nn.Module):
         self.self_attn_layer_norm = nn.LayerNorm(
             self.embed_dim,
             elementwise_affine=config.layer_norm_elementwise_affine)
-        self.fc1 = ColumnParallelLinear(
-            self.embed_dim,
-            config.ffn_dim,
-            bias=config.enable_bias,
-            gather_output=False,
-        )
-        self.fc2 = RowParallelLinear(
-            config.ffn_dim,
-            self.embed_dim,
-            bias=config.enable_bias,
-            input_is_parallel=True,
-        )
+        self.fc1 = ColumnParallelLinear(self.embed_dim,
+                                        config.ffn_dim,
+                                        bias=config.enable_bias,
+                                        gather_output=False,
+                                        perform_initialization=False)
+        self.fc2 = RowParallelLinear(config.ffn_dim,
+                                     self.embed_dim,
+                                     bias=config.enable_bias,
+                                     input_is_parallel=True,
+                                     perform_initialization=False)
         self.final_layer_norm = nn.LayerNorm(
             self.embed_dim,
             elementwise_affine=config.layer_norm_elementwise_affine)
@@ -187,7 +182,7 @@ class OPTDecoder(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.word_embed_proj_dim,
-        )
+            perform_initialization=False)
         # Positional embeddings are replicated (not sharded).
         self.embed_positions = OPTLearnedPositionalEmbedding(
             config.max_position_embeddings, config.hidden_size)
@@ -287,7 +282,7 @@ class OPTForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> Dict[int, SequenceOutputs]:
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata, cache_events)
         next_tokens = self.sampler(self.lm_head_weight, hidden_states,
@@ -302,13 +297,12 @@ class OPTForCausalLM(nn.Module):
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+                     use_np_cache: bool = False):
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         state_dict = self.state_dict()
 
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+                model_name_or_path, cache_dir, use_np_cache):
             if "lm_head.weight" in name:
                 continue
 
