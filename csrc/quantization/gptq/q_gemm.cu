@@ -123,9 +123,9 @@ __global__ void gemm_half_q_half_gptq_kernel
     int n = offset_n + t * 4;
 
     // Preload block_a
-    __shared__ half block_a[m_count][BLOCK_KN_SIZE];
+    __shared__ half block_a[m_count][BLOCK_KN_SIZE]; //m_count, BLOCK_KN_SIZE = 128
 
-    if (offset_k + t < end_k)
+    if (offset_k + t < end_k) //dim of k is 128
     {
         for (int m = 0; m < m_count; ++m)
         {
@@ -278,16 +278,17 @@ void gemm_half_q_half_cuda_part
 )
 {
     dim3 blockDim, gridDim;
-    blockDim.x = BLOCK_KN_SIZE;
+    blockDim.x = BLOCK_KN_SIZE; //128
     blockDim.y = 1;
     blockDim.z = 1;
-    gridDim.x = DIVIDE(size_n, BLOCK_KN_SIZE * 4);
-    gridDim.y = DIVIDE(size_m, m_count);
-    gridDim.z = DIVIDE(size_k, BLOCK_KN_SIZE);
+    gridDim.x = DIVIDE(size_n, BLOCK_KN_SIZE * 4); //128 * 4 =512
+    gridDim.y = DIVIDE(size_m, m_count); //8
+    gridDim.z = DIVIDE(size_k, BLOCK_KN_SIZE); //128
 
     fp_gemm_half_q_half_gptq_kernel kernel = pick_gemm_half_q_half_gptq_kernel(true, m_count);
 
-    kernel<<<gridDim, blockDim>>>
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    kernel<<<gridDim, blockDim, 0, stream>>>
     (
         a,
         b_q_weight,
@@ -434,7 +435,8 @@ void reconstruct_exllama
     gridDim.y = DIVIDE(height, BLOCK_KN_SIZE);
     gridDim.x = DIVIDE(width, BLOCK_KN_SIZE);
 
-    reconstruct_exllama_kernel<<<gridDim, blockDim>>>
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    reconstruct_exllama_kernel<<<gridDim, blockDim, 0, stream>>>
     (
         b_q_weight,
         b_q_perm,
@@ -567,7 +569,8 @@ void gemm_half_q_half_alt
     gridDim.y = DIVIDE(size_m, BLOCK_M_SIZE_MAX);
     gridDim.z = DIVIDE(size_k, BLOCK_KN_SIZE);
 
-    gemm_half_q_half_alt_kernel<<<gridDim, blockDim>>>
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    gemm_half_q_half_alt_kernel<<<gridDim, blockDim, 0, stream>>>
     (
         (const half2*) a,
         b_q_weight,
@@ -639,7 +642,8 @@ void reconstruct_gptq
     blockDim.y = 1;
     gridDim.y = DIVIDE(height, 8);
     gridDim.x = DIVIDE(width, BLOCK_KN_SIZE);
-    reconstruct_gptq_kernel<<<gridDim, blockDim>>>
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    reconstruct_gptq_kernel<<<gridDim, blockDim,0,stream>>>
     (
         b_q_weight,
         b_gptq_scales,
@@ -670,6 +674,7 @@ void gemm_half_q_half_cuda
     bool use_exllama
 )
 {
+    printf("size_m is %d,  MAX_Q_GEMM_ROWS is %d .\n", size_m, MAX_Q_GEMM_ROWS);
     if ((use_exllama && size_m > MAX_Q_GEMM_ROWS) || (!use_exllama && size_m > MAX_ALT_GEMM_ROWS)) {
         // Reconstruct FP16 matrix, then cuBLAS
         if (use_exllama) {
@@ -695,7 +700,7 @@ void gemm_half_q_half_cuda
     else if (use_exllama)
     {
         // Quantized matmul
-        int max_chunks = size_m / BLOCK_M_SIZE_MAX;
+        int max_chunks = size_m / BLOCK_M_SIZE_MAX;  //BLOCK_M_SIZE_MAX = 8
         int last_chunk = max_chunks * BLOCK_M_SIZE_MAX;
         int last_chunk_size = size_m - last_chunk;
 
@@ -794,7 +799,8 @@ void shuffle_exllama_weight
         gridDim.x = DIVIDE(width, THREADS_X);
         gridDim.y = height / 8;
 
-        make_sequential_kernel<<<gridDim, blockDim>>>
+        const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+        make_sequential_kernel<<<gridDim, blockDim, 0, stream>>>
         (
             q_weight,
             new_qweight,
@@ -813,7 +819,9 @@ void shuffle_exllama_weight
     blockDim.y = 1;
     gridDim.x = DIVIDE(width, THREADS_X);
     gridDim.y = 1;
-    shuffle_kernel<<<gridDim, blockDim>>>(q_weight, height, width);
+
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    shuffle_kernel<<<gridDim, blockDim, 0, stream>>>(q_weight, height, width);
 }
 
 }  // namespace gptq

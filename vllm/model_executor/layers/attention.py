@@ -149,8 +149,8 @@ class PagedAttention(nn.Module):
                 value,
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
-                scale=self.scale#,
-                #op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
+                scale=self.scale,
+                op=xops.fmha.ck.FwOp
                 #(is_hip()) else None,
             )
             output = out.view_as(query)
