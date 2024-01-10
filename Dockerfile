@@ -16,7 +16,6 @@ RUN cd ${WORKSPACE_DIR} && \
     git clone -b develop https://github.com/ROCmSoftwarePlatform/hipBLASLt && \
     export GTest_DIR="/usr/local/lib/cmake/GTest/" && \
     cd hipBLASLt && \
-    ./install.sh -idc &&\
     ./install.sh -idc --architecture 'gfx90a;gfx942' &&\
     cd ../ && rm -rf hipBLASLt
 
