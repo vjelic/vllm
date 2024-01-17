@@ -27,17 +27,34 @@ class TunedGemm:
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
             print(self.bestsols)
+    def apply_custom(self,ds):
+        M,N,K = ds['M'],ds['N'],ds['K']
+        #apply custom matvec (only for f16 dtype)
+        if N==1:
+            ds1 = ds.copy()
+            ds1['libtype'] = 'custom'
+            if K==8192 and (M==1280 or M==7168):
+                ds1['solidx'] = 8
+                return ds1
+            elif K==3584 and M==8192:
+                ds1['solidx'] = 8
+                return ds1
+            elif K<=8192 and K%8==0 and M%4==0:
+                ds1['solidx'] = 1
+                return ds1
+        return ds
     def create_ds(self):
         df = self.bestsols
         solds = {}
         for i in range(len(df)):
-            ds = df.iloc[i]
+            ds = self.apply_custom(df.iloc[i])
             key = (ds['M'],ds['N'],ds['K'])
             if ds['libtype']=='hipblaslt': soltype = 1
             elif ds['libtype']=='rocblas': soltype = 2
             elif ds['libtype']=='custom': soltype = 3
             solds[key] = (soltype,int(ds['solidx']))
         self.solids = solds
+        #print('>>>',solds)
     def query_sol(self,m,n,k):
         return self.solids.get((m,n,k),(0,0))
     def mm(self,inp,weights):
@@ -51,8 +68,17 @@ class TunedGemm:
         elif soltype==3:
             ##only matvec is supported currently
             out = torch.empty(inp.shape[0],weights.shape[0],dtype=torch.float16,device='cuda')
+            #print('>>>Matvec',inp.shape,weights.shape,soltype,solidx)
             if solidx<=1:
-                custom_ops.LLMM1(weights,inp,out)
+                custom_ops.LLMM1(weights,inp,out,4)
+            elif solidx==2:
+                custom_ops.LLMM1(weights,inp,out,2)
+            elif solidx==8:
+                custom_ops.LLMM1(weights,inp,out,8)
+            elif solidx==20:
+                custom_ops.LLZZ(weights,inp,out,0)
+            elif solidx==21:
+                custom_ops.LLZZ(weights,inp,out,1)
         elif soltype==2:
             out = rocb_mm(inp,weights.t(),solidx)
         else:
@@ -61,4 +87,3 @@ class TunedGemm:
         return out
 
 tgemm = TunedGemm()
-
