@@ -116,8 +116,8 @@ class PagedAttention(nn.Module):
                                          key,
                                          value,
                                          softmax_scale=self.scale,
-                                         causal=True,
-                                         alibi_slopes=self.alibi_slopes)
+                                         causal=True)#,
+                                         # alibi_slopes=self.alibi_slopes)
             else:
                 # Prompt run.
                 if self.num_kv_heads != self.num_heads:
