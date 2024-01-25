@@ -99,7 +99,7 @@ namespace {
     int M;
     int N;
     int K;
-    hipblasltDatatype_t dtype;
+    hipDataType dtype;
 
     friend auto operator<(const MatMulConfig& left, const MatMulConfig& right) -> bool {
       return std::tie(left.op_A, left.op_B, left.M, left.N, left.K, left.dtype) < std::tie(right.op_A, right.op_B, right.M, right.N, right.K, right.dtype);
@@ -132,7 +132,7 @@ std::vector<int> hipblasLtMatmul_findallsols_wrapper(
     const void *beta,
     void *c,
     int ldc,
-    hipblasltDatatype_t dtype,
+    hipDataType dtype,
     hipStream_t &stream)
 {
   int flag { 0 };
@@ -149,7 +149,7 @@ std::vector<int> hipblasLtMatmul_findallsols_wrapper(
     CHECK_HIPBLAS_ERROR(hipblasLtMatrixLayoutCreate(&matB, dtype, n, k, ldb));
   }
   CHECK_HIPBLAS_ERROR(hipblasLtMatrixLayoutCreate(&matC, dtype, m, n, ldc));
-  CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescCreate(&matmul, HIPBLASLT_COMPUTE_F32, HIPBLASLT_R_32F));
+  CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F));
   CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescSetAttribute(
       matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &op_A, sizeof(int32_t)));
   CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -167,7 +167,7 @@ std::vector<int> hipblasLtMatmul_findallsols_wrapper(
     dtype,
     dtype,
     dtype,
-    HIPBLASLT_COMPUTE_F32,
+    HIPBLAS_COMPUTE_32F,
     heuristicResult));
 
   std::vector<int> algoIndex;
@@ -216,7 +216,7 @@ hipblasStatus_t hipblasLtMatmul_sol_wrapper(
     const void *beta,
     void *c,
     int ldc,
-    hipblasltDatatype_t dtype,
+    hipDataType dtype,
     hipStream_t &stream,
     int solution_index=-1)
 {
@@ -242,7 +242,7 @@ hipblasStatus_t hipblasLtMatmul_sol_wrapper(
     CHECK_HIPBLAS_ERROR(hipblasLtMatrixLayoutCreate(&matB, dtype, n, k, ldb));
   }
   CHECK_HIPBLAS_ERROR(hipblasLtMatrixLayoutCreate(&matC, dtype, m, n, ldc));
-  CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescCreate(&matmul, HIPBLASLT_COMPUTE_F32, HIPBLASLT_R_32F));
+  CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F));
   CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescSetAttribute(
       matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &op_A, sizeof(int32_t)));
   CHECK_HIPBLAS_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -451,13 +451,13 @@ torch::Tensor HipbSolIdxBlas(
   // std::cout << " | (m, n, k): " << m << ", " << n << ", " << k << std::endl
   //           << " | (lda, ldb, ldc): " << mat1_ld << ", " << mat2_ld << ", " << result_ld << std::endl;
  
-  hipblasltDatatype_t hipblasType;
+  hipDataType hipblasType;
   if (abcType == at::kHalf) {
-    hipblasType = HIPBLASLT_R_16F;
+    hipblasType = HIP_R_16F;
   } else if (abcType == at::kBFloat16) {
-    hipblasType = HIPBLASLT_R_16B;
+    hipblasType = HIP_R_16BF;
   } else if (abcType == at::kFloat) {
-    hipblasType = HIPBLASLT_R_32F;
+    hipblasType = HIP_R_32F;
   } else {
     assert(false && "Wrong datatype!");
   }
@@ -536,13 +536,13 @@ std::vector<int> HipbFindAllSolIdxBlas(
   int64_t mat1_ld = mat1_strides[(transpose_mat1 == transpose_result) ? 1 : 0];
   int64_t mat2_ld = mat2_strides[(transpose_mat2 == transpose_result) ? 1 : 0];
   int64_t result_ld = result.stride(transpose_result ? 0 : 1);
-  hipblasltDatatype_t hipblasType;
+  hipDataType hipblasType;
   if (abcType == at::kHalf) {
-    hipblasType = HIPBLASLT_R_16F;
+    hipblasType = HIP_R_16F;
   } else if (abcType == at::kBFloat16) {
-    hipblasType = HIPBLASLT_R_16B;
+    hipblasType = HIP_R_16BF;
   } else if (abcType == at::kFloat) {
-    hipblasType = HIPBLASLT_R_32F;
+    hipblasType = HIP_R_32F;
   } else {
     assert(false && "Wrong datatype!");
   }
