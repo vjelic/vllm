@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-
+import os
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.parallel_utils.tensor_parallel import (
     gather_from_tensor_model_parallel_region)
@@ -284,6 +284,12 @@ def _get_topk_logprobs(
         token_to_logprob[token_id] = logprob
     return token_to_logprob
 
+def _multinomial(
+        probs: torch.Tensor,
+        num_samples: int,
+):
+    q = torch.empty_like(probs).exponential_(1)
+    return probs.div_(q).argmax(dim=1).view(-1, num_samples)
 
 def _sample_from_prompt(
     prob: torch.Tensor,
@@ -362,9 +368,12 @@ def _sample_from_generation_tokens(
     else:
         # Random sampling.
         # Sample 1 token for each sequence in the group.
-        next_token_ids = torch.multinomial(probs,
-                                           num_samples=1,
-                                           replacement=True)
+        if os.environ.get('VLLM_USE_TORCH_MULTINOMIAL'):
+            next_token_ids = torch.multinomial(probs,
+                                            num_samples=1,
+                                            replacement=True)
+        else:
+            next_token_ids = _multinomial(probs, 1)
         next_token_ids = next_token_ids.squeeze(dim=-1).tolist()
         parent_seq_ids = seq_ids
     return parent_seq_ids, next_token_ids
