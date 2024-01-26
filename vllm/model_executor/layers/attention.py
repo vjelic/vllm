@@ -253,8 +253,12 @@ def _paged_attention(
     # to parallelize.
     # TODO(woosuk): Tune this heuristic.
     # For context len > 8192, use V2 kernel to avoid shared memory shortage.
-    use_v1 = input_metadata.max_context_len <= 8192 and (
-        max_num_partitions == 1 or num_seqs * num_heads > 512)
+    
+    # use_v1 = input_metadata.max_context_len <= 8192 and (
+    #     max_num_partitions == 1 or num_seqs * num_heads > 512)
+    
+    use_v1 = False # forced using v2
+
     if use_v1:
         # Run PagedAttention V1.
         ops.paged_attention_v1(
