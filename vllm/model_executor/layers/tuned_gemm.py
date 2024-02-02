@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from rocsolidxgemm import rocb_create_extension,rocb_mm
 from hipbsolidxgemm import hipb_create_extension,hipb_mm
+from pathlib import Path
 import os
 import yaml
 import pandas as pd
@@ -16,6 +17,13 @@ class TunedGemm:
         self.bestsols = {}
         self.load_best_sols()
         self.create_ds()
+        self.save_gemm = int(os.environ.get('VLLM_TUNE_GEMM',0))
+        self.tune_path = os.environ.get('VLLM_UNTUNE_FILE', "/tmp/vllm_untuned.csv")
+        if (self.save_gemm == 1):
+            self.tuned_df = pd.DataFrame(columns=['M','N','K'])
+        else:
+            self.tuned_df = None
+
     def load_best_sols(self):
         perfbits = {}
         perf_file = os.environ.get('VLLM_PERF_YAML')
@@ -24,8 +32,8 @@ class TunedGemm:
                 perfbits = yaml.safe_load(file)
 
         tune_file = perfbits.get('tuned_gemm_csv',None)
-        if tune_file is not None:
-            self.bestsols = pd.read_csv(tune_file,index_col=[0])
+        if tune_file is not None and Path(tune_file).is_file():
+            self.bestsols = pd.read_csv(tune_file)
     def apply_custom(self,ds):
         M,N,K = ds['M'],ds['N'],ds['K']
         #apply custom matvec (only for f16 dtype)
@@ -82,6 +90,9 @@ class TunedGemm:
             out = rocb_mm(inp,weights.t(),solidx)
         else:
             #print('>>>Tgemm Default',inp.shape,weights.shape,soltype,solidx)
+            if (self.save_gemm == 1):
+                self.tuned_df = pd.concat([self.tuned_df, pd.DataFrame({'M':[weights.shape[0]], 'N':[inp.shape[0]], 'K':[inp.shape[1]]})]).drop_duplicates()
+                self.tuned_df.to_csv(self.tune_path, index=False)
             out = F.linear(inp,weights)
         return out
 

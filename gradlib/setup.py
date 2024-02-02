@@ -127,6 +127,7 @@ elif is_rocm_pytorch:
 
 setup(
     name='gradlib',
+    packages=['gradlib'],
     ext_modules=ext_modules,
     cmdclass={
         'build_ext': BuildExtension
