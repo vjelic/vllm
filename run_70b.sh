@@ -35,13 +35,14 @@ export LD_LIBRARY_PATH=/workspace/rccl/build/
 #TP="1 2 4 8"
 TP=8
 GEN_LEN="1 32"
-INPUT_LEN="512 1024 2048 3072 4096"
+INPUT_LEN="512 1024"
 ITER=10
 
 for tp in $TP;
 do
     echo "=============================== WARMING UP ======================================"
     export VLLM_TUNE_GEMM=1
+    cd $VLLM_DIR
     for gen_len in $GEN_LEN;
         do
             for input_len in $INPUT_LEN;

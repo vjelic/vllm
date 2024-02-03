@@ -42,6 +42,7 @@ for tp in $TP;
 do
 
     export VLLM_TUNE_GEMM=1
+    cd $VLLM_DIR
     for gen_len in $GEN_LEN;
         do
             for input_len in $INPUT_LEN;

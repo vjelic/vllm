@@ -18,9 +18,13 @@ class TunedGemm:
         self.load_best_sols()
         self.create_ds()
         self.save_gemm = int(os.environ.get('VLLM_TUNE_GEMM',0))
-        self.tune_path = os.environ.get('VLLM_UNTUNE_FILE', "/tmp/vllm_untuned.csv")
+        self.untune_path = os.environ.get('VLLM_UNTUNE_FILE', "/tmp/vllm_untuned.csv")
+
         if (self.save_gemm == 1):
-            self.tuned_df = pd.DataFrame(columns=['M','N','K'])
+            if (Path(self.untune_path).is_file()):
+                self.tuned_df = pd.read_csv(self.untune_path)
+            else:
+                self.tuned_df = pd.DataFrame(columns=['M','N','K'])
         else:
             self.tuned_df = None
 
@@ -34,6 +38,8 @@ class TunedGemm:
         tune_file = perfbits.get('tuned_gemm_csv',None)
         if tune_file is not None and Path(tune_file).is_file():
             self.bestsols = pd.read_csv(tune_file)
+
+
     def apply_custom(self,ds):
         M,N,K = ds['M'],ds['N'],ds['K']
         #apply custom matvec (only for f16 dtype)
