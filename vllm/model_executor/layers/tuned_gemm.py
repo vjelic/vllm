@@ -57,12 +57,21 @@ class TunedGemm:
         #print('>>>',solds)
     def query_sol(self,m,n,k):
         return self.solids.get((m,n,k),(0,0))
+    
     def mm(self,inp,weights):
+        b=1
+        dims = inp.dim()
+        if dims==3:
+            b = inp.shape[0]
+            inp = inp.view(b*inp.shape[1], inp.shape[2])
         if self.extensions_created == False:
             rocb_create_extension()
             hipb_create_extension()
             self.extensions_created = True
+        # print(inp.shape, weights.shape)
+        # print(weights.shape[0],inp.shape[0],inp.shape[1])
         soltype,solidx = self.query_sol(m=weights.shape[0],n=inp.shape[0],k=inp.shape[1])
+        # print(soltype, solidx)
         if soltype==1:
             out = hipb_mm(inp,weights.t(),solidx)
         elif soltype==3:
@@ -84,6 +93,8 @@ class TunedGemm:
         else:
             #print('>>>Tgemm Default',inp.shape,weights.shape,soltype,solidx)
             out = F.linear(inp,weights)
+        if dims==3:
+            out = out.view(b, out.shape[0]//b, out.shape[1])
         return out
 
 tgemm = TunedGemm()
