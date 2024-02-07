@@ -643,7 +643,7 @@ void reconstruct_gptq
     gridDim.y = DIVIDE(height, 8);
     gridDim.x = DIVIDE(width, BLOCK_KN_SIZE);
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    reconstruct_gptq_kernel<<<gridDim, blockDim,0,stream>>>
+    reconstruct_gptq_kernel<<<gridDim, blockDim, 0, stream>>>
     (
         b_q_weight,
         b_gptq_scales,
@@ -819,7 +819,10 @@ void shuffle_exllama_weight
     blockDim.y = 1;
     gridDim.x = DIVIDE(width, THREADS_X);
     gridDim.y = 1;
+<<<<<<< HEAD
 
+=======
+>>>>>>> upstream/main
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     shuffle_kernel<<<gridDim, blockDim, 0, stream>>>(q_weight, height, width);
 }
