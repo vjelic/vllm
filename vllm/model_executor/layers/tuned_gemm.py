@@ -17,13 +17,7 @@ class TunedGemm:
         self.load_best_sols()
         self.create_ds()
     def load_best_sols(self):
-        perfbits = {}
-        perf_file = os.environ.get('VLLM_PERF_YAML')
-        if perf_file is not None:
-            with open(perf_file, 'r') as file:
-                perfbits = yaml.safe_load(file)
-        print('>>>Perf Bits',perf_file, perfbits)
-        tune_file = perfbits.get('tuned_gemm_csv',None)
+        tune_file = os.environ.get('VLLM_PERF_CSV')
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
             print(self.bestsols)
