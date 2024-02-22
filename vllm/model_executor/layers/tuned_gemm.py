@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from rocsolidxgemm import rocb_create_extension,rocb_mm
 from hipbsolidxgemm import hipb_create_extension,hipb_mm
 import os
-import yaml
 import pandas as pd
 from vllm import custom_ops
 
@@ -21,27 +20,27 @@ class TunedGemm:
         if tune_file is not None:
             self.bestsols = pd.read_csv(tune_file,index_col=[0])
             print(self.bestsols)
-    def apply_custom(self,ds):
-        M,N,K = ds['M'],ds['N'],ds['K']
-        #apply custom matvec (only for f16 dtype)
-        if N==1:
-            ds1 = ds.copy()
-            ds1['libtype'] = 'custom'
-            if K==8192 and (M==1280 or M==7168):
-                ds1['solidx'] = 8
-                return ds1
-            elif K==3584 and M==8192:
-                ds1['solidx'] = 8
-                return ds1
-            elif K<=8192 and K%8==0 and M%4==0:
-                ds1['solidx'] = 1
-                return ds1
-        return ds
+    # def apply_custom(self,ds):
+    #     M,N,K = ds['M'],ds['N'],ds['K']
+    #     #apply custom matvec (only for f16 dtype)
+    #     if N==1:
+    #         ds1 = ds.copy()
+    #         ds1['libtype'] = 'custom'
+    #         if K==8192 and (M==1280 or M==7168):
+    #             ds1['solidx'] = 8
+    #             return ds1
+    #         elif K==3584 and M==8192:
+    #             ds1['solidx'] = 8
+    #             return ds1
+    #         elif K<=8192 and K%8==0 and M%4==0:
+    #             ds1['solidx'] = 1
+    #             return ds1
+    #     return ds
     def create_ds(self):
         df = self.bestsols
         solds = {}
         for i in range(len(df)):
-            ds = self.apply_custom(df.iloc[i])
+            ds = df.iloc[i]
             key = (ds['M'],ds['N'],ds['K'])
             if ds['libtype']=='hipblaslt': soltype = 1
             elif ds['libtype']=='rocblas': soltype = 2
