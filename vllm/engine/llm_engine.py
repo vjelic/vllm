@@ -43,12 +43,12 @@ def _run_worker(model_config, parallel_config, scheduler_config,
         parallel_config,
         scheduler_config,
         device_config,
-        local_rank=rank,
-        rank=rank,
-        ditributed_init_method=distributed_init_method,
-        lora_config=lora_config,
-        kv_cache_dtype=cache_dtype,
-        is_driver_worker=False,
+        rank,
+        rank,
+        distributed_init_method,
+        lora_config,
+        cache_dtype,
+        False,
     )
     while True:
         method, args, kwargs = conn.recv()
@@ -84,7 +84,7 @@ class LLMEngine:
     """
     def __del__(self):
         for worker in self.workers:
-            worker.terminate()
+            worker.kill()
 
     def __init__(
         self,
