@@ -103,7 +103,7 @@ class PagedAttention(nn.Module):
 
         if input_metadata.is_prompt:
             # Prompt run.
-            if self.num_kv_heads != self.num_heads:
+            if self.num_kv_heads != self.num_heads and False :
                 # As of Nov 2023, xformers only supports MHA. For MQA/GQA,
                 # project the key and value tensors to the desired number of
                 # heads.
