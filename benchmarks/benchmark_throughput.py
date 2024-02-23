@@ -9,6 +9,7 @@ import torch
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 from tqdm import tqdm
+from torch.multiprocessing import set_start_method
 
 
 def sample_requests(
@@ -87,6 +88,7 @@ def run_vllm(
         enforce_eager=enforce_eager,
         kv_cache_dtype=kv_cache_dtype,
         device=device,
+        worker_use_ray=False,
     )
 
     # Add the requests to the engine.
@@ -229,6 +231,7 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
+    set_start_method('spawn')
     parser = argparse.ArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend",
                         type=str,

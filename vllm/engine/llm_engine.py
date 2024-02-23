@@ -20,7 +20,7 @@ from vllm.sequence import (SamplerOutput, Sequence, SequenceGroup,
 from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                TokenizerGroup)
 from vllm.utils import Counter, set_cuda_visible_devices, get_ip, get_open_port, get_distributed_init_method
-
+from torch.multiprocessing import Process, Pipe
 if ray:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
@@ -30,6 +30,30 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
+def _run_worker(model_config, parallel_config, scheduler_config,
+                device_config,
+                rank,
+                distributed_init_method,
+                lora_config,
+                cache_dtype,     
+                conn):
+    from vllm.worker.worker import Worker
+    worker = Worker(
+        model_config,
+        parallel_config,
+        scheduler_config,
+        device_config,
+        local_rank=rank,
+        rank=rank,
+        ditributed_init_method=distributed_init_method,
+        lora_config=lora_config,
+        kv_cache_dtype=cache_dtype,
+        is_driver_worker=False,
+    )
+    while True:
+        method, args, kwargs = conn.recv()
+        result = getattr(worker, method)(*args, **kwargs)
+        conn.send(result)
 
 class LLMEngine:
     """An LLM engine that receives requests and generates texts.
@@ -58,6 +82,9 @@ class LLMEngine:
             Required for distributed execution.
         log_stats: Whether to log statistics.
     """
+    def __del__(self):
+        for worker in self.workers:
+            worker.terminate()
 
     def __init__(
         self,
@@ -132,12 +159,26 @@ class LLMEngine:
         # before CUDA_VISIBLE_DEVICES is set in the Worker
         from vllm.worker.worker import Worker
 
-        assert self.parallel_config.world_size == 1, (
-            "Ray is required if parallel_config.world_size > 1.")
+        # assert self.parallel_config.world_size == 1, (
+        #     "Ray is required if parallel_config.world_size > 1.")
 
         self.workers: List[Worker] = []
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
+        for rank in range(1, self.parallel_config.tensor_parallel_size):
+            parent_conn, child_conn = Pipe()
+            process = Process(target=_run_worker,
+                              args=(self.model_config, self.parallel_config, self.scheduler_config,
+                                    self.device_config,
+                                    rank,
+                                    distributed_init_method,
+                                    self.lora_config,
+                                    self.cache_config.cache_dtype,     
+                                    child_conn
+                               ))
+            process.start()
+            self.workers.append((process, parent_conn))
+            
         self.driver_worker = Worker(
             self.model_config,
             self.parallel_config,
@@ -356,7 +397,8 @@ class LLMEngine:
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
         # Initialize the cluster.
-        placement_group = initialize_cluster(parallel_config)
+        # placement_group = initialize_cluster(parallel_config)
+        placement_group = None
         # Create the LLM engine.
         engine = cls(*engine_configs,
                      placement_group,
@@ -973,12 +1015,16 @@ class LLMEngine:
         if max_concurrent_workers:
             raise NotImplementedError(
                 "max_concurrent_workers is not supported yet.")
-
+        
         # Start the ray workers first.
-        ray_worker_outputs = [
-            worker.execute_method.remote(method, *args, **kwargs)
-            for worker in self.workers
-        ]
+        # ray_worker_outputs = [
+        #     #worker.execute_method.remote(method, *args, **kwargs)
+        #     worker[1].send(method, args, kwargs)
+        #     for worker in self.workers
+        # ]
+            
+        for worker in self.workers:
+            worker[1].send((method, args, kwargs))
 
         if driver_args is None:
             driver_args = args
@@ -990,7 +1036,11 @@ class LLMEngine:
                                        method)(*driver_args, **driver_kwargs)
 
         # Get the results of the ray workers.
+        # if self.workers:
+        #     ray_worker_outputs = ray.get(ray_worker_outputs)
         if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
-
+            ray_worker_outputs = [worker[1].recv() for worker in self.workers]
+        else:
+            ray_worker_outputs = []
+                
         return [driver_worker_output] + ray_worker_outputs

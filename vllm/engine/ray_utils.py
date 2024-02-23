@@ -82,10 +82,10 @@ def initialize_cluster(
         else:
             ray.init(address=ray_address, ignore_reinit_error=True)
 
-    if not parallel_config.worker_use_ray:
-        assert parallel_config.world_size == 1, (
-            "Ray is required if parallel_config.world_size > 1.")
-        return None
+    # if not parallel_config.worker_use_ray:
+    #     assert parallel_config.world_size == 1, (
+    #         "Ray is required if parallel_config.world_size > 1.")
+    #     return None
 
     # Create placement group for worker processes
     current_placement_group = ray.util.get_current_placement_group()
