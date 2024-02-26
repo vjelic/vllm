@@ -91,6 +91,7 @@ class Worker:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
+        print ("----------- cupy_port ------------ : {}".format(cupy_port))
         init_distributed_environment(self.parallel_config, self.rank,
                                      cupy_port, self.distributed_init_method)
         # Initialize the model.

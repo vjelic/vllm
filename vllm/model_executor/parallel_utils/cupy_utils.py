@@ -14,10 +14,12 @@ from torch.distributed import ReduceOp
 
 try:
     import cupy
+    print ("---------------------- ENABLED CUPY ------------------")
     from cupy.cuda import nccl
     from cupyx.distributed import NCCLBackend
 except ImportError as e:
     cupy = e
+    print ("---------------------- CUPY ERROR ------------------")
     nccl = None
 
     class NCCLBackend:

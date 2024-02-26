@@ -30,7 +30,8 @@ _PAD_SLOT_ID = -1
 LORA_WARMUP_RANK = 8
 # Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
-_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
+#_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
+_BATCH_SIZES_TO_CAPTURE = [16]
 
 
 class ModelRunner:

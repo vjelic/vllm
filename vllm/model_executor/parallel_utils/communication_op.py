@@ -33,6 +33,7 @@ def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     if out is not None:
         return out
     if is_cupy_nccl_enabled_for_all_reduce():
+        print (" -------------- CUPY communication ---------- ")
         # TODO: support multiple parallel groups.
         cupy_utils.all_reduce(input_)
     else:
