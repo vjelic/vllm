@@ -14,11 +14,12 @@ class TunedGemm:
         #rocb_create_extension()
         #hipb_create_extension()
         self.extensions_created = False
+        self.save_gemm = int(os.environ.get('VLLM_TUNE_GEMM',0))
+        self.untune_path = os.environ.get('VLLM_UNTUNE_FILE', "/tmp/vllm_untuned.csv")
+        self.tune_path = os.environ.get('VLLM_TUNE_FILE', "tuned.csv")        
         self.bestsols = {}
         self.load_best_sols()
         self.create_ds()
-        self.save_gemm = int(os.environ.get('VLLM_TUNE_GEMM',0))
-        self.untune_path = os.environ.get('VLLM_UNTUNE_FILE', "/tmp/vllm_untuned.csv")
 
         if (self.save_gemm == 1):
             if (Path(self.untune_path).is_file()):
@@ -98,7 +99,7 @@ class TunedGemm:
             #print('>>>Tgemm Default',inp.shape,weights.shape,soltype,solidx)
             if (self.save_gemm == 1):
                 self.tuned_df = pd.concat([self.tuned_df, pd.DataFrame({'M':[weights.shape[0]], 'N':[inp.shape[0]], 'K':[inp.shape[1]]})]).drop_duplicates()
-                self.tuned_df.to_csv(self.tune_path, index=False)
+                self.tuned_df.to_csv(self.untune_path, index=False)
             out = F.linear(inp,weights)
         return out
 
