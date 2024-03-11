@@ -18,7 +18,7 @@ atol = 1
 dtype = torch.float16
 
 class Gemm:
-    def __init__(self,m,n,k,dtype,rocblas_decode=False):
+    def __init__(self,m,n,k,dtype,rocblas_tune=False):
         self.m=m
         self.k=k
         self.n=n
@@ -31,12 +31,13 @@ class Gemm:
         self.blob = torch.ones(128*1024*1024, dtype=torch.float32, device='cuda')
         self.topn = 20 #number of top solutions from each source
         self.hipb_sols=[]
+        self.rocb_sols=[]
         self.rtol = 1e-5
         self.atol = 1
         self.start = torch.cuda.Event(enable_timing=True)
         self.end = torch.cuda.Event(enable_timing=True)
         self.hipb_prefer_ratio = 0.995 #prefer hipblaslt unless rocblas time is less than this ratio of hipblaslt time
-        self.rocblas_decode=rocblas_decode
+        self.rocblas_tune=rocblas_tune
 
 
     def find_hipblas_sols(self):
@@ -128,9 +129,9 @@ class Gemm:
         self.hipb_top_sols = hipb_topn
 
     def find_fastest_solution(self):
-        self.find_rocblas_sols()
-        if not (self.rocblas_decode and self.n == 1):
-            self.find_hipblas_sols()
+        if (self.rocblas_tune):
+            self.find_rocblas_sols()
+        self.find_hipblas_sols()
         self.warmup()
         self.rocb_time_all_sols(fast_mode=1)
         self.warmup()
@@ -173,10 +174,10 @@ class Gemm:
 
 
 class GemmTuner:
-    def __init__(self, dtype, tuned_file=None, rocblas_decode=False):
+    def __init__(self, dtype, tuned_file=None, rocblas_tune=False):
         self.gemm_problems = pd.DataFrame(columns=['M','N','K'])
         self.dtype = dtype
-        self.rocblas_decode = rocblas_decode
+        self.rocblas_tune = rocblas_tune
         self.tuned_file = tuned_file
         if Path(tuned_file).is_file():
             self.gdf = pd.read_csv(tuned_file)
@@ -196,7 +197,7 @@ class GemmTuner:
         soldf = pd.DataFrame()
         for i in range(len(df)):
             ds = df.iloc[i]
-            gemmobj = Gemm(ds['M'],ds['N'],ds['K'],dtype=self.dtype, rocblas_decode=self.rocblas_decode)
+            gemmobj = Gemm(ds['M'],ds['N'],ds['K'],dtype=self.dtype, rocblas_tune=self.rocblas_tune)
             gemmobj.find_fastest_solution()
             soldf.loc[i,'libtype'] = gemmobj.best_libtype
             soldf.loc[i,'solidx'] = gemmobj.best_solidx

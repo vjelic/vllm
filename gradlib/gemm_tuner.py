@@ -57,14 +57,14 @@ if __name__ == '__main__':
     parser.add_argument("--input_file", type=str, default=os.getenv('GTUNE_INPUT', "input.csv"), help="list of gemms to tune for, mutually exclusive with model_dir")
     parser.add_argument("--tp", type=int, default=os.getenv('GTUNE_TP', 1), help="Tensor parallelism to be used.")
     parser.add_argument("--dtype", type=str, default='f16', help="dtype f32 f16 bf16")
-    parser.add_argument("--rocblas-decode", action="store_true", default=False, help="forces rocblas solution on decode N=1")
+    parser.add_argument("--rocblas-tune", action="store_true", default=False, help="Allow rocblas solutions")
     parser.add_argument("--batch_size", type=int, default=os.getenv('GTUNE_BATCH_SIZE', 1), help="Batch size to tune for")
     parser.add_argument("--nsets", type=list_of_ints, default=[1, 512, 1024, 2048, 3072, 4096, 8192, 16384], help="N sizes to tune for: 1,128,2048")
     args = parser.parse_args()
 
     dtype = get_dtype(args.dtype)
 
-    gtuner = GemmTuner(dtype, args.tuned_file, args.rocblas_decode)
+    gtuner = GemmTuner(dtype, args.tuned_file, args.rocblas_tune)
     nsets = [i * args.batch_size for i in args.nsets]
     if args.input_file:
         print(f">>> Loading {args.input_file}")
