@@ -67,7 +67,7 @@ def _use_flash_attn() -> int:
     Returns:
         int: 0 for none, 1 for default implementation, 2 for triton implementation.
     """
-    use_flash_attn_triton = os.environ.get('VLLM_USE_FLASH_ATTN_TRITON', "False").lower() in ("true", "1")
+    use_flash_attn_triton = os.environ.get('VLLM_USE_FLASH_ATTN_TRITON', "True").lower() in ("true", "1")
     if not ( use_flash_attn_triton and is_hip()):
         # AMD GPUs can use flash_attn package or triton impl.
         try:
