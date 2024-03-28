@@ -2,7 +2,7 @@
 
 """
 This is a script that produces a realistic PPL measurement 
-for the quantized KV cache system by processinga sequence of 
+for the quantized KV cache system by processing a sequence of 
 non-overlapping patches of the reference text.Generation of the 
 consequtive symbols in each patch is governed (forced)
 by the reference text.
