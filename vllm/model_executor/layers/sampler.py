@@ -14,8 +14,6 @@ from vllm.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                            SequenceOutput)
 from vllm.utils import is_neuron
 
-import pdb
-
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
 
@@ -267,7 +265,6 @@ def _forced_sample(
     selected_seq_groups: List[Tuple[List[int], SamplingParams]],
     samples: torch.Tensor,
 ) -> List[Tuple[List[int], List[int]]]:
-    pdb.set_trace()
     samples = samples.tolist()
     sample_idx = 0
     results = []
@@ -412,7 +409,6 @@ def _sample(
 
     # Counterintiutively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
-    #pdb.set_trace()
     for sampling_type in SamplingType:
         sample_indices = categorized_sample_indices[sampling_type]
         num_tokens = len(sample_indices)
@@ -424,12 +420,7 @@ def _sample(
         sample_metadata[sampling_type] = (seq_group_ids, seq_groups,
                                           is_prompts, sample_indices)
         if sampling_type == SamplingType.FORCED:
-            #forced_samples = torch.argmax(logprobs[sample_indices.long()],
-            #                              dim=-1)
-            #pdb.set_trace()
-            #forced_samples = torch.rand(logprobs[sample_indices.long()].size(0),
-            #                              device='cuda:0')
-            forced_samples = torch.tensor([seq_groups[0][1].future_context[0][0]],device='cuda:0')
+            forced_samples = torch.tensor([seq_groups[0][1].future_context[0][len(sampling_metadata.seq_data[seq_groups[0][0][0]].output_token_ids)]],device='cuda:0') #
         elif sampling_type == SamplingType.GREEDY:
             greedy_samples = torch.argmax(logprobs[sample_indices.long()],
                                           dim=-1)
@@ -451,7 +442,6 @@ def _sample(
             raise ValueError(f"Unsupported sampling type: {sampling_type}")
 
     # GPU<->CPU sync happens in the loop below.
-    pdb.set_trace()
     for sampling_type in SamplingType:
         if sampling_type not in sample_metadata:
             continue
