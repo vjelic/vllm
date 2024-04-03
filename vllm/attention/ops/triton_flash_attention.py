@@ -349,6 +349,8 @@ def attn_fwd(
     stride_bh,
     stride_bm,
     stride_bn,
+    stride_az, 
+    stride_ah,
     cu_seqlens_q,
     cu_seqlens_k,
     dropout_p,
