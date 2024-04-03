@@ -72,6 +72,13 @@ def load_fn(block_ptr, first, second, pad):
         tensor = tl.load(block_ptr)
     return tensor
 
+@triton.jit
+def need_alibi(self, alibi_slopes, batch, nheads):
+        assert alibi_slopes.is_cuda
+        assert alibi_slopes.dim() == 2
+        assert alibi_slopes.shape[0] == batch
+        assert alibi_slopes.shape[1] == nheads
+        self.alibi_slopes = alibi_slopes
 
 @triton.jit
 def _attn_fwd_inner(
@@ -83,6 +90,7 @@ def _attn_fwd_inner(
     V_block_ptr,
     start_m,
     actual_seqlen_k,
+    actual_seqlen_q,
     dropout_p,
     philox_seed,
     batch_philox_offset,
@@ -93,6 +101,7 @@ def _attn_fwd_inner(
     masked_blocks,
     n_extra_tokens,
     bias_ptr,
+    alibi_slopes_ptr,
     IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -152,6 +161,22 @@ def _attn_fwd_inner(
             # optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += bias * 1.44269504089
+        if alibi_slopes_ptr is not None:
+            alibi_slopes_block = load_fn(alibi_slopes_ptr, False, MASK_STEPS and (n_extra_tokens != 0), "zero")
+            # Compute the global position of each token within the sequence
+            global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
+            global_n_positions = start_n + tl.arange(0, BLOCK_N)
+
+            # Compute the relative position using the global positions
+            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
+            relative_pos_block = tl.abs(relative_pos_block)
+
+
+            alibi_block = -1 * alibi_slopes_block  * relative_pos_block
+
+            qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
+        
+        # softmax    
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
@@ -332,6 +357,7 @@ def attn_fwd(
     encoded_softmax,
     hq,
     hk,
+    alibi_slopes,
     ACTUAL_BLOCK_DMODEL: tl.constexpr,
     MAX_SEQLENS_Q: tl.constexpr,
     MAX_SEQLENS_K: tl.constexpr,
@@ -344,6 +370,8 @@ def attn_fwd(
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
+    USE_ALIBI: tl.constexpr,
+    BATCH_SIZE: tl.constexpr
 ):
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
@@ -465,6 +493,19 @@ def attn_fwd(
         )
     else:
         bias_ptr = None
+
+    if USE_ALIBI != 0:
+        alibi_slopes_ptr = tl.make_block_ptr(
+            base=alibi_slopes,  # The base pointer to the parent tensor
+            shape=(BATCH_SIZE, hq),  # The shape of the parent tensor
+            strides=(stride_az, stride_ah), #  The strides of the parent tensor
+            offsets=(off_z, off_h_q), # The offsets to the block
+            block_shape=(1, 1), # The shape of the block
+            order=(0, 1), # The order of the original data format
+        )
+    else:
+        alibi_slopes_ptr = None
+            
     if ENABLE_DROPOUT:
         batch_philox_offset = philox_offset_base \
                               + (off_z * hq + off_h_q) \
@@ -526,6 +567,7 @@ def attn_fwd(
             V_block_ptr,
             start_m,
             seqlen_k,
+            seqlen_q,
             dropout_p,
             philox_seed,
             batch_philox_offset,
@@ -537,6 +579,7 @@ def attn_fwd(
             0,
             0,
             bias_ptr,
+            alibi_slopes_ptr,
             # IS_CAUSAL, ....
             False,
             BLOCK_M,
@@ -574,6 +617,7 @@ def attn_fwd(
             V_block_ptr,
             start_m,
             seqlen_k,
+            seqlen_q,
             dropout_p,
             philox_seed,
             batch_philox_offset,
@@ -584,6 +628,7 @@ def attn_fwd(
             masked_blocks,
             n_extra_tokens,
             bias_ptr,
+            alibi_slopes_ptr,
             IS_CAUSAL,
             BLOCK_M,
             BLOCK_DMODEL,
@@ -761,7 +806,12 @@ class _attention(torch.autograd.Function):
             )
         else:
             bias_strides = (0, 0, 0, 0)
-
+       
+        if metadata.alibi_slopes is not None:
+            alibi_strides = (metadata.alibi_slopes.stride(0), metadata.alibi_slopes.stride(1))
+        else:
+            alibi_strides = (0, 0)
+            
         attn_fwd[grid](
             q,
             k,
@@ -775,6 +825,7 @@ class _attention(torch.autograd.Function):
             *v_strides,
             *o_strides,
             *bias_strides,
+            *alibi_strides,
             cu_seqlens_q,
             cu_seqlens_k,
             dropout_p=0.0,
@@ -783,6 +834,7 @@ class _attention(torch.autograd.Function):
             encoded_softmax=encoded_softmax,
             hq=nheads_q,
             hk=nheads_k,
+            alibi_slopes = metadata.alibi_slopes,
             ACTUAL_BLOCK_DMODEL=head_size,
             MAX_SEQLENS_Q=max_seqlens_q,
             MAX_SEQLENS_K=max_seqlens_k,
@@ -790,8 +842,10 @@ class _attention(torch.autograd.Function):
             VARLEN=True,
             BLOCK_DMODEL=padded_d_model,
             BIAS_TYPE=0 if bias is None else 1,
+            USE_ALIBI=0 if metadata.alibi_slopes is None else 1,
             ENABLE_DROPOUT=False,
             RETURN_ENCODED_SOFTMAX=False,
+            BATCH_SIZE= q.shape[0]
         )
 
         ctx.grid = grid
@@ -807,3 +861,4 @@ class _attention(torch.autograd.Function):
 
 
 triton_attention = _attention.apply
+
