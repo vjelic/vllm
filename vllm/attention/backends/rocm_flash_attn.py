@@ -238,6 +238,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                         attn_metadata.max_prompt_len,
                         True,
                         self.scale,
+                        self.alibi_slopes,
                     )
                 else:
                     output = self.fa_func(
