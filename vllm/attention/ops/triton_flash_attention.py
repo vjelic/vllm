@@ -25,7 +25,7 @@ import triton
 import triton.language as tl
 
 torch_dtype: tl.constexpr = torch.float16
-
+alibi_slopes = None
 
 @triton.jit
 def cdiv_fn(x, y):
@@ -73,12 +73,12 @@ def load_fn(block_ptr, first, second, pad):
     return tensor
 
 @triton.jit
-def need_alibi(self, alibi_slopes, batch, nheads):
-        assert alibi_slopes.is_cuda
-        assert alibi_slopes.dim() == 2
-        assert alibi_slopes.shape[0] == batch
-        assert alibi_slopes.shape[1] == nheads
-        self.alibi_slopes = alibi_slopes
+def need_alibi(Alibi_slopes, batch, nheads):
+        assert Alibi_slopes.is_cuda
+        assert Alibi_slopes.dim() == 2
+        assert Alibi_slopes.shape[0] == batch
+        assert Alibi_slopes.shape[1] == nheads
+        alibi_slopes = Alibi_slopes
 
 @triton.jit
 def _attn_fwd_inner(
@@ -809,8 +809,8 @@ class _attention(torch.autograd.Function):
         else:
             bias_strides = (0, 0, 0, 0)
        
-        if metadata.alibi_slopes is not None:
-            alibi_strides = (metadata.alibi_slopes.stride(0), metadata.alibi_slopes.stride(1))
+        if alibi_slopes is not None:
+            alibi_strides = (alibi_slopes.stride(0), alibi_slopes.stride(1))
         else:
             alibi_strides = (0, 0)
             
@@ -836,7 +836,7 @@ class _attention(torch.autograd.Function):
             encoded_softmax=encoded_softmax,
             hq=nheads_q,
             hk=nheads_k,
-            alibi_slopes = metadata.alibi_slopes,
+            alibi_slopes = alibi_slopes,
             ACTUAL_BLOCK_DMODEL=head_size,
             MAX_SEQLENS_Q=max_seqlens_q,
             MAX_SEQLENS_K=max_seqlens_k,
@@ -844,7 +844,7 @@ class _attention(torch.autograd.Function):
             VARLEN=True,
             BLOCK_DMODEL=padded_d_model,
             BIAS_TYPE=0 if bias is None else 1,
-            USE_ALIBI=0 if metadata.alibi_slopes is None else 1,
+            USE_ALIBI=0 if alibi_slopes is None else 1,
             ENABLE_DROPOUT=False,
             RETURN_ENCODED_SOFTMAX=False,
             BATCH_SIZE= q.shape[0]
