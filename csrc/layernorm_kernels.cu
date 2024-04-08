@@ -13,7 +13,7 @@
 
 //  using __nv_bfloat16 = __hip_bfloat16;
 //  using __nv_bfloat162 = __hip_bfloat162;
-#endif
+//#endif
 
 namespace vllm {
 
