@@ -11,8 +11,8 @@
   #include <hip/hip_bf16.h>
   #include <hip/hip_fp16.h>
 
-  using __nv_bfloat16 = __hip_bfloat16;
-  using __nv_bfloat162 = __hip_bfloat162;
+//  using __nv_bfloat16 = __hip_bfloat16;
+//  using __nv_bfloat162 = __hip_bfloat162;
 #endif
 
 namespace vllm {
@@ -71,20 +71,20 @@ struct _typeConvert<c10::Half> {
   __device__ static inline packed_hip_type convert(float2 x) { return __float22half2_rn(x); }
 };
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-// CUDA_ARCH < 800 does not have BF16 support
-template<>
-struct _typeConvert<c10::BFloat16> {
-  static constexpr bool exists = true;
-  using hip_type = __nv_bfloat16;
-  using packed_hip_type = __nv_bfloat162;
-
-  __device__ static inline float convert(hip_type x) { return __bfloat162float(x); }
-  __device__ static inline float2 convert(packed_hip_type x) { return __bfloat1622float2(x); }
-  __device__ static inline hip_type convert(float x) { return __float2bfloat16(x); }
-  __device__ static inline packed_hip_type convert(float2 x) { return __float22bfloat162_rn(x); }
-};
-#endif
+//#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+//// CUDA_ARCH < 800 does not have BF16 support
+//template<>
+//struct _typeConvert<c10::BFloat16> {
+//  static constexpr bool exists = true;
+//  using hip_type = __nv_bfloat16;
+//  using packed_hip_type = __nv_bfloat162;
+//
+//  __device__ static inline float convert(hip_type x) { return __bfloat162float(x); }
+//  __device__ static inline float2 convert(packed_hip_type x) { return __bfloat1622float2(x); }
+//  __device__ static inline hip_type convert(float x) { return __float2bfloat16(x); }
+//  __device__ static inline packed_hip_type convert(float2 x) { return __float22bfloat162_rn(x); }
+//};
+//#endif
 
 
 /* Converter POD struct to generate vectorized and packed FP16/BF16 ops
