@@ -9,6 +9,8 @@ from vllm.utils import is_hip
 
 logger = init_logger(__name__)
 
+# seungrok, temporary fix for radeon
+IS_RADEON = True
 
 @lru_cache(maxsize=None)
 def get_attn_backend(dtype: torch.dtype) -> AttentionBackend:
@@ -41,29 +43,31 @@ def _which_attn_to_use(dtype: torch.dtype) -> str:
     use_flash_attn_triton = (os.environ.get("VLLM_USE_FLASH_ATTN_TRITON",
                                             "True").lower()
                              in ("true", "1")) and is_hip()
-
-    if not is_hip() and torch.cuda.get_device_capability()[0] < 8:
-        # Volta and Turing NVIDIA GPUs.
-        logger.info("Cannot use FlashAttention backend for Volta and Turing "
-                    "GPUs.")
-        return "XFormers"
-
-    if is_hip() and torch.cuda.get_device_capability()[0] != 9:
-        # not Instinct series GPUs.
-        logger.info("flash_atten is not supported on NAVI GPUs. "
-                    "Using xformers backend.")
-        return "XFormers"
-
-    if dtype not in (torch.float16, torch.bfloat16):
-        logger.info("Cannot use FlashAttention backend for dtype other than "
-                    "torch.float16 or torch.bfloat16.")
-        return "XFormers"
-
-    if not use_flash_attn_triton:
-        # Only test for flash_attn if we are using it.
-        try:
-            import flash_attn  # noqa: F401
-        except ImportError:
+    if IS_RADEON: 
+        pass
+    else:
+        if not is_hip() and torch.cuda.get_device_capability()[0] < 8:
+            # Volta and Turing NVIDIA GPUs.
+            logger.info("Cannot use FlashAttention backend for Volta and Turing "
+                        "GPUs.")
             return "XFormers"
+
+        if is_hip() and torch.cuda.get_device_capability()[0] != 9:
+            # not Instinct series GPUs.
+            logger.info("flash_atten is not supported on NAVI GPUs. "
+                        "Using xformers backend.")
+            return "XFormers"
+
+        if dtype not in (torch.float16, torch.bfloat16):
+            logger.info("Cannot use FlashAttention backend for dtype other than "
+                        "torch.float16 or torch.bfloat16.")
+            return "XFormers"
+
+        if not use_flash_attn_triton:
+            # Only test for flash_attn if we are using it.
+            try:
+                import flash_attn  # noqa: F401
+            except ImportError:
+                return "XFormers"
 
     return "FlashAttentionTriton" if use_flash_attn_triton else "FlashAttention"
