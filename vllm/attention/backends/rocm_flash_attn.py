@@ -155,7 +155,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             # AMD Radeon 7900 series (gfx1100) currently does not support
             # xFormers nor FlashAttention. As a temporary workaround, we use
             # naive PyTorch implementation of attention.
-            self.attn_fuc = _naive_attention()
+            #self.attn_fuc = _naive_attention()
+            self.attn_fuc = _naive_attention
             logger.debug("Using naive attention in ROCmBackend")
         elif self.use_triton_flash_attn:
             from vllm.attention.ops.triton_flash_attention import (  # noqa: F401
@@ -235,6 +236,9 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                             key,
                             value,
                             attn_metadata.prompt_lens,
+                            self.num_heads,
+                            self.num_kv_heads,
+                            self.head_size,
                             self.scale,
                         )
                     else:
@@ -303,17 +307,28 @@ def _naive_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     prompt_lens: List[int],
+    num_heads: int,
+    num_kv_heads: int,
+    head_size: int,
     scale: float,
 ) -> torch.Tensor:
+    query = query.reshape(-1, num_heads, head_size)
+    #key = key.view(-1, num_kv_heads, head_size)
+    #value = value.view(-1, num_kv_heads, head_size)
+    key = key.reshape(-1, num_heads, head_size)
+    value = value.reshape(-1, num_heads, head_size)
     num_tokens = query.shape[0]
     output = torch.empty_like(query)
     start = 0
     for _, prompt_len in enumerate(prompt_lens):
         end = start + prompt_len
         out = _naive_masked_attention(
-            query[None, start:end],
-            key[None, start:end],
-            value[None, start:end],
+            #query[None, start:end],
+            #key[None, start:end],
+            #value[None, start:end],
+            query[start:end],
+            key[start:end],
+            value[start:end],
             scale,
         )
         # TODO(woosuk): Unnecessary copy. Optimize.
@@ -333,6 +348,7 @@ def _naive_masked_attention(
     value: torch.Tensor,
     scale: float,
 ) -> torch.Tensor:
+
     seq_len, _, _ = query.shape
     attn_mask = torch.triu(torch.ones(seq_len,
                                       seq_len,
