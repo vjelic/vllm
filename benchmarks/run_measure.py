@@ -1,0 +1,1 @@
+torchrun --standalone --nnodes=1 --nproc-per-node=8 benchmark_latency.py --model TheBloke/Llama-2-70B-Chat-fp16 -tp 8 --input-len 128 --output-len 1 --batch-size 1 --num-iters-warmup 3 --num-iters 10 --trust-remote-code --dtype half
