@@ -148,6 +148,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
         #self.use_naive_attn = torch.cuda.get_device_capability()[0] != 9
+        self.use_naive_attn = 0
         # NOTE: Allow for switching between Triton and CK. Defaulting to triton.
         self.use_triton_flash_attn = (os.environ.get(
             "VLLM_USE_TRITON_FLASH_ATTN", "True").lower() in ("true", "1"))
