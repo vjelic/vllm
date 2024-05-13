@@ -1,0 +1,39 @@
+# default base image
+ARG BASE_IMAGE=rocm/pytorch:rocm6.1_ubuntu22.04_py3.10_pytorch_2.1.2
+FROM $BASE_IMAGE
+USER root
+
+RUN echo "Base image is $BASE_IMAGE"
+
+WORKDIR "/workplace"
+
+ENV PYTORCH_ROCM_ARCH="gfx90a;gfx942"
+ENV VLLM_USE_FLASH_ATTN_TRITON=1
+# azure_vm striction, turn-on when available
+ENV HIP_FORCE_DEV_KERNARG=0 
+
+# torch
+RUN pip install --upgrade pip
+
+# triton
+RUN pip uninstall pytorch-triton-rocm triton -y
+RUN git clone https://github.com/ROCm/triton.git -b triton-mlir &&\
+    cd triton/python &&\
+    python setup.py install
+
+# vllm
+RUN git clone https://github.com/ROCm/vllm.git -b main &&\
+    cd vllm &&\
+    pip install -U -r requirements-rocm.txt &&\
+    python3 setup.py clean --all && python3 setup.py install 
+
+# gradlib
+RUN cd vllm/gradlib \
+    && pip install .
+
+RUN pip install pandas
+RUN pip uninstall filelock -y
+RUN pip install filelock==3.13.3
+
+# record configuration for posterity
+RUN pip list
