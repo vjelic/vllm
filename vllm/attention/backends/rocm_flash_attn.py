@@ -224,32 +224,31 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 # triton attention
                 # When block_tables are not filled, it means q and k are the
                 # prompt, and they have the same length.
-                if self.use_naive_attn or self.use_triton_flash_attn:
+                if self.use_triton_flash_attn:
+                    output, _ = self.attn_func(
+                        query,
+                        key,
+                        value,
+                        None,
+                        attn_metadata.seq_start_loc,
+                        attn_metadata.seq_start_loc,
+                        attn_metadata.max_prompt_len,
+                        attn_metadata.max_prompt_len,
+                        True,
+                        self.scale,
+                    )
+                elif self.use_naive_attn:
                     if self.num_kv_heads != self.num_heads:
                         # Interleave for MQA workaround.
                         key = self.repeat_kv(key, self.num_queries_per_kv)
                         value = self.repeat_kv(value, self.num_queries_per_kv)
-                    if self.use_naive_attn:
-                        output = self.attn_fuc(
-                            query,
-                            key,
-                            value,
-                            attn_metadata.prompt_lens,
-                            self.scale,
-                        )
-                    else:
-                        output, _ = self.attn_func(
-                            query,
-                            key,
-                            value,
-                            None,
-                            attn_metadata.seq_start_loc,
-                            attn_metadata.seq_start_loc,
-                            attn_metadata.max_prompt_len,
-                            attn_metadata.max_prompt_len,
-                            True,
-                            self.scale,
-                        )
+                    output = self.attn_fuc(
+                        query,
+                        key,
+                        value,
+                        attn_metadata.prompt_lens,
+                        self.scale,
+                    )
                 else:
                     output = self.attn_func(
                         q=query,
