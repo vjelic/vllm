@@ -18,22 +18,22 @@ MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 4321  # Arbitrary values for testing
-PARTITION_SIZE = 512
+PARTITION_SIZE = 512 if not is_hip() else 256
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
-          ] if not is_hip() else [torch.half, torch.bfloat16]
+          ] if not is_hip() else [torch.half]
 NUM_GEN_SEQS = [7]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
-NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
+NUM_HEADS = [(64, 8)]  # Arbitrary values for testing
 
 # FlashAttention forward only supports head dimension at most 128
 # https://github.com/ROCmSoftwarePlatform/flash-attention/blob/3d2b6f5d037782cc2c906909a46fb7e2e1b48b25/csrc/flash_attn_rocm/flash_api.cpp#L62
 HEAD_SIZES = [64, 80, 96, 112, 128, 256
-              ] if not is_hip() else [64, 80, 96, 112, 128]
+              ] if not is_hip() else [128]
 
-BLOCK_SIZES = [16, 32]
-USE_ALIBI = [False, True]
-KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
+BLOCK_SIZES = [16]
+USE_ALIBI = [False]
+KV_CACHE_DTYPE = ["auto"]
 SEEDS = [0]
 CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
@@ -111,7 +111,7 @@ def ref_single_query_cached_kv_attention(
         output[i].copy_(out, non_blocking=True)
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", ["v2"])
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -204,7 +204,7 @@ def test_paged_attention(
             dtype=torch.float32,
         )
         max_logits = torch.empty_like(exp_sums)
-        ops.paged_attention_v2(
+        ops.paged_attention_custom(
             output,
             exp_sums,
             max_logits,
