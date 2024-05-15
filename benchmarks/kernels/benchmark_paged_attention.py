@@ -9,7 +9,9 @@ from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, create_kv_caches_with_random
 from vllm._C import ops
 
 NUM_BLOCKS = 1024
-PARTITION_SIZE = 512
+#PARTITION_SIZE = 512
+PARTITION_SIZE = 256
+#PARTITION_SIZE = 1024
 
 
 @torch.inference_mode()
@@ -114,22 +116,41 @@ def main(
                     kv_cache_dtype,
                 )
             elif version == "v2":
-                ops.paged_attention_v2(
-                    output,
-                    exp_sums,
-                    max_logits,
-                    tmp_output,
-                    query,
-                    key_cache,
-                    value_cache,
-                    num_kv_heads,
-                    scale,
-                    block_tables,
-                    context_lens,
-                    block_size,
-                    max_context_len,
-                    alibi_slopes,
-                    kv_cache_dtype,
+                if args.custom_paged_attn:
+                    ops.paged_attention_custom(
+                        output,
+                        exp_sums,
+                        max_logits,
+                        tmp_output,
+                        query,
+                        key_cache,
+                        value_cache,
+                        num_kv_heads,
+                        scale,
+                        block_tables,
+                        context_lens,
+                        block_size,
+                        max_context_len,
+                        alibi_slopes,
+                        kv_cache_dtype,
+                    )
+                else:
+                    ops.paged_attention_v2(
+                        output,
+                        exp_sums,
+                        max_logits,
+                        tmp_output,
+                        query,
+                        key_cache,
+                        value_cache,
+                        num_kv_heads,
+                        scale,
+                        block_tables,
+                        context_lens,
+                        block_size,
+                        max_context_len,
+                        alibi_slopes,
+                        kv_cache_dtype,
                 )
             else:
                 raise ValueError(f"Invalid version: {version}")
@@ -183,6 +204,7 @@ if __name__ == '__main__':
         default="auto",
         help=
         'Data type for kv cache storage. If "auto", will use model data type.')
+    parser.add_argument("--custom-paged-attn", action="store_true", help="Use attention custom ll4mi")
     parser.add_argument("--device", type=str, choices=["cuda"], default="cuda")
     args = parser.parse_args()
     print(args)
