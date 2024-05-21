@@ -9,7 +9,8 @@ from vllm._C import ops
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, create_kv_caches_with_random
 
 NUM_BLOCKS = 1024
-PARTITION_SIZE = 512
+#PARTITION_SIZE = 512
+PARTITION_SIZE = 256
 
 
 @torch.inference_mode()
@@ -118,24 +119,43 @@ def main(
                     kv_scale,
                 )
             elif version == "v2":
-                ops.paged_attention_v2(
-                    output,
-                    exp_sums,
-                    max_logits,
-                    tmp_output,
-                    query,
-                    key_cache,
-                    value_cache,
-                    num_kv_heads,
-                    scale,
-                    block_tables,
-                    context_lens,
-                    block_size,
-                    max_context_len,
-                    alibi_slopes,
-                    kv_cache_dtype,
-                    kv_scale,
-                )
+                if not args.custom_paged_attn:
+                    ops.paged_attention_v2(
+                        output,
+                        exp_sums,
+                        max_logits,
+                        tmp_output,
+                        query,
+                        key_cache,
+                        value_cache,
+                        num_kv_heads,
+                        scale,
+                        block_tables,
+                        context_lens,
+                        block_size,
+                        max_context_len,
+                        alibi_slopes,
+                        kv_cache_dtype,
+                        kv_scale,
+                    )
+                else:
+                    ops.paged_attention_custom(
+                        output,
+                        exp_sums,
+                        max_logits,
+                        tmp_output,
+                        query,
+                        key_cache,
+                        value_cache,
+                        num_kv_heads,
+                        scale,
+                        block_tables,
+                        context_lens,
+                        block_size,
+                        max_context_len,
+                        alibi_slopes,
+                        kv_cache_dtype,
+                    )
             else:
                 raise ValueError(f"Invalid version: {version}")
         torch.cuda.synchronize()
@@ -181,6 +201,7 @@ if __name__ == '__main__':
                         default="half")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--custom-paged-attn", action="store_true", help="Use custom paged attention")
     parser.add_argument(
         "--kv-cache-dtype",
         type=str,

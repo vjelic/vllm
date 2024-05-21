@@ -16,6 +16,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "paged_attention_v2",
     &paged_attention_v2,
     "PagedAttention V2.");
+  ops.def(
+    "paged_attention_custom",
+    &paged_attention_custom,
+    "PagedAttention LL4Mi Custom.");
+
 
   // Activation ops
   ops.def(
