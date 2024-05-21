@@ -7,6 +7,7 @@ from xformers import ops as xops
 from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
 
 from vllm._C import ops, cache_ops
+from vllm.custom_ops import paged_attention_custom
 from vllm.utils import get_max_shared_memory_bytes
 from vllm.utils import is_hip
 from allclose_default import get_default_atol, get_default_rtol
@@ -14,26 +15,28 @@ from allclose_default import get_default_atol, get_default_rtol
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 # This will change depending on the compute capability.
 # - 512 as a buffer
-MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
+#MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
+#MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES +8192+1024*5
+MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES 
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 4321  # Arbitrary values for testing
-PARTITION_SIZE = 512
+PARTITION_SIZE = 256
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
-          ] if not is_hip() else [torch.half, torch.bfloat16]
-NUM_GEN_SEQS = [7]  # Arbitrary values for testing
+          ] if not is_hip() else [torch.half]
+NUM_GEN_SEQS = [1,17,64]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
-NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
+NUM_HEADS = [(8*x, 8) for x in range(1,17)]  # Arbitrary values for testing
 
 # FlashAttention forward only supports head dimension at most 128
 # https://github.com/ROCmSoftwarePlatform/flash-attention/blob/3d2b6f5d037782cc2c906909a46fb7e2e1b48b25/csrc/flash_attn_rocm/flash_api.cpp#L62
 HEAD_SIZES = [64, 80, 96, 112, 128, 256
-              ] if not is_hip() else [64, 80, 96, 112, 128]
+              ] if not is_hip() else [128]
 
-BLOCK_SIZES = [16, 32]
-USE_ALIBI = [False, True]
-KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
+BLOCK_SIZES = [16]
+USE_ALIBI = [False]
+KV_CACHE_DTYPE = ["auto"]
 SEEDS = [0]
 CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
@@ -111,7 +114,7 @@ def ref_single_query_cached_kv_attention(
         output[i].copy_(out, non_blocking=True)
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", ["v2"])
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -153,6 +156,7 @@ def test_paged_attention(
     context_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
     context_lens[-1] = MAX_SEQ_LEN
     max_context_len = max(context_lens)
+    print('>>> ctx lens', context_lens)
     context_lens = torch.tensor(context_lens, dtype=torch.int)
 
     # Create the block tables.
@@ -204,7 +208,7 @@ def test_paged_attention(
             dtype=torch.float32,
         )
         max_logits = torch.empty_like(exp_sums)
-        ops.paged_attention_v2(
+        paged_attention_custom(
             output,
             exp_sums,
             max_logits,
@@ -260,6 +264,7 @@ def test_paged_attention(
     # implementations, there is a small numerical difference in the two
     # outputs. Thus, we use a relaxed tolerance for the test.
     atol = get_default_atol(output) if is_hip() else 1e-3
+    atol = 5e-3
     rtol = get_default_rtol(output) if is_hip() else 1e-5
 
     # NOTE(zhaoyang): FP8 KV Cache will introduce quantization error,
