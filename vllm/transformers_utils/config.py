@@ -39,6 +39,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "internvl_chat": InternVLChatConfig,
     "nemotron": NemotronConfig,
     "ultravox": UltravoxConfig,
+    "grok-1": Grok1Config,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():
