@@ -7,9 +7,11 @@ import torch
 
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, create_kv_caches_with_random
 from vllm._C import ops
+from vllm.custom_ops import paged_attention_custom
 
 NUM_BLOCKS = 1024
-PARTITION_SIZE = 512
+#PARTITION_SIZE = 512
+PARTITION_SIZE = 256
 
 
 @torch.inference_mode()
@@ -114,7 +116,8 @@ def main(
                     kv_cache_dtype,
                 )
             elif version == "v2":
-                ops.paged_attention_v2(
+                #ops.paged_attention_v2(
+                paged_attention_custom(
                     output,
                     exp_sums,
                     max_logits,

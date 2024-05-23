@@ -375,7 +375,8 @@ custom_extension = CUDAExtension(
     name="vllm.custom_ops",
     sources=[
         "csrc/custom/custom.cpp", "csrc/custom/custom_kernels.cu",
-        "csrc/custom/fused_kernels.cu"
+        "csrc/custom/fused_kernels.cu",
+        "csrc/custom/paged_attention/attention_ll4mi.cu"
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
