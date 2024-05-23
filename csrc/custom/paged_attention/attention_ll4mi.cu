@@ -374,14 +374,18 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
             warp_qk_max[w] = shared_qk_max[w][head_idx];
             global_qk_max = fmaxf(global_qk_max,warp_qk_max[w]); 
         }
-        max_logits_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_qk_max;
+        if (head_idx < GQA_RATIO) {
+          max_logits_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_qk_max;
+        }
         //global_exp_scale[h] = __expf(qk_max[h] - global_qk_max);
         float global_exp_sum = 0.0f;
         #pragma unroll
         for (int w=0; w<NWARPS; w++) {
             global_exp_sum += shared_exp_sum[w][head_idx] * __expf(warp_qk_max[w] - global_qk_max);
         }
-        exp_sums_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_exp_sum;
+        if (head_idx < GQA_RATIO) {
+          exp_sums_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_exp_sum;
+        }
         //global_inv_sum[h] = 1.0f/global_exp_sum;
         const float global_inv_sum_scale = __fdividef(1.f, global_exp_sum + 1e-6f) * __expf(qk_max[h] - global_qk_max);
         dout[h] *= global_inv_sum_scale;
