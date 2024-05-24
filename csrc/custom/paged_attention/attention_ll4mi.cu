@@ -325,12 +325,13 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         }
 
         const int lane4_token_idx = 4*(global_token_idx>>2);
+        const int alibi_offset = lane4_token_idx - context_len + 1;
         if (alibi_slopes != nullptr) {
           #pragma unroll
           for (int h=0;h<QHLOOP;h++) {
               #pragma unroll
               for(int i=0; i<4; i++) {
-                  dout[h][i] += alibi_slope[h] * (lane4_token_idx+i - context_len + 1);
+                  dout[h][i] += alibi_slope[h] * (alibi_offset + i);
               }
           }
         }
@@ -770,6 +771,7 @@ void paged_attention_custom_launcher(
   //assert(gqa_ratio>=4);
   //assert(gqa_ratio%4==0);
   assert(num_heads%num_kv_heads==0);
+  assert(head_size==HEAD_SIZE);
   dim3 grid(num_seqs,max_num_partitions,num_kv_heads);
   dim3 block(NTHR);
   const at::cuda::OptionalCUDAGuard device_guard(device_of(query));
@@ -858,6 +860,7 @@ void paged_attention_custom(
 #endif
   const c10::optional<torch::Tensor>& alibi_slopes,
   const std::string& kv_cache_dtype) {
+  assert(block_size==16);
   if (query.dtype() == at::ScalarType::Half) {
     //CALL_V2_LAUNCHER_BLOCK_SIZE(__half);
     CALL_CUSTOM_LAUNCHER(_Float16);
