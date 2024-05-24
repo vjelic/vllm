@@ -236,6 +236,15 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
        Klocal[d] = k_ptrh8[d*BLOCK_SIZE + physical_block_offset];
       }
 
+      float alibi_slope[QHLOOP];
+      if (alibi_slopes != nullptr) {
+        #pragma unroll
+        for (int h=0; h<QHLOOP; h++) {
+            const int qhead_idx = h*4 + lane4id; 
+            alibi_slope[h] = (qhead_idx < GQA_RATIO) ? alibi_slopes[wg_start_head_idx + qhead_idx] : 0.f; 
+        }
+      }
+
 #if 1
 
       const scalar_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
@@ -316,6 +325,15 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         }
 
         const int lane4_token_idx = 4*(global_token_idx>>2);
+        if (alibi_slopes != nullptr) {
+          #pragma unroll
+          for (int h=0;h<QHLOOP;h++) {
+              #pragma unroll
+              for(int i=0; i<4; i++) {
+                  dout[h][i] += alibi_slope[h] * (lane4_token_idx+i - context_len + 1);
+              }
+          }
+        }
 
         #pragma unroll
         for (int h=0;h<QHLOOP;h++) {
@@ -374,9 +392,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
             warp_qk_max[w] = shared_qk_max[w][head_idx];
             global_qk_max = fmaxf(global_qk_max,warp_qk_max[w]); 
         }
-        if (head_idx < GQA_RATIO) {
-          max_logits_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_qk_max;
-        }
         //global_exp_scale[h] = __expf(qk_max[h] - global_qk_max);
         float global_exp_sum = 0.0f;
         #pragma unroll
@@ -384,6 +399,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
             global_exp_sum += shared_exp_sum[w][head_idx] * __expf(warp_qk_max[w] - global_qk_max);
         }
         if (head_idx < GQA_RATIO) {
+          max_logits_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_qk_max;
           exp_sums_ptr[(wg_start_head_idx + head_idx) * max_num_partitions] = global_exp_sum;
         }
         //global_inv_sum[h] = 1.0f/global_exp_sum;
