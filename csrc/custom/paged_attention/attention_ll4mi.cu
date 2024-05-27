@@ -706,7 +706,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     kv_block_stride,                                                                          \
     kv_head_stride, exp_sums_ptr, max_logits_ptr, tmp_out_ptr,out_ptr,max_ctx_blocks);                                                                         
 
-template<typename T, int BLOCK_SIZE=16, int HEAD_SIZE=128>
+template<typename T, int BLOCK_SIZE=16, int HEAD_SIZE=128, int PARTITION_SIZE=256>
 void paged_attention_custom_launcher(
   torch::Tensor& out,
   torch::Tensor& exp_sums,
@@ -774,7 +774,7 @@ void paged_attention_custom_launcher(
 
   //dim3 grid(num_seqs,BLOCK_RATIO_PER_WG*max_ctx_blocks);
   //dim3 block(num_heads*HEAD_SIZE*sizeof(T)/sizeof(float4));
-  constexpr int NTHR = 256;
+  constexpr int NTHR = PARTITION_SIZE;
   const int max_num_partitions = DIVIDE_ROUND_UP(max_context_len, NTHR);
   //constexpr int NPAR = 2;
   //constexpr int GQA_RATIO = 32;
@@ -811,18 +811,23 @@ void paged_attention_custom_launcher(
   //dim3 grid2(num_heads,num_seqs,head_size/HEAD_ELEMS_PER_WG);
   //dim3 block2(1024);
   // LAUNCH_CUSTOM_ATTENTION2;
-  //constexpr int PARSIZE = 256;
-  dim3 reduce_grid(num_heads, num_seqs);
-  dim3 reduce_block(head_size); //TODO: assumes max_partitions < head_SIZE
-  int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
-  paged_attention_ll4mi_reduce_kernel<T, HEAD_SIZE, HEAD_SIZE, NTHR>
-  <<<reduce_grid, reduce_block, reduce_shared_mem_size, stream>>>(                                   
-    out_ptr,                                                                                  
-    exp_sums_ptr,                                                                             
-    max_logits_ptr,                                                                           
-    tmp_out_ptr,                                                                              
-    context_lens_ptr,                                                                         
-    max_num_partitions);
+
+  //reduction kernel is only required if max_context_len > partition size, otherwise main kernel writes directly to final output
+  // note there are cases with graphing where max_context_len is the max supported by graphing, not the actual max among 
+  // all the sequences: in that case reduction kernel will still run but return immediately 
+  if (max_context_len > PARTITION_SIZE) {
+    dim3 reduce_grid(num_heads, num_seqs);
+    dim3 reduce_block(head_size); //TODO: assumes max_partitions < head_SIZE
+    int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
+    paged_attention_ll4mi_reduce_kernel<T, HEAD_SIZE, HEAD_SIZE, PARTITION_SIZE>
+    <<<reduce_grid, reduce_block, reduce_shared_mem_size, stream>>>(                                   
+      out_ptr,                                                                                  
+      exp_sums_ptr,                                                                             
+      max_logits_ptr,                                                                           
+      tmp_out_ptr,                                                                              
+      context_lens_ptr,                                                                         
+      max_num_partitions);
+  }
   //switch (head_size) {
   //  // NOTE(woosuk): To reduce the compilation time, we only compile for the
   //  // head sizes that we use in the model. However, we can easily extend this
