@@ -535,144 +535,120 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
   const scalar_t* __restrict__ tmp_out,   // [num_seqs, num_heads, max_num_partitions, head_size]
   const int* __restrict__ context_lens,   // [num_seqs]
   const int max_num_partitions) {
-  const int num_heads = gridDim.x;
-  const int head_idx = blockIdx.x;
-  const int seq_idx = blockIdx.y;
-  const int context_len = context_lens[seq_idx];
-  const int num_partitions = DIVIDE_ROUND_UP(context_len, PARTITION_SIZE);
-  if (num_partitions == 1) {
-    // No need to reduce. Only copy tmp_out to out.
-    //scalar_t* out_ptr = out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
-    //const scalar_t* tmp_out_ptr = tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE
-    //                                      + head_idx * max_num_partitions * HEAD_SIZE;
-    //for (int i = threadIdx.x; i < HEAD_SIZE; i += blockDim.x) {
-    //  out_ptr[i] = tmp_out_ptr[i];
-    //}
-    // Terminate the thread block.
-    //if num_partitions==1, main kernel will write to out directly, no work in reduction kernel
-    return;
-  }
+    const int num_heads = gridDim.x;
+    const int head_idx = blockIdx.x;
+    const int seq_idx = blockIdx.y;
+    const int context_len = context_lens[seq_idx];
+    const int num_partitions = DIVIDE_ROUND_UP(context_len, PARTITION_SIZE);
+    if (num_partitions == 1) {
+      //if num_partitions==1, main kernel will write to out directly, no work in reduction kernel
+      return;
+    }
 
-  constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
-  const int warp_idx = threadIdx.x / WARP_SIZE;
-  const int lane = threadIdx.x % WARP_SIZE;
+    constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
+    const int warpid = threadIdx.x / WARP_SIZE;
+    const int laneid = threadIdx.x % WARP_SIZE;
 
-  // Size: 2 * num_partitions.
-  extern __shared__ char shared_mem[];
-  // Workspace for reduction.
-  __shared__ float red_smem[2 * NUM_WARPS];
-  __shared__ float shared_global_exp_sum;
-  //float reg_max_logits[MAX_PARTITIONS]; //dependent on max_num_partitions: assume 32K max context div 1K Partition size -> TODO: make this proper template param
-  //Assume code below is optimized for MAX_PARTITIONS<=64 TODO: handle larger than warp size cases later
-  float* shared_max_logits = reinterpret_cast<float*>(shared_mem);
-  float* shared_exp_sums = reinterpret_cast<float*>(shared_mem + sizeof(float) * num_partitions);
-  //scalar_t tmp_outs[MAX_PARTITIONS];
+    __shared__ float shared_global_exp_sum;
+    __shared__ float shared_exp_sums[WARP_SIZE];
 
-  // Load max logits to shared memory.
-  const float* max_logits_ptr = max_logits + seq_idx * num_heads * max_num_partitions
-                                           + head_idx * max_num_partitions;
-  ////float max_logit = -FLT_MAX;
-  //for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
-  ////for (int i = threadIdx.x; i < MAX_PARTITIONS; i += blockDim.x) {
-    //const float l = max_logits_ptr[i];
-    //shared_max_logits[i] = l;
-    ////reg_max_logits[i] =  max_logits_ptr[i];  //TODO: review this -> right now num_partitions is very small <=32
-    //max_logit = fmaxf(max_logit, l);
-    ////max_logit = fmaxf(max_logit, reg_max_logits[i]);
-  ////}
-  //__syncthreads();
-  float max_logit = (threadIdx.x < num_partitions) ? max_logits_ptr[threadIdx.x]:-FLT_MAX;
-  float reg_max_logit =  max_logit;
+    if (warpid==0) {
 
-  // Get the global max logit.
-  // Reduce within the warp.
-#pragma unroll
-  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-    max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
-  }
-//  if (lane == 0) {
-//    red_smem[warp_idx] = max_logit;
-//  }
+    const float* max_logits_ptr = max_logits + seq_idx * num_heads * max_num_partitions
+                                             + head_idx * max_num_partitions;
 
-//  if (num_partitions >= WARP_SIZE) {
-//  __syncthreads();
-//  // Reduce across warps.
-//  max_logit = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
-//#pragma unroll
-//  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-//    max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
-//  }
-//  // Broadcast the max value to all threads.
-//  //max_logit = __shfl(max_logit, 0);
-//  }
-  // Load rescaled exp sums to shared memory.
-  const float* exp_sums_ptr = exp_sums + seq_idx * num_heads * max_num_partitions
-                                       + head_idx * max_num_partitions;
-  float global_exp_sum = 0.0f;
+    //valid partition is the last valid partition in case threadid > num partitions
+    const int valid_partition = (threadIdx.x < num_partitions) ? threadIdx.x : num_partitions-1;
+    float max_logit = max_logits_ptr[valid_partition];
+    float reg_max_logit =  max_logit;
 
-  //for (int i = threadIdx.x; i < num_partitions; i += blockDim.x) {
-  //  //float l = shared_max_logits[i];
-  //  //float l = reg_max_logits[i];
-  //  float rescaled_exp_sum = exp_sums_ptr[i] * expf(reg_max_logits[i] - max_logit);
-  //  global_exp_sum += rescaled_exp_sum;
-  //  shared_exp_sums[i] = rescaled_exp_sum;
-  //}
-  float rescaled_exp_sum = (threadIdx.x < num_partitions) ? exp_sums_ptr[threadIdx.x] * expf(reg_max_logit - max_logit) : 0.0f;
-  global_exp_sum += rescaled_exp_sum;
-  //if (threadIdx.x < num_partitions) {
-    //shared_exp_sums[threadIdx.x] = (threadIdx.x < num_partitions) ? rescaled_exp_sum : 0.0f;
+    #pragma unroll
+    for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+      max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
+    }
+
+    const float* exp_sums_ptr = exp_sums + seq_idx * num_heads * max_num_partitions
+                                         + head_idx * max_num_partitions;
+
+    float global_exp_sum = 0.0f;
+    float rescaled_exp_sum = exp_sums_ptr[valid_partition];
+    rescaled_exp_sum *= (threadIdx.x < num_partitions) ? expf(reg_max_logit - max_logit) : 0.0f;
+    global_exp_sum += rescaled_exp_sum;
     shared_exp_sums[threadIdx.x] = rescaled_exp_sum;
-  //}
 
-#pragma unroll
-  for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-    global_exp_sum += __shfl_xor(global_exp_sum, mask);
-  }
-  if (threadIdx.x==0) {
-    shared_global_exp_sum = global_exp_sum;
-  }
-  __syncthreads();
-
-  //global_exp_sum = block_sum<NUM_WARPS>(&red_smem[NUM_WARPS], global_exp_sum);
-  const float inv_global_exp_sum = __fdividef(1.0f, shared_global_exp_sum + 1e-6f);
-
-  // Aggregate tmp_out to out.
-  scalar_t* out_ptr = out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
+    #pragma unroll
+    for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+      global_exp_sum += __shfl_xor(global_exp_sum, mask);
+    }
+    if (threadIdx.x==0) {
+      shared_global_exp_sum = global_exp_sum;
+    }
+    }//warpid == 0
     const scalar_t* tmp_out_ptr = tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE
-                                        + head_idx * max_num_partitions * HEAD_SIZE;
-//#pragma unroll
-  //for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
-  //if (threadIdx.x < HEAD_SIZE) { //TODO: assume HEAD_SIZE < NUM_THREADS, revisit this assumption later
+                                        + head_idx * max_num_partitions * HEAD_SIZE + threadIdx.x;
     constexpr int MAX_NPAR = 64;
     scalar_t tmps[MAX_NPAR];
-    int lastj=0;
     #pragma unroll
     for (int j = 0; j < MAX_NPAR; j++) {
-        lastj = (j<num_partitions) ? j: lastj;
-        tmps[j] = tmp_out_ptr[lastj * HEAD_SIZE + threadIdx.x];
+        tmps[j] = 0.0f;
     }
+    const int last_partition_offset = (num_partitions-1)*HEAD_SIZE;
+    const int num_partition_offset = (num_partitions)*HEAD_SIZE;
+    int idx=0;
+    
+    constexpr int JCHUNK = 16;
 
-    //float tmpf[64];
-    //#pragma unroll
-    //for (int j = 0; j < 64; j++) {
-    //    const float mult = (j<num_partitions) ? 1.0f: 0.0f;
-    //    tmpf[j] = (float)tmps[j] * mult;
-    //}
+    #pragma unroll
+    for (int j = 0; j < JCHUNK*HEAD_SIZE; j+=HEAD_SIZE) {
+        //lastj is last valid partition
+        const int lastj_offset = (j<num_partition_offset) ? j : last_partition_offset;
+        tmps[idx] = tmp_out_ptr[lastj_offset];
+        idx++;
+    }
+    __syncthreads();
 
+    if (num_partitions > JCHUNK) {
+        #pragma unroll
+        for (int j = JCHUNK*HEAD_SIZE; j < 2*JCHUNK*HEAD_SIZE; j+=HEAD_SIZE) {
+            const int lastj_offset = (j<num_partition_offset) ? j : last_partition_offset;
+            tmps[idx] = tmp_out_ptr[lastj_offset];
+            idx++;
+        }
+
+        if (num_partitions > 2*JCHUNK) {
+            #pragma unroll
+            for (int j = 2*JCHUNK*HEAD_SIZE; j < MAX_NPAR*HEAD_SIZE; j+=HEAD_SIZE) {
+                const int lastj_offset = (j<num_partition_offset) ? j : last_partition_offset;
+                tmps[idx] = tmp_out_ptr[lastj_offset];
+                idx++;
+            }
+        }
+    } //num_partitions > JCHUNK
+
+    // Aggregate tmp_out to out.
     float acc = 0.0f;
-    //for (int j = 0; j < num_partitions; ++j) {
     #pragma unroll
-    for (int j = 0; j < MAX_NPAR; j++) {
-      //acc += to_float(tmp_out_ptr[j * HEAD_SIZE + i]) * shared_exp_sums[j] * inv_global_exp_sum;
-      const float expsum = (j<num_partitions) ? shared_exp_sums[j] : 0.0f;
-      //acc += (float)tmp_out_ptr[j * HEAD_SIZE + threadIdx.x] * shared_exp_sums[j] * inv_global_exp_sum;
-      acc += (float)tmps[j] * expsum;
+    for (int j = 0; j < JCHUNK; j++) {
+      acc += tmps[j] * shared_exp_sums[j];
     }
+    if (num_partitions > JCHUNK) {
+        #pragma unroll
+        for (int j = JCHUNK; j < 2*JCHUNK; j++) {
+          acc += tmps[j] * shared_exp_sums[j];
+        }
+        if (num_partitions > 2*JCHUNK) {
+            #pragma unroll
+            for (int j = 2*JCHUNK; j < MAX_NPAR; j++) {
+              acc += tmps[j] * shared_exp_sums[j];
+            }
+        }
+    }
+    const float inv_global_exp_sum = __fdividef(1.0f, shared_global_exp_sum + 1e-6f);
     acc *= inv_global_exp_sum;
     //from_float(out_ptr[threadIdx.x], acc);
+    scalar_t* out_ptr = out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
     out_ptr[threadIdx.x] = (scalar_t)acc;
-  //}
-}
+  }
 
 #define CALL_CUSTOM_LAUNCHER(T)                             \
   paged_attention_custom_launcher<T>(                       \
@@ -818,9 +794,9 @@ void paged_attention_custom_launcher(
   if (max_context_len > PARTITION_SIZE) {
     dim3 reduce_grid(num_heads, num_seqs);
     dim3 reduce_block(head_size); //TODO: assumes max_partitions < head_SIZE
-    int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
+    //int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
     paged_attention_ll4mi_reduce_kernel<T, HEAD_SIZE, HEAD_SIZE, PARTITION_SIZE>
-    <<<reduce_grid, reduce_block, reduce_shared_mem_size, stream>>>(                                   
+    <<<reduce_grid, reduce_block, 0, stream>>>(                                   
       out_ptr,                                                                                  
       exp_sums_ptr,                                                                             
       max_logits_ptr,                                                                           
