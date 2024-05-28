@@ -156,16 +156,16 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             # xFormers nor FlashAttention. As a temporary workaround, we use
             # naive PyTorch implementation of attention.
             self.attn_fuc = _naive_attention()
-            logger.debug("Using naive attention in ROCmBackend")
+            logger.info("Using naive attention in ROCmBackend")
         elif self.use_triton_flash_attn:
             from vllm.attention.ops.triton_flash_attention import (  # noqa: F401
                 triton_attention)
             self.attn_func = triton_attention
-            logger.debug("Using Triton FA in ROCmBackend")
+            logger.info("Using Triton FA in ROCmBackend")
         else:
             from flash_attn import flash_attn_varlen_func  # noqa: F401
             self.attn_func = flash_attn_varlen_func
-            logger.debug("Using CK FA in ROCmBackend")
+            logger.info("Using CK FA in ROCmBackend")
 
     def repeat_kv(self, x: torch.Tensor, n_rep: int) -> torch.Tensor:
         """torch.repeat_interleave(x, dim=1, repeats=n_rep)"""
