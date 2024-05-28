@@ -550,7 +550,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     const int laneid = threadIdx.x % WARP_SIZE;
 
     __shared__ float shared_global_exp_sum;
-    __shared__ float shared_exp_sums[WARP_SIZE];
+    __shared__ float shared_exp_sums[2*WARP_SIZE];
 
     if (warpid==0) {
 
@@ -559,8 +559,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
 
     //valid partition is the last valid partition in case threadid > num partitions
     const int valid_partition = (threadIdx.x < num_partitions) ? threadIdx.x : num_partitions-1;
-    float max_logit = max_logits_ptr[valid_partition];
-    float reg_max_logit =  max_logit;
+    const int valid_partition2 = (WARP_SIZE+threadIdx.x < num_partitions) ? WARP_SIZE+threadIdx.x : num_partitions-1;
+    float reg_max_logit = max_logits_ptr[valid_partition];
+    float reg_max_logit2 = max_logits_ptr[valid_partition2];
+    float max_logit = fmaxf(reg_max_logit,reg_max_logit2);
 
     #pragma unroll
     for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
@@ -572,9 +574,12 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
 
     float global_exp_sum = 0.0f;
     float rescaled_exp_sum = exp_sums_ptr[valid_partition];
+    float rescaled_exp_sum2 = exp_sums_ptr[valid_partition2];
     rescaled_exp_sum *= (threadIdx.x < num_partitions) ? expf(reg_max_logit - max_logit) : 0.0f;
-    global_exp_sum += rescaled_exp_sum;
+    rescaled_exp_sum2 *= (threadIdx.x+WARP_SIZE < num_partitions) ? expf(reg_max_logit2 - max_logit) : 0.0f;
+    global_exp_sum += rescaled_exp_sum + rescaled_exp_sum2;
     shared_exp_sums[threadIdx.x] = rescaled_exp_sum;
+    shared_exp_sums[threadIdx.x+WARP_SIZE] = rescaled_exp_sum2;
 
     #pragma unroll
     for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
@@ -643,6 +648,23 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
             }
         }
     }
+    
+    if (num_partitions > MAX_NPAR) {
+        idx=0;
+        #pragma unroll
+        for (int j = MAX_NPAR*HEAD_SIZE; j < 2*MAX_NPAR*HEAD_SIZE; j+=HEAD_SIZE) {
+            //lastj is last valid partition
+            const int lastj_offset = (j<num_partition_offset) ? j : last_partition_offset;
+            tmps[idx] = tmp_out_ptr[lastj_offset];
+            idx++;
+        }
+
+        #pragma unroll
+        for (int j = 0; j < MAX_NPAR; j++) {
+          acc += tmps[j] * shared_exp_sums[j+MAX_NPAR];
+        }
+    }
+
     const float inv_global_exp_sum = __fdividef(1.0f, shared_global_exp_sum + 1e-6f);
     acc *= inv_global_exp_sum;
     //from_float(out_ptr[threadIdx.x], acc);
