@@ -273,6 +273,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
       //dout[0] = {0};
       //dout[1] = {0};
+      float max_attn_val = 30.0; //hardcoded for grok
 
         #pragma unroll
         for (int h=0;h<QHLOOP;h++) {
@@ -309,6 +310,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
           dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h], 4, 15, 0);
           dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h], 4, 15, 0);
           dout[h]*=scale;
+          //dout[h] = max_attn_val * tanh(dout[h] / max_attn_val);
         }
         //transpose dout so that 4 token ids are in each lane, and 4 heads are across 4 lanes
         #pragma unroll
