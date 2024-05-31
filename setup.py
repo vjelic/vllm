@@ -400,7 +400,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("benchmarks", "csrc", "docs", "examples",
+    packages=find_packages(exclude=("csrc", "docs", "examples",
                                     "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
