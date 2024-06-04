@@ -20,12 +20,9 @@ do
                 for input_len in $INPUT_LEN;
                 do
 
-torchrun --standalone --nnodes=1 --nproc-per-node=$tp  benchmarks/profile_benchmark.py --model $MODEL  --batch-size 1    --input-len $input_len --output-len $gen_len --tensor-parallel-size $tp --num-iters $ITER --enforce-eager
-
-#python benchmarks/profile_benchmark.py --model $MODEL 
-
-
-done
+torchrun --standalone --nnodes=$tp --nproc-per-node=1  benchmarks/benchmark_latency.py --model $MODEL  --batch-size 1    --input-len $input_len --output-len $gen_len \
+                            --tensor-parallel-size $tp --num-iters $ITER
+    done
 done
 done
 
