@@ -2,7 +2,9 @@
 # to run the OpenAI compatible server.
 
 #################### BASE BUILD IMAGE ####################
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 AS dev
+FROM nvidia/cuda:12.5.0-devel-ubuntu22.04 AS dev
+
+RUN mkdir -p ~/.pip && echo "[global]" >> ~/.pip/pip.conf && echo "index-url = https://pypi.tuna.tsinghua.edu.cn/simple" >> ~/.pip/pip.conf
 
 RUN apt-get update -y \
     && apt-get install -y python3-pip git
@@ -11,7 +13,7 @@ RUN apt-get update -y \
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
-RUN ldconfig /usr/local/cuda-12.1/compat/
+RUN ldconfig /usr/local/cuda-12.5/compat/
 
 WORKDIR /workspace
 
@@ -29,6 +31,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 #################### EXTENSION BUILD IMAGE ####################
 FROM dev AS build
+
+#RUN mkdir -p ~/.pip && echo "[global]" >> ~/.pip/pip.conf && echo "index-url = https://pypi.tuna.tsinghua.edu.cn/simple" >> ~/.pip/pip.conf
 
 # install build dependencies
 COPY requirements-build.txt requirements-build.txt
@@ -104,7 +108,9 @@ RUN --mount=type=cache,target=/root/.cache/pip VLLM_USE_PRECOMPILED=1 pip instal
 # We used base cuda image because pytorch installs its own cuda libraries.
 # However pynccl depends on cuda libraries so we had to switch to the runtime image
 # In the future it would be nice to get a container with pytorch and cuda without duplicating cuda
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04 AS vllm-base
+FROM nvidia/cuda:12.5.0-runtime-ubuntu22.04 AS vllm-base
+
+RUN mkdir -p ~/.pip && echo "[global]" >> ~/.pip/pip.conf && echo "index-url = https://pypi.tuna.tsinghua.edu.cn/simple" >> ~/.pip/pip.conf
 
 # libnccl required for ray
 RUN apt-get update -y \
