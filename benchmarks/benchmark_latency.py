@@ -16,6 +16,19 @@ def main(args: argparse.Namespace):
 
     # NOTE(woosuk): If the request cannot be processed in a single batch,
     # the engine will automatically process the request in multiple batches.
+        # exceptions for navi, let's leave this for huge models
+    if args.model == "TheBloke/Llama-2-70B-Chat-GPTQ" or args.model == "MaziyarPanahi/Meta-Llama-3-70B-Instruct-GPTQ":
+        if int(torch.cuda.get_device_properties(0).total_memory/1e9) < 40:
+            effective_max_model_len = 2000
+        elif int(torch.cuda.get_device_properties(0).total_memory/1e9) < 50: # w7900 48 GB
+            effective_max_model_len = 3000
+        else:
+            effective_max_model_len = None # derived from the model config
+    else:
+        effective_max_model_len = None
+
+    print("effective_max_model_len", effective_max_model_len)
+
     llm = LLM(model=args.model,
               tokenizer=args.tokenizer,
               quantization=args.quantization,
@@ -30,6 +43,7 @@ def main(args: argparse.Namespace):
               worker_use_ray=args.worker_use_ray,
               enable_chunked_prefill=args.enable_chunked_prefill,
               download_dir=args.download_dir,
+              max_model_len=effective_max_model_len,
               block_size=args.block_size)
 
     sampling_params = SamplingParams(
