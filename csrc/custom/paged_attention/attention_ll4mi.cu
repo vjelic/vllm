@@ -73,12 +73,13 @@ using Tx8_t = typename Tx8<T>::type;
 
 //#define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
 
-template<typename T, typename Acc>
-__device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag, int const x, int const y, int const z) {
+// TODO(Gurunath): validate if cbsz, abid, blgp values can remain same for f16 and bf16_1k?!
+template<int cbsz, int abid, int blgp, typename T, typename Acc>
+__device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag) {
   if constexpr (std::is_same_v<T, _Half4>) {
-    return __builtin_amdgcn_mfma_f32_4x4x4f16(a_frag, b_frag, c_frag, x, y, z);
+    return __builtin_amdgcn_mfma_f32_4x4x4f16(a_frag, b_frag, c_frag, cbsz, abid, blgp);
   } else if constexpr (std::is_same_v<T, BF16x4>) {
-    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a_frag, b_frag, c_frag, x, y, z);
+    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a_frag, b_frag, c_frag, cbsz, abid, blgp);
   } else {
     static_assert(false, "Unsupported dtype for MFMA");
   }
@@ -356,71 +357,39 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
 #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[0].xy[0], dout[h], 4, 0, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[0].xy[1], dout[h], 4, 0, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[1].xy[0], dout[h], 4, 1, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[1].xy[1], dout[h], 4, 1, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[2].xy[0], dout[h], 4, 2, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[2].xy[1], dout[h], 4, 2, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[3].xy[0], dout[h], 4, 3, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[3].xy[1], dout[h], 4, 3, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[4].xy[0], dout[h], 4, 4, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[4].xy[1], dout[h], 4, 4, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[5].xy[0], dout[h], 4, 5, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[5].xy[1], dout[h], 4, 5, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[6].xy[0], dout[h], 4, 6, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[6].xy[1], dout[h], 4, 6, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[7].xy[0], dout[h], 4, 7, 0);
-      dout[h] =
-          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[7].xy[1], dout[h], 4, 7, 0);
+      dout[h] = gcn_mfma_instr<4, 0, 0>(Qlocal[h].xy[0], Klocal[0].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 0, 0>(Qlocal[h].xy[1], Klocal[0].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 1, 0>(Qlocal[h].xy[0], Klocal[1].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 1, 0>(Qlocal[h].xy[1], Klocal[1].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 2, 0>(Qlocal[h].xy[0], Klocal[2].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 2, 0>(Qlocal[h].xy[1], Klocal[2].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 3, 0>(Qlocal[h].xy[0], Klocal[3].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 3, 0>(Qlocal[h].xy[1], Klocal[3].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 4, 0>(Qlocal[h].xy[0], Klocal[4].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 4, 0>(Qlocal[h].xy[1], Klocal[4].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 5, 0>(Qlocal[h].xy[0], Klocal[5].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 5, 0>(Qlocal[h].xy[1], Klocal[5].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 6, 0>(Qlocal[h].xy[0], Klocal[6].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 6, 0>(Qlocal[h].xy[1], Klocal[6].xy[1], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 7, 0>(Qlocal[h].xy[0], Klocal[7].xy[0], dout[h]);
+      dout[h] = gcn_mfma_instr<4, 7, 0>(Qlocal[h].xy[1], Klocal[7].xy[1], dout[h]);
       if constexpr (KHELOOP > 8) {
-        dout[h] =
-            gcn_mfma_instr(Qlocal[h].xy[0], Klocal[8].xy[0], dout[h], 4, 8, 0);
-        dout[h] =
-            gcn_mfma_instr(Qlocal[h].xy[1], Klocal[8].xy[1], dout[h], 4, 8, 0);
-        dout[h] =
-            gcn_mfma_instr(Qlocal[h].xy[0], Klocal[9].xy[0], dout[h], 4, 9, 0);
-        dout[h] =
-            gcn_mfma_instr(Qlocal[h].xy[1], Klocal[9].xy[1], dout[h], 4, 9, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[10].xy[0], dout[h], 4,
-                                 10, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[10].xy[1], dout[h], 4,
-                                 10, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[11].xy[0], dout[h], 4,
-                                 11, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[11].xy[1], dout[h], 4,
-                                 11, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[12].xy[0], dout[h], 4,
-                                 12, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[12].xy[1], dout[h], 4,
-                                 12, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[13].xy[0], dout[h], 4,
-                                 13, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[13].xy[1], dout[h], 4,
-                                 13, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[14].xy[0], dout[h], 4,
-                                 14, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[14].xy[1], dout[h], 4,
-                                 14, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h], 4,
-                                 15, 0);
-        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h], 4,
-                                 15, 0);
+        dout[h] = gcn_mfma_instr<4,  8, 0>(Qlocal[h].xy[0], Klocal[8].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4,  8, 0>(Qlocal[h].xy[1], Klocal[8].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4,  9, 0>(Qlocal[h].xy[0], Klocal[9].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4,  9, 0>(Qlocal[h].xy[1], Klocal[9].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 10, 0>(Qlocal[h].xy[0], Klocal[10].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 10, 0>(Qlocal[h].xy[1], Klocal[10].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 11, 0>(Qlocal[h].xy[0], Klocal[11].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 11, 0>(Qlocal[h].xy[1], Klocal[11].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 12, 0>(Qlocal[h].xy[0], Klocal[12].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 12, 0>(Qlocal[h].xy[1], Klocal[12].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 13, 0>(Qlocal[h].xy[0], Klocal[13].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 13, 0>(Qlocal[h].xy[1], Klocal[13].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 14, 0>(Qlocal[h].xy[0], Klocal[14].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 14, 0>(Qlocal[h].xy[1], Klocal[14].xy[1], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 15, 0>(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h]);
+        dout[h] = gcn_mfma_instr<4, 15, 0>(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h]);
       }  // KHELOOP>8
       dout[h] *= scale;
     }
@@ -554,22 +523,22 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       for (int vh = 0; vh < VHELOOP; vh++) {
         floatx4 acc = {0};
         // iterate over tokens
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][0].xy[0], acc, 4, 0, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][0].xy[1], acc, 4, 1, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][1].xy[0], acc, 4, 2, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][1].xy[1], acc, 4, 3, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][2].xy[0], acc, 4, 4, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][2].xy[1], acc, 4, 5, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][3].xy[0], acc, 4, 6, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][3].xy[1], acc, 4, 7, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][4].xy[0], acc, 4, 8, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][4].xy[1], acc, 4, 9, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][5].xy[0], acc, 4, 10, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][5].xy[1], acc, 4, 11, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][6].xy[0], acc, 4, 12, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][6].xy[1], acc, 4, 13, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][7].xy[0], acc, 4, 14, 0);
-        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][7].xy[1], acc, 4, 15, 0);
+        acc = gcn_mfma_instr<4,  0, 0>(logits[qh], Vlocal[vh][0].xy[0], acc);
+        acc = gcn_mfma_instr<4,  1, 0>(logits[qh], Vlocal[vh][0].xy[1], acc);
+        acc = gcn_mfma_instr<4,  2, 0>(logits[qh], Vlocal[vh][1].xy[0], acc);
+        acc = gcn_mfma_instr<4,  3, 0>(logits[qh], Vlocal[vh][1].xy[1], acc);
+        acc = gcn_mfma_instr<4,  4, 0>(logits[qh], Vlocal[vh][2].xy[0], acc);
+        acc = gcn_mfma_instr<4,  5, 0>(logits[qh], Vlocal[vh][2].xy[1], acc);
+        acc = gcn_mfma_instr<4,  6, 0>(logits[qh], Vlocal[vh][3].xy[0], acc);
+        acc = gcn_mfma_instr<4,  7, 0>(logits[qh], Vlocal[vh][3].xy[1], acc);
+        acc = gcn_mfma_instr<4,  8, 0>(logits[qh], Vlocal[vh][4].xy[0], acc);
+        acc = gcn_mfma_instr<4,  9, 0>(logits[qh], Vlocal[vh][4].xy[1], acc);
+        acc = gcn_mfma_instr<4, 10, 0>(logits[qh], Vlocal[vh][5].xy[0], acc);
+        acc = gcn_mfma_instr<4, 11, 0>(logits[qh], Vlocal[vh][5].xy[1], acc);
+        acc = gcn_mfma_instr<4, 12, 0>(logits[qh], Vlocal[vh][6].xy[0], acc);
+        acc = gcn_mfma_instr<4, 13, 0>(logits[qh], Vlocal[vh][6].xy[1], acc);
+        acc = gcn_mfma_instr<4, 14, 0>(logits[qh], Vlocal[vh][7].xy[0], acc);
+        acc = gcn_mfma_instr<4, 15, 0>(logits[qh], Vlocal[vh][7].xy[1], acc);
         Tx4_t<scalar_t> tmp;
 #pragma unroll
         for (int i = 0; i < 4; i++) {
