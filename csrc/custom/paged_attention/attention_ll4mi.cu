@@ -5,6 +5,8 @@
 
 #include <algorithm>
 
+#include <hip/hip_bf16.h>
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
@@ -13,6 +15,8 @@
 #define GCN_MFMA_INSTR1 __builtin_amdgcn_mfma_f32_16x16x4f32
 #define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
 
+///////////////////////////
+
 using floatx4 = __attribute__((__vector_size__(4 * sizeof(float)))) float;
 using float16x4 =
     __attribute__((__vector_size__(4 * sizeof(_Float16)))) _Float16;
@@ -20,6 +24,66 @@ typedef float16x4 _Half4;
 typedef struct _Half8 {
   _Half4 xy[2];
 } _Half8;
+
+// TODO(Gurunath): can we use uint16_t here to get small vector working?
+using BF16x4 = __hip_bfloat16[4];
+typedef struct _BF16x8 {
+  BF16x4 xy[2];
+} BF16x8;
+
+///////////////////////////
+
+template<typename T>
+struct Tx4 {
+  using type = __attribute__((__vector_size__(4 * sizeof(T)))) T;
+};
+
+template<>
+struct Tx4 <_Float16> {
+  using type = _Half4;
+};
+
+template<>
+struct Tx4 <__hip_bfloat16> {
+  using type = BF16x4;
+};
+
+template<typename T>
+using Tx4_t = typename Tx4<T>::type;
+
+template<typename T>
+struct Tx8 {
+  using type = __attribute__((__vector_size__(8 * sizeof(T)))) T;
+};
+
+template<>
+struct Tx8 <_Float16> {
+  using type = _Half8;
+};
+
+template<>
+struct Tx8 <__hip_bfloat16> {
+  using type = BF16x8;
+};
+
+template<typename T>
+using Tx8_t = typename Tx8<T>::type;
+
+////////////////////////////////////////
+
+//#define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
+
+template<typename T, typename Acc>
+__device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag, int const x, int const y, int const z) {
+  if constexpr (std::is_same_v<T, _Half4>) {
+    return __builtin_amdgcn_mfma_f32_4x4x4f16(a_frag, b_frag, c_frag, x, y, z);
+  } else if constexpr (std::is_same_v<T, BF16x4>) {
+    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a_frag, b_frag, c_frag, x, y, z);
+  } else {
+    static_assert(false, "Unsupported dtype for MFMA");
+  }
+}
+
 ////// Non temporal load stores ///////
 
 #if 1
@@ -161,16 +225,16 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   constexpr int GQA_RATIO4 = 4 * QHLOOP;
   __shared__ float shared_qk_max[NWARPS][GQA_RATIO4 + 1];
   __shared__ float shared_exp_sum[NWARPS][GQA_RATIO4 + 1];
-  _Half8 Qlocal[QHLOOP];
+  Tx8_t<scalar_t> Qlocal[QHLOOP];
   constexpr int x = 16 / sizeof(scalar_t);
   constexpr int KHELOOP = HEAD_SIZE / x;
-  _Half8 Klocal[KHELOOP];
+  Tx8_t<scalar_t> Klocal[KHELOOP];
   constexpr int VHELOOP =
       HEAD_SIZE /
       WARP_SIZE;  // v head_size dimension is distributed across lanes
   constexpr int VTLOOP = 8;  // 16 separate 4xtokens across warp -> 16/2
                              // 8xtokens
-  _Half8 Vlocal[VHELOOP][VTLOOP];
+  Tx8_t<scalar_t> Vlocal[VHELOOP][VTLOOP];
   floatx4 dout[QHLOOP];
   float qk_max[QHLOOP];
 #pragma unroll
@@ -213,7 +277,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     // each 4 lanes fetch 8 helems, so warp fetches 8*16 = 128 helems
     const scalar_t* q_ptr =
         q + seq_idx * q_stride + wg_start_head_idx * HEAD_SIZE;
-    const _Half8* q_ptrh8 = reinterpret_cast<const _Half8*>(q_ptr);
+    const Tx8_t<scalar_t>* q_ptrh8 = reinterpret_cast<const Tx8_t<scalar_t>*>(q_ptr);
     const int qhead_elemh8 = laneid / 4;
 #pragma unroll
     for (int h = 0; h < QHLOOP - 1; h++) {
@@ -231,7 +295,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
     const scalar_t* k_ptr = k_cache + physical_block_number * kv_block_stride +
                             wg_start_kv_head_idx * kv_head_stride;
-    const _Half8* k_ptrh8 = reinterpret_cast<const _Half8*>(k_ptr);
+    const Tx8_t<scalar_t>* k_ptrh8 = reinterpret_cast<const Tx8_t<scalar_t>*>(k_ptr);
 
     const int physical_block_offset =
         local_token_idx % BLOCK_SIZE;  // since x=half8, physical_block_offset
@@ -267,7 +331,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     }
 
     const scalar_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
-    const _Half8* v_ptrh8 = reinterpret_cast<const _Half8*>(v_ptr);
+    const Tx8_t<scalar_t>* v_ptrh8 = reinterpret_cast<const Tx8_t<scalar_t>*>(v_ptr);
 // iterate over each v block
 #pragma unroll
     for (int b = 0; b < VBLOCKS; b++) {
@@ -275,13 +339,13 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       // kv_block_stride
       const int64_t vphysical_block_number =
           static_cast<int64_t>(vphysical_blocks[b]);
-      const _Half8* v_ptrh8b =
+      const Tx8_t<scalar_t>* v_ptrh8b =
           v_ptrh8 + (vphysical_block_number * kv_block_stride) / 8;
 // iterate over each head elem (within head_size)
 #pragma unroll
       for (int h = 0; h < VHELOOP; h++) {
         const int head_size_elem = h * WARP_SIZE + laneid;
-        const _Half8* v_ptrh8be = v_ptrh8b + head_size_elem * BLOCK_SIZE / 8;
+        const Tx8_t<scalar_t>* v_ptrh8be = v_ptrh8b + head_size_elem * BLOCK_SIZE / 8;
 // iterate over all velems within block
 #pragma unroll
         for (int d = 0; d < BLOCK_SIZE / 8; d++) {
@@ -293,69 +357,69 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[0].xy[0], dout[h], 4, 0, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[0].xy[0], dout[h], 4, 0, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[0].xy[1], dout[h], 4, 0, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[0].xy[1], dout[h], 4, 0, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[1].xy[0], dout[h], 4, 1, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[1].xy[0], dout[h], 4, 1, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[1].xy[1], dout[h], 4, 1, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[1].xy[1], dout[h], 4, 1, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[2].xy[0], dout[h], 4, 2, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[2].xy[0], dout[h], 4, 2, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[2].xy[1], dout[h], 4, 2, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[2].xy[1], dout[h], 4, 2, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[3].xy[0], dout[h], 4, 3, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[3].xy[0], dout[h], 4, 3, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[3].xy[1], dout[h], 4, 3, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[3].xy[1], dout[h], 4, 3, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[4].xy[0], dout[h], 4, 4, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[4].xy[0], dout[h], 4, 4, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[4].xy[1], dout[h], 4, 4, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[4].xy[1], dout[h], 4, 4, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[5].xy[0], dout[h], 4, 5, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[5].xy[0], dout[h], 4, 5, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[5].xy[1], dout[h], 4, 5, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[5].xy[1], dout[h], 4, 5, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[6].xy[0], dout[h], 4, 6, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[6].xy[0], dout[h], 4, 6, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[6].xy[1], dout[h], 4, 6, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[6].xy[1], dout[h], 4, 6, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[7].xy[0], dout[h], 4, 7, 0);
+          gcn_mfma_instr(Qlocal[h].xy[0], Klocal[7].xy[0], dout[h], 4, 7, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[7].xy[1], dout[h], 4, 7, 0);
+          gcn_mfma_instr(Qlocal[h].xy[1], Klocal[7].xy[1], dout[h], 4, 7, 0);
       if constexpr (KHELOOP > 8) {
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[8].xy[0], dout[h], 4, 8, 0);
+            gcn_mfma_instr(Qlocal[h].xy[0], Klocal[8].xy[0], dout[h], 4, 8, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[8].xy[1], dout[h], 4, 8, 0);
+            gcn_mfma_instr(Qlocal[h].xy[1], Klocal[8].xy[1], dout[h], 4, 8, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[9].xy[0], dout[h], 4, 9, 0);
+            gcn_mfma_instr(Qlocal[h].xy[0], Klocal[9].xy[0], dout[h], 4, 9, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[9].xy[1], dout[h], 4, 9, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[10].xy[0], dout[h], 4,
+            gcn_mfma_instr(Qlocal[h].xy[1], Klocal[9].xy[1], dout[h], 4, 9, 0);
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[10].xy[0], dout[h], 4,
                                  10, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[10].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[10].xy[1], dout[h], 4,
                                  10, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[11].xy[0], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[11].xy[0], dout[h], 4,
                                  11, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[11].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[11].xy[1], dout[h], 4,
                                  11, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[12].xy[0], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[12].xy[0], dout[h], 4,
                                  12, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[12].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[12].xy[1], dout[h], 4,
                                  12, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[13].xy[0], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[13].xy[0], dout[h], 4,
                                  13, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[13].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[13].xy[1], dout[h], 4,
                                  13, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[14].xy[0], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[14].xy[0], dout[h], 4,
                                  14, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[14].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[14].xy[1], dout[h], 4,
                                  14, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h], 4,
                                  15, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h], 4,
+        dout[h] = gcn_mfma_instr(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h], 4,
                                  15, 0);
       }  // KHELOOP>8
       dout[h] *= scale;
@@ -462,7 +526,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   }
   // logits[h] -> every 4 lanes hold 4 heads, each lane holds 4 tokens, there
   // are 4x16 tokens across warp
-  float16x4 logits[QHLOOP];
+  Tx4_t<scalar_t> logits[QHLOOP];
 #pragma unroll
   for (int h = 0; h < QHLOOP; h++) {
 #pragma unroll
@@ -471,7 +535,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     }
   }
 
-  __shared__ float16x4 vout_shared[QHLOOP][VHELOOP][WARP_SIZE][NWARPS + 1];
+  __shared__ Tx4_t<scalar_t> vout_shared[QHLOOP][VHELOOP][WARP_SIZE][NWARPS + 1];
 
   if (warp_start_token_idx >= context_len) {  // warp out of context
 #pragma unroll
@@ -490,23 +554,23 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       for (int vh = 0; vh < VHELOOP; vh++) {
         floatx4 acc = {0};
         // iterate over tokens
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[0], acc, 4, 0, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[1], acc, 4, 1, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[0], acc, 4, 2, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[1], acc, 4, 3, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[0], acc, 4, 4, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[1], acc, 4, 5, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[0], acc, 4, 6, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[1], acc, 4, 7, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[0], acc, 4, 8, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[1], acc, 4, 9, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[0], acc, 4, 10, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[1], acc, 4, 11, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[0], acc, 4, 12, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[1], acc, 4, 13, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[0], acc, 4, 14, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[1], acc, 4, 15, 0);
-        float16x4 tmp;
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][0].xy[0], acc, 4, 0, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][0].xy[1], acc, 4, 1, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][1].xy[0], acc, 4, 2, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][1].xy[1], acc, 4, 3, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][2].xy[0], acc, 4, 4, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][2].xy[1], acc, 4, 5, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][3].xy[0], acc, 4, 6, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][3].xy[1], acc, 4, 7, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][4].xy[0], acc, 4, 8, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][4].xy[1], acc, 4, 9, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][5].xy[0], acc, 4, 10, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][5].xy[1], acc, 4, 11, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][6].xy[0], acc, 4, 12, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][6].xy[1], acc, 4, 13, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][7].xy[0], acc, 4, 14, 0);
+        acc = gcn_mfma_instr(logits[qh], Vlocal[vh][7].xy[1], acc, 4, 15, 0);
+        Tx4_t<scalar_t> tmp;
 #pragma unroll
         for (int i = 0; i < 4; i++) {
           tmp[i] = (scalar_t)acc[i];
@@ -519,7 +583,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   __syncthreads();
 
   if (warpid == 0) {
-    float16x4 vout[QHLOOP][VHELOOP];
+    Tx4_t<scalar_t> vout[QHLOOP][VHELOOP];
     // iterate across heads
     scalar_t* out_ptr;
     int out_num_partitions;
