@@ -24,6 +24,7 @@ typedef struct _Half8 {
 } _Half8;
 
 // TODO(Gurunath): can we use uint16_t here to get small vector working?
+//   But this will need a lot of special handling for one element as well
 using BF16 = __hip_bfloat16;
 using BF16x4 = BF16[4];
 typedef struct _BF16x8 {
@@ -342,7 +343,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       Qlocal[QHLOOP - 1] =
           q_ptrh8[final_qhead_idx * HEAD_SIZE / 8 + qhead_elemh8];
     } else {
-      // FIXME(Gurunath)
       //Qlocal[QHLOOP - 1].xy[0] = {0};
       //Qlocal[QHLOOP - 1].xy[1] = {0};
       zero(Qlocal[QHLOOP - 1].xy[0]);
