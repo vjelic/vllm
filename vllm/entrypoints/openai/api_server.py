@@ -4,9 +4,11 @@ import inspect
 import re
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Optional, Set
+import threading
+from typing import List, Optional, Set
 
 import fastapi
+import requests
 import uvicorn
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -39,7 +41,7 @@ openai_serving_embedding: OpenAIServingEmbedding
 logger = init_logger(__name__)
 
 _running_tasks: Set[asyncio.Task] = set()
-
+_aux_ports: List[int] = []
 
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
@@ -112,9 +114,19 @@ async def create_chat_completion(request: ChatCompletionRequest,
         assert isinstance(generator, ChatCompletionResponse)
         return JSONResponse(content=generator.model_dump())
 
+def reroute(request, port):
+    requests.post(f"http://localhost:{port}/v1/completions", json=request.dict())
+
 
 @app.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
+    if envs.LOCAL_RANK == 0:
+        # @TODO: Make this less ugly
+        global _aux_ports
+        for port in _aux_ports:
+            thread = threading.Thread(target=reroute, args=(request, port))
+            thread.start()
+
     generator = await openai_serving_completion.create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -210,9 +222,16 @@ if __name__ == "__main__":
     openai_serving_embedding = OpenAIServingEmbedding(engine, model_config,
                                                       served_model_names)
     app.root_path = args.root_path
+    port = args.port
+    if (engine.engine.parallel_config.distributed_executor_backend == "torchrun"
+        and args.tensor_parallel_size > 1):
+        if envs.LOCAL_RANK != 0:
+            port = envs.AUX_PORT_START + envs.LOCAL_RANK - 1
+        else:
+            _aux_ports = [x for x in range(envs.AUX_PORT_START, envs.AUX_PORT_START + args.tensor_parallel_size - 1)]
     uvicorn.run(app,
                 host=args.host,
-                port=args.port,
+                port=port,
                 log_level=args.uvicorn_log_level,
                 timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
                 ssl_keyfile=args.ssl_keyfile,
