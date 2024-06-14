@@ -15,8 +15,6 @@
 #define GCN_MFMA_INSTR1 __builtin_amdgcn_mfma_f32_16x16x4f32
 #define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
 
-///////////////////////////
-
 using floatx4 = __attribute__((__vector_size__(4 * sizeof(float)))) float;
 using float16x4 =
     __attribute__((__vector_size__(4 * sizeof(_Float16)))) _Float16;
@@ -73,7 +71,6 @@ using Tx8_t = typename Tx8<T>::type;
 
 //#define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
 
-// TODO(Gurunath): validate if cbsz, abid, blgp values can remain same for f16 and bf16_1k?!
 template<int cbsz, int abid, int blgp, typename T, typename Acc>
 __device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag) {
   if constexpr (std::is_same_v<T, _Half4>) {
@@ -970,6 +967,8 @@ void paged_attention_custom(
   const int head_size = query.size(2);
   if (query.dtype() == at::ScalarType::Half) {
     CALL_CUSTOM_LAUNCHER_BLK_HEAD(_Float16);
+  } else if (query.dtype() == at::ScalarType::BFloat16) {
+    CALL_CUSTOM_LAUNCER_BLK_HEAD(__hip_bfloat16);
   } else {
     TORCH_CHECK(false, "Unsupported data type: ", query.dtype());
   }

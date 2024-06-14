@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import pytest
 import torch
-from allclose_default import get_default_atol, get_default_rtol
+from .allclose_default import get_default_atol, get_default_rtol
 
 from vllm._C import cache_ops, ops
 from vllm._custom_C import paged_attention_custom
@@ -19,7 +19,7 @@ NUM_BLOCKS = 4321  # Arbitrary values for testing
 PARTITION_SIZE = 256
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
-          ] if not is_hip() else [torch.half]
+          ] if not is_hip() else [torch.half, torch.bfloat16]
 NUM_GEN_SEQS = [1, 17, 64]  # Arbitrary values for testing
 NUM_HEADS = [(8 * x, 8) for x in range(1, 17)]  # Arbitrary values for testing
 
