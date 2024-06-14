@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-#include <hip/hip_bf16.h>
+#include <cuda_bf16.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -24,10 +24,13 @@ typedef struct _Half8 {
 } _Half8;
 
 // TODO(Gurunath): can we use uint16_t here to get small vector working?
-using BF16x4 = __hip_bfloat16[4];
+using BF16 = __hip_bfloat16;
+using BF16x4 = BF16[4];
 typedef struct _BF16x8 {
   BF16x4 xy[2];
 } BF16x8;
+using u16x4 =
+    __attribute__((__vector_size__(4 * sizeof(_Float16)))) uint16_t;
 
 ///////////////////////////
 
@@ -42,7 +45,7 @@ struct Tx4 <_Float16> {
 };
 
 template<>
-struct Tx4 <__hip_bfloat16> {
+struct Tx4 <BF16> {
   using type = BF16x4;
 };
 
@@ -60,7 +63,7 @@ struct Tx8 <_Float16> {
 };
 
 template<>
-struct Tx8 <__hip_bfloat16> {
+struct Tx8 <BF16> {
   using type = BF16x8;
 };
 
@@ -69,14 +72,66 @@ using Tx8_t = typename Tx8<T>::type;
 
 ////////////////////////////////////////
 
+__device__ __forceinline__ void zero(BF16x4 &dest) {
+  dest[0] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  dest[1] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  dest[2] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  dest[3] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+}
+
+__device__ __forceinline__ void zero(float16x4 &dest) {
+  dest[0] = 0;
+  dest[1] = 0;
+  dest[2] = 0;
+  dest[3] = 0;
+}
+
+
+template<typename Tsrc, typename Tdest>
+__device__ __forceinline__ Tdest cast_assign(Tsrc src) {
+  return static_cast<Tdest>(src);
+}
+
+template<>
+__device__ __forceinline__ BF16 cast_assign<float, BF16>(float src) {
+  return __float2bfloat16(src);
+}
+
+template<>
+__device__ __forceinline__ float cast_assign<BF16, float>(BF16 src) {
+  return __bfloat162float(src);
+}
+
+template<>
+__device__ __forceinline__ _Float16 cast_assign<float, _Float16>(float src) {
+  return static_cast<_Float16>(src);
+}
+
+template<>
+__device__ __forceinline__ float cast_assign<_Float16, float>(_Float16 src) {
+  return static_cast<float>(src);
+}
+
+////////////////////////////////////////
+
 //#define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
 
+/**
+ * NOTE(Gurunath): _Half4 and BF16 decay differently
+ */
 template<int cbsz, int abid, int blgp, typename T, typename Acc>
 __device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag) {
   if constexpr (std::is_same_v<T, _Half4>) {
     return __builtin_amdgcn_mfma_f32_4x4x4f16(a_frag, b_frag, c_frag, cbsz, abid, blgp);
-  } else if constexpr (std::is_same_v<T, BF16x4>) {
-    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a_frag, b_frag, c_frag, cbsz, abid, blgp);
+  } else if constexpr (std::is_same_v<T, BF16 *>) {
+    u16x4 a;
+    u16x4 b;
+#pragma unroll
+    for (size_t idx{}; idx < 4; ++idx) {
+      a[idx] = __bfloat16_as_ushort(a_frag[idx]);
+      b[idx] = __bfloat16_as_ushort(b_frag[idx]);
+    }
+    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a, b, c_frag, cbsz, abid, blgp);
   } else {
     static_assert(false, "Unsupported dtype for MFMA");
   }
@@ -287,8 +342,11 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       Qlocal[QHLOOP - 1] =
           q_ptrh8[final_qhead_idx * HEAD_SIZE / 8 + qhead_elemh8];
     } else {
-      Qlocal[QHLOOP - 1].xy[0] = {0};
-      Qlocal[QHLOOP - 1].xy[1] = {0};
+      // FIXME(Gurunath)
+      //Qlocal[QHLOOP - 1].xy[0] = {0};
+      //Qlocal[QHLOOP - 1].xy[1] = {0};
+      zero(Qlocal[QHLOOP - 1].xy[0]);
+      zero(Qlocal[QHLOOP - 1].xy[1]);
     }
 
     const scalar_t* k_ptr = k_cache + physical_block_number * kv_block_stride +
@@ -497,7 +555,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   for (int h = 0; h < QHLOOP; h++) {
 #pragma unroll
     for (int i = 0; i < 4; i++) {
-      logits[h][i] = (scalar_t)dout[h][i];
+      //logits[h][i] = (scalar_t)dout[h][i];
+      logits[h][i] = cast_assign<float, scalar_t>(dout[h][i]);
     }
   }
 
@@ -508,7 +567,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     for (int qh = 0; qh < QHLOOP; qh++) {
 #pragma unroll
       for (int vh = 0; vh < VHELOOP; vh++) {
-        vout_shared[qh][vh][laneid][warpid] = {0};
+        //vout_shared[qh][vh][laneid][warpid] = {0};
+        zero(vout_shared[qh][vh][laneid][warpid]);
       }
     }
   } else {  // warp in context
@@ -536,12 +596,14 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         acc = gcn_mfma_instr<4, 13, 0>(logits[qh], Vlocal[vh][6].xy[1], acc);
         acc = gcn_mfma_instr<4, 14, 0>(logits[qh], Vlocal[vh][7].xy[0], acc);
         acc = gcn_mfma_instr<4, 15, 0>(logits[qh], Vlocal[vh][7].xy[1], acc);
+        //
         Tx4_t<scalar_t> tmp;
 #pragma unroll
         for (int i = 0; i < 4; i++) {
-          tmp[i] = (scalar_t)acc[i];
+          //tmp[i] = (scalar_t)acc[i];
+          vout_shared[qh][vh][laneid][warpid][i] = cast_assign<float, scalar_t>(acc[i]);
         }
-        vout_shared[qh][vh][laneid][warpid] = tmp;
+        //vout_shared[qh][vh][laneid][warpid] = tmp;
       }
     }
   }  // warp in context
@@ -566,10 +628,15 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 // iterate over each v head elem (within head_size)
 #pragma unroll
       for (int vh = 0; vh < VHELOOP; vh++) {
-        vout[qh][vh] = {0};
+        //vout[qh][vh] = {0};
+        zero(vout[qh][vh]);
 #pragma unroll
         for (int w = 0; w < NWARPS; w++) {
-          vout[qh][vh] += vout_shared[qh][vh][laneid][w];
+          //vout[qh][vh] += vout_shared[qh][vh][laneid][w];
+#pragma unroll
+          for (int i = 0; i < 4; i++) {
+            vout[qh][vh][i] += vout_shared[qh][vh][laneid][w][i];
+          }
         }
         const int head_size_elem = vh * WARP_SIZE + laneid;
 #pragma unroll
@@ -688,7 +755,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   scalar_t tmps[MAX_NPAR];
 #pragma unroll
   for (int j = 0; j < MAX_NPAR; j++) {
-    tmps[j] = 0.0f;
+    tmps[j] = cast_assign<float, scalar_t>(0.0f);
   }
   const int last_partition_offset = (num_partitions - 1) * HEAD_SIZE;
   const int num_partition_offset = (num_partitions)*HEAD_SIZE;
@@ -732,17 +799,17 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   float acc = 0.0f;
 #pragma unroll
   for (int j = 0; j < JCHUNK; j++) {
-    acc += tmps[j] * shared_exp_sums[j];
+    acc += cast_assign<scalar_t, float>(tmps[j]) * shared_exp_sums[j];
   }
   if (num_partitions > JCHUNK) {
 #pragma unroll
     for (int j = JCHUNK; j < 2 * JCHUNK; j++) {
-      acc += tmps[j] * shared_exp_sums[j];
+      acc += cast_assign<scalar_t, float>(tmps[j]) * shared_exp_sums[j];
     }
     if (num_partitions > 2 * JCHUNK) {
 #pragma unroll
       for (int j = 2 * JCHUNK; j < MAX_NPAR; j++) {
-        acc += tmps[j] * shared_exp_sums[j];
+        acc += cast_assign<scalar_t, float>(tmps[j]) * shared_exp_sums[j];
       }
     }
   }
@@ -761,7 +828,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
 
 #pragma unroll
     for (int j = 0; j < MAX_NPAR; j++) {
-      acc += tmps[j] * shared_exp_sums[j + MAX_NPAR];
+      acc += cast_assign<scalar_t, float>(tmps[j]) * shared_exp_sums[j + MAX_NPAR];
     }
   }
 
@@ -771,7 +838,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   // from_float(out_ptr[threadIdx.x], acc);
   scalar_t* out_ptr =
       out + seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
-  out_ptr[threadIdx.x] = (scalar_t)acc;
+  out_ptr[threadIdx.x] = cast_assign<float, scalar_t>(acc);
 }
 
 #define LAUNCH_CUSTOM_ATTENTION(GQA_RATIO)                                    \
@@ -968,7 +1035,7 @@ void paged_attention_custom(
   if (query.dtype() == at::ScalarType::Half) {
     CALL_CUSTOM_LAUNCHER_BLK_HEAD(_Float16);
   } else if (query.dtype() == at::ScalarType::BFloat16) {
-    CALL_CUSTOM_LAUNCER_BLK_HEAD(__hip_bfloat16);
+    CALL_CUSTOM_LAUNCHER_BLK_HEAD(BF16);
   } else {
     TORCH_CHECK(false, "Unsupported data type: ", query.dtype());
   }
