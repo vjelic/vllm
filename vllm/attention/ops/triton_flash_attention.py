@@ -740,7 +740,7 @@ class _attention(torch.autograd.Function):
             o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
 
         # Get closest power of 2 over or equal to 32.
-        unpadded_head_dims = {32, 64, 128, 256}
+        unpadded_head_dims = [32, 64, 128, 256]
         if head_size not in unpadded_head_dims:
             padded_d_model = None
             for i in unpadded_head_dims:
