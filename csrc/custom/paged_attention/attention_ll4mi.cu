@@ -23,15 +23,16 @@ typedef struct _Half8 {
   _Half4 xy[2];
 } _Half8;
 
-// TODO(Gurunath): can we use uint16_t here to get small vector working?
-//   But this will need a lot of special handling for one element as well
 using BF16 = __hip_bfloat16;
-using BF16x4 = BF16[4];
+using u16x4 =
+    __attribute__((__vector_size__(4 * sizeof(_Float16)))) uint16_t;
+union alignas(8) BF16x4 {
+  BF16 bf16_data[4];
+  u16x4 raw_data;
+};
 typedef struct _BF16x8 {
   BF16x4 xy[2];
 } BF16x8;
-using u16x4 =
-    __attribute__((__vector_size__(4 * sizeof(_Float16)))) uint16_t;
 
 ///////////////////////////
 
@@ -74,17 +75,17 @@ using Tx8_t = typename Tx8<T>::type;
 ////////////////////////////////////////
 
 __device__ __forceinline__ void zero(BF16x4 &dest) {
-  dest[0] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
-  dest[1] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
-  dest[2] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
-  dest[3] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  __hip_bfloat162* dummy { reinterpret_cast<__hip_bfloat162 *>(dest.bf16_data) };
+  dummy[0] = __bfloat162bfloat162( __ushort_as_bfloat16(static_cast<uint16_t>(0)) );
+  dummy[1] = __bfloat162bfloat162( __ushort_as_bfloat16(static_cast<uint16_t>(0)) );
+  //dest.bf16_data[0] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  //dest.bf16_data[1] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  //dest.bf16_data[2] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
+  //dest.bf16_data[3] = __ushort_as_bfloat16(static_cast<uint16_t>(0));
 }
 
 __device__ __forceinline__ void zero(float16x4 &dest) {
-  dest[0] = 0;
-  dest[1] = 0;
-  dest[2] = 0;
-  dest[3] = 0;
+  dest = {0};
 }
 
 
@@ -99,6 +100,15 @@ __device__ __forceinline__ BF16 cast_assign<float, BF16>(float src) {
 }
 
 template<>
+__device__ __forceinline__ BF16x4 cast_assign<floatx4, BF16x4>(floatx4 src) {
+  BF16x4 tmp;
+  __hip_bfloat162* tmp_packed { reinterpret_cast<__hip_bfloat162 *>(tmp.bf16_data) };
+  tmp_packed[0] = __float22bfloat162_rn( float2 { src[0], src[1] } );
+  tmp_packed[1] = __float22bfloat162_rn( float2 { src[2], src[3] } );
+  return tmp;
+}
+
+template<>
 __device__ __forceinline__ float cast_assign<BF16, float>(BF16 src) {
   return __bfloat162float(src);
 }
@@ -109,30 +119,27 @@ __device__ __forceinline__ _Float16 cast_assign<float, _Float16>(float src) {
 }
 
 template<>
+__device__ __forceinline__ _Half4 cast_assign<floatx4, _Half4>(floatx4 src) {
+  _Half4 tmp;
+  _Float16_2* tmp_packed { reinterpret_cast<_Float16_2 *>(& tmp) };
+  tmp_packed[0] = {static_cast<_Float16>(src[0]), static_cast<_Float16>(src[1])};
+  tmp_packed[1] = {static_cast<_Float16>(src[2]), static_cast<_Float16>(src[3])};
+  return tmp;
+}
+
+template<>
 __device__ __forceinline__ float cast_assign<_Float16, float>(_Float16 src) {
   return static_cast<float>(src);
 }
 
 ////////////////////////////////////////
 
-//#define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
-
-/**
- * NOTE(Gurunath): _Half4 and BF16 decay differently
- */
 template<int cbsz, int abid, int blgp, typename T, typename Acc>
 __device__ __forceinline__ Acc/*x4*/ gcn_mfma_instr(T/*x4*/ a_frag, T/*x4*/ b_frag, Acc/*x4*/ c_frag) {
   if constexpr (std::is_same_v<T, _Half4>) {
     return __builtin_amdgcn_mfma_f32_4x4x4f16(a_frag, b_frag, c_frag, cbsz, abid, blgp);
-  } else if constexpr (std::is_same_v<T, BF16 *>) {
-    u16x4 a;
-    u16x4 b;
-#pragma unroll
-    for (size_t idx{}; idx < 4; ++idx) {
-      a[idx] = __bfloat16_as_ushort(a_frag[idx]);
-      b[idx] = __bfloat16_as_ushort(b_frag[idx]);
-    }
-    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a, b, c_frag, cbsz, abid, blgp);
+  } else if constexpr (std::is_same_v<T, BF16x4>) {
+    return __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a_frag.raw_data, b_frag.raw_data, c_frag, cbsz, abid, blgp);
   } else {
     static_assert(false, "Unsupported dtype for MFMA");
   }
@@ -343,8 +350,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       Qlocal[QHLOOP - 1] =
           q_ptrh8[final_qhead_idx * HEAD_SIZE / 8 + qhead_elemh8];
     } else {
-      //Qlocal[QHLOOP - 1].xy[0] = {0};
-      //Qlocal[QHLOOP - 1].xy[1] = {0};
       zero(Qlocal[QHLOOP - 1].xy[0]);
       zero(Qlocal[QHLOOP - 1].xy[1]);
     }
@@ -553,10 +558,22 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   Tx4_t<scalar_t> logits[QHLOOP];
 #pragma unroll
   for (int h = 0; h < QHLOOP; h++) {
-#pragma unroll
-    for (int i = 0; i < 4; i++) {
-      //logits[h][i] = (scalar_t)dout[h][i];
-      logits[h][i] = cast_assign<float, scalar_t>(dout[h][i]);
+//#pragma unroll
+//    for (int i = 0; i < 4; i++) {
+//      if constexpr (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, _Float16>) {
+//        logits[h][i] = cast_assign<float, scalar_t>(dout[h][i]);
+//      } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+//        logits[h].bf16_data[i] = cast_assign<float, scalar_t>(dout[h][i]);
+//      } else {
+//        static_assert(false, "Unsupported datatype");
+//      }
+//    }
+    if constexpr (std::is_same_v<scalar_t, _Float16>) {
+      logits[h] = cast_assign<floatx4, _Half4>(dout[h]);
+    } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+      logits[h] = cast_assign<floatx4, BF16x4>(dout[h]);
+    } else {
+      static_assert(false, "Unsupported datatype");
     }
   }
 
@@ -567,7 +584,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     for (int qh = 0; qh < QHLOOP; qh++) {
 #pragma unroll
       for (int vh = 0; vh < VHELOOP; vh++) {
-        //vout_shared[qh][vh][laneid][warpid] = {0};
         zero(vout_shared[qh][vh][laneid][warpid]);
       }
     }
@@ -596,14 +612,23 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         acc = gcn_mfma_instr<4, 13, 0>(logits[qh], Vlocal[vh][6].xy[1], acc);
         acc = gcn_mfma_instr<4, 14, 0>(logits[qh], Vlocal[vh][7].xy[0], acc);
         acc = gcn_mfma_instr<4, 15, 0>(logits[qh], Vlocal[vh][7].xy[1], acc);
-        //
-        Tx4_t<scalar_t> tmp;
-#pragma unroll
-        for (int i = 0; i < 4; i++) {
-          //tmp[i] = (scalar_t)acc[i];
-          vout_shared[qh][vh][laneid][warpid][i] = cast_assign<float, scalar_t>(acc[i]);
-        }
-        //vout_shared[qh][vh][laneid][warpid] = tmp;
+//#pragma unroll
+//        for (int i = 0; i < 4; i++) {
+//          if constexpr (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, _Float16>) {
+//            vout_shared[qh][vh][laneid][warpid][i] = cast_assign<float, scalar_t>(acc[i]);
+//          } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+//            vout_shared[qh][vh][laneid][warpid].bf16_data[i] = cast_assign<float, scalar_t>(acc[i]);
+//          } else {
+//            static_assert(false, "Unsupported datatype");
+//          }
+//        }
+      if constexpr (std::is_same_v<scalar_t, _Float16>) {
+        vout_shared[qh][vh][laneid][warpid] = cast_assign<floatx4, _Half4>(acc);
+      } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+        vout_shared[qh][vh][laneid][warpid] = cast_assign<floatx4, BF16x4>(acc);
+      } else {
+        static_assert(false, "Unsupported datatype");
+      }
       }
     }
   }  // warp in context
@@ -628,14 +653,18 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 // iterate over each v head elem (within head_size)
 #pragma unroll
       for (int vh = 0; vh < VHELOOP; vh++) {
-        //vout[qh][vh] = {0};
         zero(vout[qh][vh]);
 #pragma unroll
         for (int w = 0; w < NWARPS; w++) {
-          //vout[qh][vh] += vout_shared[qh][vh][laneid][w];
 #pragma unroll
           for (int i = 0; i < 4; i++) {
-            vout[qh][vh][i] += vout_shared[qh][vh][laneid][w][i];
+            if constexpr (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, _Float16>) {
+              vout[qh][vh][i] += vout_shared[qh][vh][laneid][w][i];
+            } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+              vout[qh][vh].bf16_data[i] += vout_shared[qh][vh][laneid][w].bf16_data[i];
+            } else {
+              static_assert(false, "Unsupported datatype");
+            }
           }
         }
         const int head_size_elem = vh * WARP_SIZE + laneid;
@@ -643,11 +672,15 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         for (int i = 0; i < 4; i++) {
           const int head_idx = 4 * qh + i;
           if (head_idx < GQA_RATIO) {
-            // out_ptr[(wg_start_head_idx + head_idx) * max_num_partitions *
-            // HEAD_SIZE + head_size_elem] = vout[qh][vh][i];
-            out_ptr[(wg_start_head_idx + head_idx) * out_num_partitions *
-                        HEAD_SIZE +
-                    head_size_elem] = vout[qh][vh][i];
+            if constexpr (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, _Float16>) {
+              out_ptr[(wg_start_head_idx + head_idx) * out_num_partitions * HEAD_SIZE + head_size_elem]
+                = vout[qh][vh][i];
+            } else if constexpr (std::is_same_v<scalar_t, BF16>) {
+              out_ptr[(wg_start_head_idx + head_idx) * out_num_partitions * HEAD_SIZE + head_size_elem]
+                = vout[qh][vh].bf16_data[i];
+            } else {
+              static_assert(false, "Unsupported datatype");
+            }
           }
         }
       }
