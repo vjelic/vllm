@@ -380,7 +380,8 @@ class AsyncLLMEngine:
                 MultiprocessingGPUExecutorAsync)
             executor_class = MultiprocessingGPUExecutorAsync
         elif distributed_executor_backend == "torchrun":
-            from vllm.executor.torchrun_gpu_executor import TorchrunGPUExecutorAsync
+            from vllm.executor.torchrun_gpu_executor import (
+                TorchrunGPUExecutorAsync)
             executor_class = TorchrunGPUExecutorAsync
         else:
             from vllm.executor.gpu_executor import GPUExecutorAsync
