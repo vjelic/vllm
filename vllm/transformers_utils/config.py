@@ -15,7 +15,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              InternVLChatConfig, JAISConfig,
                                              MedusaConfig, MLPSpeculatorConfig,
                                              MPTConfig, NemotronConfig,
-                                             RWConfig, UltravoxConfig)
+                                             RWConfig, UltravoxConfig,
+                                             Grok1Config)
 from vllm.transformers_utils.utils import check_gguf_file
 
 if VLLM_USE_MODELSCOPE:
