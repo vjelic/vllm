@@ -13,8 +13,10 @@ from vllm.model_executor.layers.fused_moe import (fused_moe,
                                                   get_config_file_name,
                                                   invoke_fused_moe_kernel,
                                                   moe_align_block_size)
+import triton
+import triton.language as tl
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
 os.environ["DEBUG_CLR_GRAPH_PACKET_CAPTURE"] = "1"
 os.environ["OPTIMIZE_EPILOGUE"] = "1"
@@ -258,7 +260,7 @@ def run_grid(bs, method):
 
     # holds Dict[str, Dict[str, int]]
     filename = get_config_file_name(num_total_experts,
-                                    model_intermediate_size // tp_size)
+                                    model_intermediate_size // tp_size, dtype="")
     print(f"writing config to file {filename}")
     existing_content = {}
     if os.path.exists(filename):
@@ -300,6 +302,13 @@ def run_timing(
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
+
+    w1_scale = None
+    w2_scale = None
+    a1_scale = None
+    a2_scale = None
+    compute_type = (tl.bfloat16 if hidden_states.dtype == torch.bfloat16 else tl.float16)
+    use_fp8 = None
 
     gating_output = F.softmax(
         torch.rand(
@@ -374,10 +383,13 @@ def run_timing(
 
     start_event.record()
     for i in range(num_calls):
+
         invoke_fused_moe_kernel(
             hidden_states,
             w1,
             intermediate_cache1,
+            a1_scale,
+            w1_scale,
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -386,6 +398,8 @@ def run_timing(
             False,
             topk_ids.shape[1],
             config,
+            compute_type=compute_type,
+            use_fp8=use_fp8
         )
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
@@ -394,6 +408,8 @@ def run_timing(
             intermediate_cache2,
             w2,
             intermediate_cache3,
+            a2_scale,
+            w2_scale,
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -402,6 +418,8 @@ def run_timing(
             True,
             1,
             config,
+            compute_type=compute_type,
+            use_fp8=use_fp8
         )
 
     end_event.record()
