@@ -471,55 +471,45 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     }
   }
 
-  __shared__ float16x4 vout_shared[QHLOOP][VHELOOP][WARP_SIZE][NWARPS + 1];
+  __shared__ floatx4 vout_shared[VHELOOP][WARP_SIZE][NWARPS + 1];
 
-  if (warp_start_token_idx >= context_len) {  // warp out of context
-#pragma unroll
-    for (int qh = 0; qh < QHLOOP; qh++) {
-#pragma unroll
-      for (int vh = 0; vh < VHELOOP; vh++) {
-        vout_shared[qh][vh][laneid][warpid] = {0};
-      }
-    }
-  } else {  // warp in context
 // iterate across heads
 #pragma unroll
-    for (int qh = 0; qh < QHLOOP; qh++) {
-// iterate over each v head elem (within head_size)
+  for (int qh = 0; qh < QHLOOP; qh++) { //qhloop
+      if (warp_start_token_idx >= context_len) {  // warp out of context
 #pragma unroll
-      for (int vh = 0; vh < VHELOOP; vh++) {
-        floatx4 acc = {0};
-        // iterate over tokens
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[0], acc, 4, 0, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[1], acc, 4, 1, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[0], acc, 4, 2, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[1], acc, 4, 3, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[0], acc, 4, 4, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[1], acc, 4, 5, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[0], acc, 4, 6, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[1], acc, 4, 7, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[0], acc, 4, 8, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[1], acc, 4, 9, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[0], acc, 4, 10, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[1], acc, 4, 11, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[0], acc, 4, 12, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[1], acc, 4, 13, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[0], acc, 4, 14, 0);
-        acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[1], acc, 4, 15, 0);
-        float16x4 tmp;
-#pragma unroll
-        for (int i = 0; i < 4; i++) {
-          tmp[i] = (scalar_t)acc[i];
+        for (int vh = 0; vh < VHELOOP; vh++) {
+            vout_shared[vh][laneid][warpid] = {0};
         }
-        vout_shared[qh][vh][laneid][warpid] = tmp;
-      }
-    }
-  }  // warp in context
+      } else { // warp in context
+        // iterate over each v head elem (within head_size)
+#pragma unroll
+        for (int vh = 0; vh < VHELOOP; vh++) {
+            floatx4 acc = {0};
+            // iterate over tokens
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[0], acc, 4, 0, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][0].xy[1], acc, 4, 1, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[0], acc, 4, 2, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][1].xy[1], acc, 4, 3, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[0], acc, 4, 4, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][2].xy[1], acc, 4, 5, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[0], acc, 4, 6, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][3].xy[1], acc, 4, 7, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[0], acc, 4, 8, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][4].xy[1], acc, 4, 9, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[0], acc, 4, 10, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][5].xy[1], acc, 4, 11, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[0], acc, 4, 12, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][6].xy[1], acc, 4, 13, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[0], acc, 4, 14, 0);
+            acc = GCN_MFMA_INSTR(logits[qh], Vlocal[vh][7].xy[1], acc, 4, 15, 0);
+            vout_shared[vh][laneid][warpid] = acc;
+        }
+      }  // warp in context
+      __syncthreads();
 
-  __syncthreads();
-
-  if (warpid == 0) {
-    float16x4 vout[QHLOOP][VHELOOP];
+   if (warpid == 0) {
+    floatx4 vout[VHELOOP];
     // iterate across heads
     scalar_t* out_ptr;
     int out_num_partitions;
@@ -531,15 +521,13 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       out_num_partitions = 1;
       out_ptr = final_out + seq_idx * num_heads * HEAD_SIZE;
     }
+    // iterate over each v head elem (within head_size)
 #pragma unroll
-    for (int qh = 0; qh < QHLOOP; qh++) {
-// iterate over each v head elem (within head_size)
-#pragma unroll
-      for (int vh = 0; vh < VHELOOP; vh++) {
-        vout[qh][vh] = {0};
+    for (int vh = 0; vh < VHELOOP; vh++) {
+        vout[vh] = {0};
 #pragma unroll
         for (int w = 0; w < NWARPS; w++) {
-          vout[qh][vh] += vout_shared[qh][vh][laneid][w];
+          vout[vh] += vout_shared[vh][laneid][w];
         }
         const int head_size_elem = vh * WARP_SIZE + laneid;
 #pragma unroll
@@ -550,28 +538,12 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
             // HEAD_SIZE + head_size_elem] = vout[qh][vh][i];
             out_ptr[(wg_start_head_idx + head_idx) * out_num_partitions *
                         HEAD_SIZE +
-                    head_size_elem] = vout[qh][vh][i];
+                    head_size_elem] = (scalar_t)vout[vh][i];
           }
         }
-      }
     }
-  }
-
-#if 0
-    const int num_seqs = gridDim.x;
-    const int global_token4id = global_token_idx/4;
-  #pragma unroll
-    for (int t=0;t<4;t++) {
-  #pragma unroll
-        for (int h=0;h<QHLOOP;h++) {
-          //const int head_idx = h*4 + t;
-          const int head_idx = h*4 + lane4id;
-	      //qk_out[head_idx*num_seqs*max_ctx_blocks*BLOCK_SIZE + seq_idx*max_ctx_blocks*BLOCK_SIZE + global_token_idx] = (scalar_t)dout[h][t];
-	       qk_out[head_idx*num_seqs*max_ctx_blocks*BLOCK_SIZE + seq_idx*max_ctx_blocks*BLOCK_SIZE + 4*global_token4id + t] = logits[h][t];
-	      //qk_out[head_idx*num_seqs*max_ctx_blocks*BLOCK_SIZE + seq_idx*max_ctx_blocks*BLOCK_SIZE + 4*global_token4id + t] = vout[h][t%2][t];
-        }
-    }
-#endif
+   }//warpid==0
+  } //qhloop
 }
 
 // Grid: (num_heads, num_seqs).
