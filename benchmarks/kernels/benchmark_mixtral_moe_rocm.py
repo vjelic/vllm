@@ -1,12 +1,14 @@
+import argparse
 import json
 import os
 import sys
 
 import torch
 import torch.nn.functional as F
-import triton
 from tqdm import tqdm
 
+import triton
+import triton.language as tl
 import vllm._moe_C as moe_kernels
 from vllm._C import ops
 from vllm.model_executor.layers.fused_moe import (fused_moe,
@@ -14,12 +16,31 @@ from vllm.model_executor.layers.fused_moe import (fused_moe,
                                                   invoke_fused_moe_kernel,
                                                   moe_align_block_size)
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+parser = argparse.ArgumentParser(description="Process some integers.")
+parser.add_argument(
+    "--TP",
+    type=int,
+    choices=[8, 4, 2, 1],
+    help="Specify the TP value that the actual model will run on",
+    required=True,
+)
+parser.add_argument(
+    "--GPUID",
+    type=str,
+    help="This script uses single GPU. Specify the GPU-ID to use for tuning",
+    default="0",
+)
+args = parser.parse_args()
+
+print(f"TP is set to: {args.TP}")
+print(f"GPU-ID being used for tuning: {args.GPU}")
+
+TP = args.TP
+
+os.environ["HIP_VISIBLE_DEVICES"] = args.GPU
 os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
 os.environ["DEBUG_CLR_GRAPH_PACKET_CAPTURE"] = "1"
 os.environ["OPTIMIZE_EPILOGUE"] = "1"
-
-TP = 8
 
 
 def main():
@@ -257,8 +278,9 @@ def run_grid(bs, method):
     # print("best_config", best_config)
 
     # holds Dict[str, Dict[str, int]]
-    filename = get_config_file_name(num_total_experts,
-                                    model_intermediate_size // tp_size)
+    filename = get_config_file_name(
+        num_total_experts, model_intermediate_size // tp_size, dtype=None
+    )
     print(f"writing config to file {filename}")
     existing_content = {}
     if os.path.exists(filename):
@@ -378,6 +400,8 @@ def run_timing(
             hidden_states,
             w1,
             intermediate_cache1,
+            None,  # a1_scale
+            None,  # w1_scale
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -386,6 +410,12 @@ def run_timing(
             False,
             topk_ids.shape[1],
             config,
+            compute_type=(
+                tl.bfloat16
+                if hidden_states.dtype == torch.bfloat16
+                else tl.float16
+            ),
+            use_fp8=False,
         )
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
@@ -394,6 +424,8 @@ def run_timing(
             intermediate_cache2,
             w2,
             intermediate_cache3,
+            None,  # a2_scale
+            None,  # w2_scale
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -402,6 +434,12 @@ def run_timing(
             True,
             1,
             config,
+            compute_type=(
+                tl.bfloat16
+                if hidden_states.dtype == torch.bfloat16
+                else tl.float16
+            ),
+            use_fp8=False,
         )
 
     end_event.record()
