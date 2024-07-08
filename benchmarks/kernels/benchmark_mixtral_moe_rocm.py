@@ -5,10 +5,10 @@ import sys
 
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
-
 import triton
 import triton.language as tl
+from tqdm import tqdm
+
 import vllm._moe_C as moe_kernels
 from vllm._C import ops
 from vllm.model_executor.layers.fused_moe import (fused_moe,
@@ -33,11 +33,11 @@ parser.add_argument(
 args = parser.parse_args()
 
 print(f"TP is set to: {args.TP}")
-print(f"GPU-ID being used for tuning: {args.GPU}")
+print(f"GPU-ID being used for tuning: {args.GPUID}")
 
 TP = args.TP
 
-os.environ["HIP_VISIBLE_DEVICES"] = args.GPU
+os.environ["HIP_VISIBLE_DEVICES"] = args.GPUID
 os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
 os.environ["DEBUG_CLR_GRAPH_PACKET_CAPTURE"] = "1"
 os.environ["OPTIMIZE_EPILOGUE"] = "1"
