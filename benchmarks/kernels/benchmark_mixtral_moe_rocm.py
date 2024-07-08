@@ -410,11 +410,8 @@ def run_timing(
             False,
             topk_ids.shape[1],
             config,
-            compute_type=(
-                tl.bfloat16
-                if hidden_states.dtype == torch.bfloat16
-                else tl.float16
-            ),
+            compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
+                          else tl.float16),
             use_fp8=False,
         )
 
@@ -434,11 +431,8 @@ def run_timing(
             True,
             1,
             config,
-            compute_type=(
-                tl.bfloat16
-                if hidden_states.dtype == torch.bfloat16
-                else tl.float16
-            ),
+            compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
+                          else tl.float16),
             use_fp8=False,
         )
 
