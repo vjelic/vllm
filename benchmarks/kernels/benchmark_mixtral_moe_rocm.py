@@ -278,9 +278,9 @@ def run_grid(bs, method):
     # print("best_config", best_config)
 
     # holds Dict[str, Dict[str, int]]
-    filename = get_config_file_name(
-        num_total_experts, model_intermediate_size // tp_size, dtype=None
-    )
+    filename = get_config_file_name(num_total_experts,
+                                    model_intermediate_size // tp_size,
+                                    dtype=None)
     print(f"writing config to file {filename}")
     existing_content = {}
     if os.path.exists(filename):
