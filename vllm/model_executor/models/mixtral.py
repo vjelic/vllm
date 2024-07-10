@@ -27,6 +27,7 @@ import numpy as np
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from transformers import MixtralConfig
 
 from vllm import _custom_ops as ops
@@ -133,7 +134,7 @@ class MixtralMoE(nn.Module):
                                      quant_config=quant_config)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        batch_size, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits, _ = self.gate(hidden_states)
@@ -158,8 +159,7 @@ class MixtralMoE(nn.Module):
             else:
                 final_hidden_states.add_(current_hidden_states)
 
-        return tensor_model_parallel_all_reduce(final_hidden_states).view(
-            batch_size, sequence_length, hidden_dim)
+        return tensor_model_parallel_all_reduce(final_hidden_states)
 
 
 
