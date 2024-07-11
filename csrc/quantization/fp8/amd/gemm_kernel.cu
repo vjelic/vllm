@@ -301,7 +301,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleB = d_scaleB;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : k + 256;
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k+256);
   auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
   auto ldc = m;
   auto strideA = m * (k+256);
