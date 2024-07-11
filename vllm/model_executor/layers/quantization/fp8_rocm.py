@@ -177,8 +177,9 @@ class Fp8RocmLinearMethod(LinearMethodBase):
                                                  requires_grad=False)
 
         # WEIGHT
-        #   Transpose weight for passing to torch._scaled_mm
+        # pad the weight
         weight = layer.weight
+        weight = F.pad(weight, (0, 256), "constant", 0).contiguous()
         layer.weight = Parameter(weight, requires_grad=False)
 
         if layer.weight.dtype == torch.float8_e4m3fnuz:

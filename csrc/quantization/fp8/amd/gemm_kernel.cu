@@ -225,7 +225,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
                   b.dtype() == torch::kFloat8_e4m3fnuz,
               "The input tensors should be in fp8.");
   TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "Input tensors must be 2-D.");
-  TORCH_CHECK(a_sizes[1] == b_sizes[0], "a dim 1 must match b dim 0.");
+  TORCH_CHECK(a_sizes[1] + 256 == b_sizes[0], "a dim 1 must match b dim 0.");
 
   auto options{at::TensorOptions().dtype(torch::kFloat16).device(at::kCUDA)};
   auto result{torch::empty({a_sizes[0], b_sizes[1]}, options)};
@@ -274,14 +274,6 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   void* d_b = static_cast<void*>((transpose_result ? a : b).data_ptr());
   void* d_d = static_cast<void*>(result.data_ptr());
 
-  // void *d_scaleA, *d_scaleB, *d_workspace;
-  // CHECK_HIP_ERROR(hipMalloc(&d_scaleA, sizeof(float)));
-  // CHECK_HIP_ERROR(hipMalloc(&d_scaleB, sizeof(float)));
-  // CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-  // CHECK_HIP_ERROR(hipMemcpy(d_scaleA, &(transpose_result ? scaleB : scaleA),
-  // sizeof(float), hipMemcpyHostToDevice)); CHECK_HIP_ERROR(hipMemcpy(d_scaleB,
-  // &(transpose_result ? scaleA : scaleB), sizeof(float),
-  // hipMemcpyHostToDevice));
   auto d_scaleA = transpose_result ? scaleB.data_ptr() : scaleA.data_ptr();
   auto d_scaleB = transpose_result ? scaleA.data_ptr() : scaleB.data_ptr();
 
@@ -309,10 +301,10 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleB = d_scaleB;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : k;
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : k + 256;
   auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
   auto ldc = m;
-  auto strideA = m * k;
+  auto strideA = m * (k+256);
   auto strideB = n * k;
   auto strideC = m * n;
 
