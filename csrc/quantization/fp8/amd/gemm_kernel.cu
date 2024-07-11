@@ -44,7 +44,7 @@ static size_t get_hipblaslt_workspace_size() {
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  size_t workspace_size = 32 * 1024;  // going with 32MB
+  size_t workspace_size = 256 * 1024;  // going with 32MB
   if (env) {
     try {
       workspace_size = std::stoi(env);
@@ -267,7 +267,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = a_sizes[transpose_result ? 0 : 1];
+  int64_t k = b_sizes[transpose_result ? 1 : 0];
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());

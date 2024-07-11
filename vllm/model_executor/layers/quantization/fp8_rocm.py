@@ -226,7 +226,6 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         n = x.shape[0]
         k = x.shape[1]
 
-        print("Size: ", weight.size(), "Stride: ", weight.stride())
         algo = self._config._tuned.get((m, n, k))
         if algo is None:
             _save_shape(m, n, k)
