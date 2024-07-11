@@ -122,7 +122,7 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = a_sizes[transpose_result ? 0 : 1];
+  int64_t k = b_sizes[transpose_result ? 1 : 0];
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());
@@ -167,10 +167,10 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleD = d_scaleD;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : k;
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + 256);
   auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
   auto ldc = m;
-  auto strideA = m * k;
+  auto strideA = m * (k + 256);
   auto strideB = n * k;
   auto strideC = m * n;
 
