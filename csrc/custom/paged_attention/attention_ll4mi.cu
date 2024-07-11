@@ -277,6 +277,13 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       for (int d = 0; d < KHELOOP; d++) {
         Klocal[d] = k_ptrh8[d * BLOCK_SIZE + physical_block_offset];
       }
+    } else {
+      const _B8x8* k_ptrh8 = reinterpret_cast<const _B8x8*>(k_ptr);
+
+#pragma unroll
+      for (int d = 0; d < KHELOOP; d++) {
+        Klocalb8[d] = k_ptrh8[d * BLOCK_SIZE + physical_block_offset];
+      }
     }
 
     float alibi_slope[QHLOOP];
@@ -356,69 +363,69 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[0].xy[0], dout[h], 4, 0, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[0].xy[0],Klocalb8[0].xy[0]), dout[h], 4, 0, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[0].xy[1], dout[h], 4, 0, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[0].xy[1],Klocalb8[0].xy[1]), dout[h], 4, 0, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[1].xy[0], dout[h], 4, 1, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[1].xy[0],Klocalb8[1].xy[0]), dout[h], 4, 1, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[1].xy[1], dout[h], 4, 1, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[1].xy[1],Klocalb8[1].xy[1]), dout[h], 4, 1, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[2].xy[0], dout[h], 4, 2, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[2].xy[0],Klocalb8[2].xy[0]), dout[h], 4, 2, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[2].xy[1], dout[h], 4, 2, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[2].xy[1],Klocalb8[2].xy[1]), dout[h], 4, 2, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[3].xy[0], dout[h], 4, 3, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[3].xy[0],Klocalb8[3].xy[0]), dout[h], 4, 3, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[3].xy[1], dout[h], 4, 3, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[3].xy[1],Klocalb8[3].xy[1]), dout[h], 4, 3, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[4].xy[0], dout[h], 4, 4, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[4].xy[0],Klocalb8[4].xy[0]), dout[h], 4, 4, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[4].xy[1], dout[h], 4, 4, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[4].xy[1],Klocalb8[4].xy[1]), dout[h], 4, 4, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[5].xy[0], dout[h], 4, 5, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[5].xy[0],Klocalb8[5].xy[0]), dout[h], 4, 5, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[5].xy[1], dout[h], 4, 5, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[5].xy[1],Klocalb8[5].xy[1]), dout[h], 4, 5, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[6].xy[0], dout[h], 4, 6, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[6].xy[0],Klocalb8[6].xy[0]), dout[h], 4, 6, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[6].xy[1], dout[h], 4, 6, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[6].xy[1],Klocalb8[6].xy[1]), dout[h], 4, 6, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[7].xy[0], dout[h], 4, 7, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[7].xy[0],Klocalb8[7].xy[0]), dout[h], 4, 7, 0);
       dout[h] =
-          GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[7].xy[1], dout[h], 4, 7, 0);
+          GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[7].xy[1],Klocalb8[7].xy[1]), dout[h], 4, 7, 0);
       if constexpr (KHELOOP > 8) {
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[8].xy[0], dout[h], 4, 8, 0);
+            GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[8].xy[0],Klocalb8[8].xy[0]), dout[h], 4, 8, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[8].xy[1], dout[h], 4, 8, 0);
+            GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[8].xy[1],Klocalb8[8].xy[1]), dout[h], 4, 8, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[9].xy[0], dout[h], 4, 9, 0);
+            GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[9].xy[0],Klocalb8[9].xy[0]), dout[h], 4, 9, 0);
         dout[h] =
-            GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[9].xy[1], dout[h], 4, 9, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[10].xy[0], dout[h], 4,
+            GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[9].xy[1],Klocalb8[9].xy[1]), dout[h], 4, 9, 0);
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[10].xy[0],Klocalb8[10].xy[0]), dout[h], 4,
                                  10, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[10].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[10].xy[1],Klocalb8[10].xy[1]), dout[h], 4,
                                  10, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[11].xy[0], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[11].xy[0],Klocalb8[11].xy[0]), dout[h], 4,
                                  11, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[11].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[11].xy[1],Klocalb8[11].xy[1]), dout[h], 4,
                                  11, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[12].xy[0], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[12].xy[0],Klocalb8[12].xy[0]), dout[h], 4,
                                  12, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[12].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[12].xy[1],Klocalb8[12].xy[1]), dout[h], 4,
                                  12, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[13].xy[0], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[13].xy[0],Klocalb8[13].xy[0]), dout[h], 4,
                                  13, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[13].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[13].xy[1],Klocalb8[13].xy[1]), dout[h], 4,
                                  13, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[14].xy[0], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[14].xy[0],Klocalb8[14].xy[0]), dout[h], 4,
                                  14, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[14].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[14].xy[1],Klocalb8[14].xy[1]), dout[h], 4,
                                  14, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], Klocal[15].xy[0], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[0], convert_b8_to_b16x4<KV_DTYPE>(Klocal[15].xy[0],Klocalb8[15].xy[0]), dout[h], 4,
                                  15, 0);
-        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], Klocal[15].xy[1], dout[h], 4,
+        dout[h] = GCN_MFMA_INSTR(Qlocal[h].xy[1], convert_b8_to_b16x4<KV_DTYPE>(Klocal[15].xy[1],Klocalb8[15].xy[1]), dout[h], 4,
                                  15, 0);
       }  // KHELOOP>8
       dout[h] *= scale;
