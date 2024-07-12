@@ -350,6 +350,7 @@ def fused_moe(
     configs = get_moe_configs(E, w2.shape[2], None)
     if configs:
         config = configs[min(configs.keys(), key=lambda x: abs(x - M))]
+        config = {key: value for key, value in config.items() if key != "GROUP_SIZE_M"}
     else:
         config = {
             "BLOCK_SIZE_M": 64,
