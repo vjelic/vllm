@@ -12,7 +12,6 @@ import torch
 import triton
 import triton.language as tl
 from vllm._C import ops
-import vllm._moe_C as moe_kernels
 
 
 @triton.jit()
@@ -251,7 +250,7 @@ def fused_topk(
     token_expert_indicies = torch.empty(
         M, topk, dtype=torch.int32, device=hidden_states.device
     )
-    moe_kernels.topk_softmax(
+    ops.topk_softmax(
         topk_weights,
         topk_ids,
         token_expert_indicies,
