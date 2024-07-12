@@ -190,7 +190,7 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
                                         inputs, problem));
 
   if (algo_idx == 0) {
-    constexpr int request_solutions = 1024;
+    constexpr int request_solutions = 1;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
     heuristicResult.reserve(request_solutions);
     CHECK_HIPBLASLT_ERROR(
