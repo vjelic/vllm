@@ -35,7 +35,7 @@
 #endif
 
 static void* workspace = nullptr;
-static size_t workspace_size;
+static size_t workspace_size, padding_size;
 
 // Copied from
 // https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cuda/tunable/GemmHipblaslt.h
@@ -59,8 +59,19 @@ static size_t get_hipblaslt_workspace_size() {
   return workspace_size * 1024;
 }
 
+static size_t get_padding_size() {
+  static const char* env = getenv("VLLM_FP8_PADDING");
+  size_t padding_size = 0;
+  if (env) {
+    std::string s(env);
+    if (s == "1") padding_size = 256;
+  }
+  return padding_size;
+}
+
 void create_workspace() {
   workspace_size = get_hipblaslt_workspace_size();
+  padding_size = get_padding_size();
   if (workspace_size > 0)
     CHECK_HIP_ERROR(hipMalloc(&workspace, workspace_size));
 }
@@ -167,10 +178,10 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleD = d_scaleD;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + 256);
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
   auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
   auto ldc = m;
-  auto strideA = m * (k + 256);
+  auto strideA = m * (k + padding_size);
   auto strideB = n * k;
   auto strideC = m * n;
 
@@ -184,15 +195,6 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
     heuristicResult.reserve(request_solutions);
     CHECK_HIPBLASLT_ERROR(
         gemm.algoGetHeuristic(request_solutions, gemmPref, heuristicResult));
-    static size_t solSize = 0;
-    if (heuristicResult.size() != solSize) {
-      std::cout << "fp8 sols: " << heuristicResult.size() << "\n";
-      solSize = heuristicResult.size();
-      for (auto& res : heuristicResult) {
-        auto idx = hipblaslt_ext::getIndexFromAlgo(res.algo);
-        std::cout << idx << "\n";
-      }
-    }
     TORCH_CHECK(!heuristicResult.empty(), "No valid solution found!");
     algo_idx = hipblaslt_ext::getIndexFromAlgo(heuristicResult[0].algo);
   }
@@ -225,7 +227,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
                   b.dtype() == torch::kFloat8_e4m3fnuz,
               "The input tensors should be in fp8.");
   TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "Input tensors must be 2-D.");
-  TORCH_CHECK(a_sizes[1] + 256 == b_sizes[0], "a dim 1 must match b dim 0.");
+  TORCH_CHECK(a_sizes[1] + padding_size == b_sizes[0], "a dim 1 must match b dim 0.");
 
   auto options{at::TensorOptions().dtype(torch::kFloat16).device(at::kCUDA)};
   auto result{torch::empty({a_sizes[0], b_sizes[1]}, options)};
@@ -301,10 +303,10 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleB = d_scaleB;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k+256);
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
   auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
   auto ldc = m;
-  auto strideA = m * (k+256);
+  auto strideA = m * (k + padding_size);
   auto strideB = n * k;
   auto strideC = m * n;
 
@@ -312,20 +314,11 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
                                         strideB, strideC, strideC, epilogue,
                                         inputs, problem));
   if (algo_idx == 0) {
-    constexpr int request_solutions = 1024;
+    constexpr int request_solutions = 1;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
     heuristicResult.reserve(request_solutions);
     CHECK_HIPBLASLT_ERROR(
         gemm.algoGetHeuristic(request_solutions, gemmPref, heuristicResult));
-    static size_t solSize = 0;
-    if (heuristicResult.size() != solSize) {
-      std::cout << "fp16 sols: " << heuristicResult.size() << "\n";
-      solSize = heuristicResult.size();
-      for (auto& res : heuristicResult) {
-        auto idx = hipblaslt_ext::getIndexFromAlgo(res.algo);
-        std::cout << idx << "\n";
-      }
-    }
     algo_idx = hipblaslt_ext::getIndexFromAlgo(heuristicResult[0].algo);
     TORCH_CHECK(!heuristicResult.empty(), "No valid solution found!");
   }

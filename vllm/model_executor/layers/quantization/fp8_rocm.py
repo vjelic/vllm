@@ -26,6 +26,7 @@ class Fp8RocmConfig(QuantizationConfig):
     def __init__(self) -> None:
         self._tuned = {}
         gemm_type = os.getenv("FP8_GEMM", "fp8_16")
+        self.pad_weight = True if os.getenv("VLLM_FP8_PADDING", "0") == "1" else False
         vllm_ops.create_workspace()
         if gemm_type == "fp8_8":
             self.gemm_method = Fp8RocmLinearMethod.apply_fp8_8
@@ -179,7 +180,8 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         # WEIGHT
         # pad the weight
         weight = layer.weight
-        weight = F.pad(weight, (0, 256), "constant", 0).contiguous()
+        if self._config.pad_weight:
+            weight = F.pad(weight, (0, 256), "constant", 0).contiguous()
         layer.weight = Parameter(weight, requires_grad=False)
 
         if layer.weight.dtype == torch.float8_e4m3fnuz:
@@ -229,14 +231,8 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         algo = self._config._tuned.get((m, n, k))
         if algo is None:
             _save_shape(m, n, k)
-            res, _ = torch._scaled_mm(x8,
-                                      weight.t(),
-                                      out_dtype=x.dtype,
-                                      scale_a=asf,
-                                      scale_b=wsf,
-                                      bias=bias)
-        else:
-            res = vllm_ops.fp8_gemm_16(x8, weight.t(), asf, wsf, int(algo))
+            algo = 0
+        res = vllm_ops.fp8_gemm_16(x8, weight.t(), asf, wsf, int(algo))
         return res
 
     def apply_fp8_8(
@@ -258,15 +254,8 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         algo = self._config._tuned.get((m, n, k))
         if algo is None:
             _save_shape(m, n, k)
-            res, _ = torch._scaled_mm(x8,
-                                      weight.t(),
-                                      out_dtype=x8.dtype,
-                                      scale_a=asf,
-                                      scale_b=wsf,
-                                      scale_result=osf,
-                                      bias=bias)
-        else:
-            res = vllm_ops.fp8_gemm(x8, weight.t(), asf, wsf, osf, int(algo))
+            algo = 0
+        res = vllm_ops.fp8_gemm(x8, weight.t(), asf, wsf, osf, int(algo))
         res16 = torch.empty_like(res, dtype=torch.float16)
         vllm_ops.convert_fp8(res16, res, 1 / osf)
         return res16
