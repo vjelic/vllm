@@ -116,6 +116,9 @@ void dynamic_scaled_fp8_quant(torch::Tensor& out, torch::Tensor& input,
 void convert_fp8(torch::Tensor& dst_data, torch::Tensor& src_data,
                  torch::Tensor& scale);
 
+void convert_fp8_2d(torch::Tensor& dst_data, torch::Tensor& src_data,
+                 torch::Tensor& scale);
+
 #ifdef USE_ROCM
 torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
                        torch::Tensor& scaleA, torch::Tensor& scaleB,

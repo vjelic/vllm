@@ -68,6 +68,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "that it is divisible by the block size.");
   ops.def("convert_fp8", &convert_fp8,
           "Convert the key and value cache to fp8 data type");
+  ops.def("convert_fp8_2d", &convert_fp8_2d,
+          "Convert the key and value cache to fp8 data type with padding");
 
 #ifdef USE_ROCM
   ops.def("fp8_gemm", &fp8_gemm, "fp8 GEMM with fp8 output");

@@ -133,7 +133,7 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = b_sizes[transpose_result ? 1 : 0];
+  int64_t k = b_sizes[transpose_result ? 1 : 0] - padding_size;
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());
@@ -179,10 +179,10 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
 
   auto&& problem = gemm.getProblemTypes();
   auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
-  auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
+  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + padding_size) : n;
   auto ldc = m;
   auto strideA = m * (k + padding_size);
-  auto strideB = n * k;
+  auto strideB = n * (k + padding_size);
   auto strideC = m * n;
 
   CHECK_HIPBLASLT_ERROR(gemm.setProblem(m, n, k, 1, lda, ldb, ldc, ldc, strideA,
@@ -227,7 +227,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
                   b.dtype() == torch::kFloat8_e4m3fnuz,
               "The input tensors should be in fp8.");
   TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "Input tensors must be 2-D.");
-  TORCH_CHECK(a_sizes[1] + padding_size == b_sizes[0], "a dim 1 must match b dim 0.");
+  TORCH_CHECK(a_sizes[1] == b_sizes[0], "a dim 1 must match b dim 0.");
 
   auto options{at::TensorOptions().dtype(torch::kFloat16).device(at::kCUDA)};
   auto result{torch::empty({a_sizes[0], b_sizes[1]}, options)};
@@ -269,7 +269,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = b_sizes[transpose_result ? 1 : 0];
+  int64_t k = b_sizes[transpose_result ? 1 : 0] - padding_size;
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());
@@ -304,10 +304,10 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
 
   auto&& problem = gemm.getProblemTypes();
   auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
-  auto ldb = problem.op_b == HIPBLAS_OP_N ? k : n;
+  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + padding_size) : n;
   auto ldc = m;
   auto strideA = m * (k + padding_size);
-  auto strideB = n * k;
+  auto strideB = n * (k + padding_size);
   auto strideC = m * n;
 
   CHECK_HIPBLASLT_ERROR(gemm.setProblem(m, n, k, 1, lda, ldb, ldc, ldc, strideA,

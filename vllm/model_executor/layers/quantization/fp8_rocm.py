@@ -26,7 +26,7 @@ class Fp8RocmConfig(QuantizationConfig):
     def __init__(self) -> None:
         self._tuned = {}
         gemm_type = os.getenv("FP8_GEMM", "fp8_16")
-        self.pad_weight = True if os.getenv("VLLM_FP8_PADDING", "0") == "1" else False
+        self.padding = True if os.getenv("VLLM_FP8_PADDING", "0") == "1" else False
         vllm_ops.create_workspace()
         if gemm_type == "fp8_8":
             self.gemm_method = Fp8RocmLinearMethod.apply_fp8_8
@@ -180,7 +180,7 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         # WEIGHT
         # pad the weight
         weight = layer.weight
-        if self._config.pad_weight:
+        if self._config.padding:
             weight = F.pad(weight, (0, 256), "constant", 0).contiguous()
         layer.weight = Parameter(weight, requires_grad=False)
 
@@ -222,8 +222,12 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert not bias
-        x8 = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
-        vllm_ops.convert_fp8(x8, x, asf)
+        if self._config.padding:
+            x8 = torch.empty((x.shape[0], x.shape[1] + 256), 
+                             dtype=torch.float8_e4m3fnuz, device=x.device)
+        else:
+            x8 = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
+        vllm_ops.convert_fp8_2d(x8, x, asf)
         m = weight.shape[0]
         n = x.shape[0]
         k = x.shape[1]
@@ -245,8 +249,12 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert not bias
-        x8 = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
-        vllm_ops.convert_fp8(x8, x, asf)
+        if self._config.padding:
+            x8 = torch.empty((x.shape[0], x.shape[1] + 256), 
+                             dtype=torch.float8_e4m3fnuz, device=x.device)
+        else:
+            x8 = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
+        vllm_ops.convert_fp8_2d(x8, x, asf)
         m = weight.shape[0]
         n = x.shape[0]
         k = x.shape[1]
