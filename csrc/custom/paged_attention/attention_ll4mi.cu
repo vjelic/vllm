@@ -132,7 +132,7 @@ __device__ __forceinline__ _B16x4 convert_b8_to_b16x4(_B16x4 b16val, _B8x2x2 b8v
     if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
         return b16val;
     } else {
-        union {
+        union alignas(8){
             uint2 u32x2;
             _B16x4 u16x4;
         } tmp;
@@ -167,7 +167,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 #if 0
   scalar_t* __restrict__ qk_out,             // [num_heads, num_seqs, max_ctx_blocks,block_size]
 #endif
-    int max_ctx_blocks) {
+    int max_ctx_blocks, float kv_scale) {
   constexpr int NWARPS = NUM_THREADS / WARP_SIZE;
   const int warpid = threadIdx.x / WARP_SIZE;
   const int laneid = threadIdx.x % WARP_SIZE;
@@ -192,7 +192,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   __shared__ float shared_exp_sum[NWARPS][GQA_RATIO4 + 1];
   _B16x8 Qlocal[QHLOOP];
   constexpr int x = 16 / sizeof(scalar_t);
-  constexpr int KHELOOP = HEAD_SIZE / x;
+  constexpr int KHELOOP = HEAD_SIZE / 8;
 
   _B16x8 Klocal[KHELOOP];
   _B8x8 Klocalb8[KHELOOP];
@@ -282,7 +282,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
 #pragma unroll
       for (int d = 0; d < KHELOOP; d++) {
-        Klocalb8[d] = k_ptrh8[d * BLOCK_SIZE + physical_block_offset];
+        Klocalb8[d] = k_ptrh8[d * BLOCK_SIZE + physical_block_offset*2 + (d%2)];
       }
     }
 
@@ -429,6 +429,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
                                  15, 0);
       }  // KHELOOP>8
       dout[h] *= scale;
+      if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+          dout[h] *= kv_scale;
+      }
     }
 // transpose dout so that 4 token ids are in each lane, and 4 heads are across 4
 // lanes
@@ -573,6 +576,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
             acc = GCN_MFMA_INSTR(logits[qh], convert_b8_to_b16x4<KV_DTYPE>(Vlocal[vh][6].xy[1],Vlocalb8[vh][6].xy[1]), acc, 4, 13, 0);
             acc = GCN_MFMA_INSTR(logits[qh], convert_b8_to_b16x4<KV_DTYPE>(Vlocal[vh][7].xy[0],Vlocalb8[vh][7].xy[0]), acc, 4, 14, 0);
             acc = GCN_MFMA_INSTR(logits[qh], convert_b8_to_b16x4<KV_DTYPE>(Vlocal[vh][7].xy[1],Vlocalb8[vh][7].xy[1]), acc, 4, 15, 0);
+            if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+                acc *= kv_scale;
+            }
             vout_shared[vh][laneid][warpid] = acc;
         }
       }  // warp in context
@@ -793,7 +799,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
           query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads, scale,     \
           block_tables_ptr, context_lens_ptr, max_num_blocks_per_seq,         \
           alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,        \
-          exp_sums_ptr, max_logits_ptr, tmp_out_ptr, out_ptr, max_ctx_blocks);
+          exp_sums_ptr, max_logits_ptr, tmp_out_ptr, out_ptr, max_ctx_blocks, kv_scale);
 
 template <typename T, typename KVT, vllm::Fp8KVCacheDataType KV_DTYPE, int BLOCK_SIZE, int HEAD_SIZE, int PARTITION_SIZE = 256>
 void paged_attention_custom_launcher(
@@ -806,7 +812,7 @@ void paged_attention_custom_launcher(
   torch::Tensor& qk_out,
   torch::Tensor& softmax_out,
 #endif
-    const c10::optional<torch::Tensor>& alibi_slopes) {
+    const c10::optional<torch::Tensor>& alibi_slopes, float kv_scale) {
 
   int num_seqs = query.size(0);
   int num_heads = query.size(1);
@@ -925,7 +931,7 @@ void paged_attention_custom_launcher(
   paged_attention_custom_launcher<T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE>(               \
       out, exp_sums, max_logits, tmp_out, query, key_cache, value_cache, \
       num_kv_heads, scale, block_tables, context_lens, max_context_len,  \
-      alibi_slopes);
+      alibi_slopes,kv_scale);
 
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)                    \
   switch (block_size) {                                           \
