@@ -933,7 +933,7 @@ void paged_attention_custom(
   torch::Tensor& softmax_out,
 #endif
     const c10::optional<torch::Tensor>& alibi_slopes,
-    const std::string& kv_cache_dtype) {
+    const std::string& kv_cache_dtype,float kv_scale) {
   const int head_size = query.size(2);
   if (query.dtype() == at::ScalarType::Half) {
     CALL_CUSTOM_LAUNCHER_BLK_HEAD(_Float16);
