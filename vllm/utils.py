@@ -325,7 +325,7 @@ def _generate_random_fp8(
     tensor: torch.tensor,
     low: float,
     high: float,
-) -> None:
+) -> torch.tensor:
     # NOTE(zhaoyang): Due to NaN and Inf representation for fp8 data type,
     # it may occur Inf or NaN if we directly use torch.randint
     # to generate random data for fp8 data.
@@ -337,9 +337,23 @@ def _generate_random_fp8(
     from vllm import _custom_ops as ops
     tensor_tmp = torch.empty_like(tensor, dtype=torch.float16)
     tensor_tmp.uniform_(low, high)
-    ops.convert_fp8(tensor, tensor_tmp)
+    #ops.convert_fp8(tensor, tensor_tmp)
+    tensor = _per_tensor_quantize(tensor_tmp,1.0)
     del tensor_tmp
+    return tensor
 
+def _per_tensor_quantize(tensor: torch.Tensor,
+                         inv_scale: float) -> torch.Tensor:
+    finfo = torch.finfo(torch.float8_e4m3fnuz)
+    qweight = (tensor / inv_scale).clamp(min=finfo.min, max=finfo.max)
+    return qweight.to(torch.float8_e4m3fnuz)
+
+
+def _per_tensor_dequantize(tensor: torch.Tensor,
+                           inv_scale: float) -> torch.Tensor:
+    fake_qweight = tensor.to(torch.float16)
+    dq_weight = fake_qweight * inv_scale
+    return dq_weight
 
 def get_kv_cache_torch_dtype(
         cache_dtype: Optional[Union[str, torch.dtype]],
@@ -355,7 +369,8 @@ def get_kv_cache_torch_dtype(
         elif cache_dtype in ["half", "bfloat16", "float"]:
             torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
         elif cache_dtype == "fp8":
-            torch_dtype = torch.uint8
+            #torch_dtype = torch.uint8
+            torch_dtype = torch.float8_e4m3fnuz
         else:
             raise ValueError(f"Invalid kv cache dtype: {cache_dtype}")
     elif isinstance(cache_dtype, torch.dtype):
@@ -423,7 +438,7 @@ def create_kv_caches_with_random(
         if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             key_cache.uniform_(-scale, scale)
         elif cache_dtype == 'fp8':
-            _generate_random_fp8(key_cache, -scale, scale)
+            key_cache = _generate_random_fp8(key_cache, -scale, scale)
         else:
             raise ValueError(
                 f"Does not support key cache of type {cache_dtype}")
@@ -438,7 +453,7 @@ def create_kv_caches_with_random(
         if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             value_cache.uniform_(-scale, scale)
         elif cache_dtype == 'fp8':
-            _generate_random_fp8(value_cache, -scale, scale)
+            value_cache = _generate_random_fp8(value_cache, -scale, scale)
         else:
             raise ValueError(
                 f"Does not support value cache of type {cache_dtype}")

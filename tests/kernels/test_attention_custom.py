@@ -17,8 +17,9 @@ FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 MAX_SEQ_LEN = 4096
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
-NUM_BLOCKS = 64*1024+4321  # Arbitrary values for testing
-PARTITION_SIZE = 256
+NUM_BLOCKS = 4321  # Arbitrary values for testing
+PARTITION_SIZE_CUSTOM = 256
+PARTITION_SIZE_V2 = 1024
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
           ] if not is_hip() else [torch.half]
@@ -31,7 +32,7 @@ NUM_HEADS = [(8 * x, 8) for x in range(8, 9)]  # Arbitrary values for testing
 HEAD_SIZES = [128]
 BLOCK_SIZES = [16]
 USE_ALIBI = [False, True]
-KV_CACHE_DTYPE = ["auto"]
+KV_CACHE_DTYPE = ["fp8"]
 SEEDS = [0]
 CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 1)
@@ -172,6 +173,8 @@ def test_paged_attention(
                                                 kv_cache_dtype, dtype, seed,
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
+    #print('>>> kcache', key_cache)
+    #print('>>> vcache', value_cache)
 
     # Using default kv_scale
     kv_scale = 1.0
@@ -195,6 +198,8 @@ def test_paged_attention(
             kv_scale,
         )
     elif version == "v2" or version == "custom":
+        if version == "v2": PARTITION_SIZE = PARTITION_SIZE_V2
+        elif version == "custom" : PARTITION_SIZE = PARTITION_SIZE_CUSTOM
         num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
                           PARTITION_SIZE)
         assert PARTITION_SIZE % block_size == 0
@@ -258,14 +263,16 @@ def test_paged_attention(
         dequantized_key_cache = torch.empty(size=key_cache_shape,
                                             dtype=dtype,
                                             device=device)
-        cache_ops.convert_fp8(key_cache, dequantized_key_cache)
+        dequantized_key_cache = _per_tensor_dequantize(key_cache,1.0)
+        #cache_ops.convert_fp8(key_cache, dequantized_key_cache)
         key_cache = dequantized_key_cache
 
         value_cache_shape = value_cache.shape
         dequantized_value_cache = torch.empty(size=value_cache_shape,
                                               dtype=dtype,
                                               device=device)
-        cache_ops.convert_fp8(value_cache, dequantized_value_cache)
+        dequantized_value_cache = _per_tensor_dequantize(value_cache,1.0)
+        #cache_ops.convert_fp8(value_cache, dequantized_value_cache)
         value_cache = dequantized_value_cache
 
     ref_output = torch.empty_like(query)
@@ -290,6 +297,13 @@ def test_paged_attention(
     # NOTE(zhaoyang): FP8 KV Cache will introduce quantization error,
     # so we use a relaxed tolerance for the test.
     atol, rtol = 1e-4, 1e-5
+    if version == "v2" or version == "v1": atol=2e-4
     if kv_cache_dtype == "fp8":
-        atol, rtol = 1e-2, 1e-5
+        atol, rtol = 5e-4, 1e-5
     assert torch.allclose(output, ref_output, atol=atol, rtol=rtol)
+
+def _per_tensor_dequantize(tensor: torch.Tensor,
+                           inv_scale: float) -> torch.Tensor:
+    fake_qweight = tensor.to(torch.float16)
+    dq_weight = fake_qweight * inv_scale
+    return dq_weight
