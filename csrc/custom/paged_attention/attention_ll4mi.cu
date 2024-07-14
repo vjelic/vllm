@@ -258,10 +258,16 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         Klocal[d] = k_ptrh8[d * BLOCK_SIZE + physical_block_offset];
       }
     } else {
-        const _B8x8* k_ptrb8 = reinterpret_cast<const _B8x8*>(k_ptr);
+        //const _B8x8* k_ptrb8 = reinterpret_cast<const _B8x8*>(k_ptr);
+        constexpr int X = 16/sizeof(cache_t); 
 #pragma unroll
         for (int d = 0; d < KHELOOP; d++) {
-            const _B8x8 Klocalb8 = k_ptrb8[d * BLOCK_SIZE + physical_block_offset*2 + (d%2)];
+            const int head_elem = d*8;
+            const int offset1 = head_elem/X;
+            const int offset2 = head_elem%X;
+            const cache_t* k_ptr2 = k_ptr + physical_block_offset*X + offset1 * BLOCK_SIZE * X + offset2;
+            //_B8x8 Klocalb8 = k_ptrb8[d * BLOCK_SIZE + physical_block_offset*2 + (d%2)];
+            _B8x8 Klocalb8 = *reinterpret_cast<const _B8x8*>(k_ptr2);
             union alignas(16){
               uint4 u4;
               _B16x8 u16x8;

@@ -17,21 +17,22 @@ FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 MAX_SEQ_LEN = 4096
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
-NUM_BLOCKS = 4321  # Arbitrary values for testing
+NUM_BLOCKS = 64*1024+4321  # Arbitrary values for testing
 PARTITION_SIZE_CUSTOM = 256
 PARTITION_SIZE_V2 = 1024
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
           ] if not is_hip() else [torch.half]
-NUM_GEN_SEQS = [1, 17, 64]  # Arbitrary values for testing
+NUM_GEN_SEQS = [1,7,64]  # Arbitrary values for testing
 #NUM_HEADS = [(8 * x, 8) for x in range(1, 17)]  # Arbitrary values for testing
-NUM_HEADS = [(8 * x, 8) for x in range(8, 9)]  # Arbitrary values for testing
+#NUM_HEADS = [(8 * x, 8) for x in range(8, 9)]  # Arbitrary values for testing
+NUM_HEADS = [(64,8)]  # Arbitrary values for testing
 
 # FlashAttention forward only supports head dimension at most 128
 # https://github.com/ROCmSoftwarePlatform/flash-attention/blob/3d2b6f5d037782cc2c906909a46fb7e2e1b48b25/csrc/flash_attn_rocm/flash_api.cpp#L62
 HEAD_SIZES = [128]
 BLOCK_SIZES = [16]
-USE_ALIBI = [False, True]
+USE_ALIBI = [False,True]
 KV_CACHE_DTYPE = ["fp8"]
 SEEDS = [0]
 CUDA_DEVICES = [
@@ -299,7 +300,7 @@ def test_paged_attention(
     atol, rtol = 1e-4, 1e-5
     if version == "v2" or version == "v1": atol=2e-4
     if kv_cache_dtype == "fp8":
-        atol, rtol = 5e-4, 1e-5
+        atol, rtol = 2e-4, 1e-5
     assert torch.allclose(output, ref_output, atol=atol, rtol=rtol)
 
 def _per_tensor_dequantize(tensor: torch.Tensor,
