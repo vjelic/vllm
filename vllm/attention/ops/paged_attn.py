@@ -214,6 +214,7 @@ class PagedAttention:
                     max_seq_len,
                     alibi_slopes,
                     kv_cache_dtype,
+                    kv_scale
                 )
         return output
 
