@@ -186,7 +186,7 @@ template <typename Tout, typename Tin, int Vec_size>
 struct call_convert_fp8 {
   void operator()(torch::Tensor& src_data, torch::Tensor& dst_data,
                   torch::Tensor& scale) {
-    const auto N = src_data.numel() / 2;
+    const auto N = src_data.numel() / Vec_size;
     // std::cout << N << "\n";
     constexpr uint32_t loopSize = 1;  // std::max(N / 50000000LL, 1);
     constexpr dim3 numThreads{1024, 1, 1};
@@ -242,7 +242,7 @@ template <typename Tout, typename Tin, int Vec_size>
 struct call_convert_fp8_2d {
   void operator()(torch::Tensor& src_data, torch::Tensor& dst_data,
                   torch::Tensor& scale) {
-    const auto N = src_data.numel() / 2;
+    const auto N = src_data.numel() / Vec_size;
     // std::cout << N << "\n";
     constexpr uint32_t loopSize = 1;  // std::max(N / 50000000LL, 1);
     constexpr dim3 numThreads{1024, 1, 1};
