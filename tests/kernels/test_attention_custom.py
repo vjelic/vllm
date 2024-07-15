@@ -18,7 +18,7 @@ MAX_SEQ_LEN = 4096
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 64*1024+4321  # Arbitrary values for testing
-PARTITION_SIZE_CUSTOM = 256
+PARTITION_SIZE_CUSTOM = 512 #256
 PARTITION_SIZE_V2 = 1024
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
@@ -33,7 +33,7 @@ NUM_HEADS = [(64,8)]  # Arbitrary values for testing
 HEAD_SIZES = [128]
 BLOCK_SIZES = [16]
 USE_ALIBI = [False,True]
-KV_CACHE_DTYPE = ["fp8"]
+KV_CACHE_DTYPE = ["auto","fp8"]
 SEEDS = [0]
 CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 1)
