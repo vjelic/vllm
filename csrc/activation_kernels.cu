@@ -30,14 +30,15 @@ template <typename scalar_t, scalar_t (*ACT_FN)(const scalar_t&)>
 __global__ void scaled_act_and_mul_kernel(
     c10::Float8_e4m3fnuz* __restrict__ out,          // [..., d]
     const scalar_t* __restrict__ input,  // [..., 2, d]
-    const int d, const float* scale) {
+    const int d, const int d_padded, 
+    const float* scale) {
   const int64_t token_idx = blockIdx.x;
   for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
     const scalar_t x = VLLM_LDG(&input[token_idx * 2 * d + idx]);
     const scalar_t y = VLLM_LDG(&input[token_idx * 2 * d + d + idx]);
     float z = static_cast<float>(ACT_FN(x) * y) / *scale;
     float r = fmax(-FP8_E4M3_MAX, fmin(z, FP8_E4M3_MAX));
-    out[token_idx * d + idx] = static_cast<c10::Float8_e4m3fnuz>(r);
+    out[token_idx * d_padded + idx] = static_cast<c10::Float8_e4m3fnuz>(r);
   }
 }
 
@@ -90,6 +91,7 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
 // Launch activation and gating kernel.
 #define LAUNCH_SCALED_ACTIVATION_GATE_KERNEL(KERNEL)                            \
   int d = input.size(-1) / 2;                                            \
+  int d_padded = out.size(-1);                                           \
   int64_t num_tokens = input.numel() / input.size(-1);                   \
   dim3 grid(num_tokens);                                                 \
   dim3 block(std::min(d, 1024));                                         \
@@ -97,9 +99,10 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();          \
   VLLM_DISPATCH_FLOATING_TYPES(                                          \
       input.scalar_type(), "act_and_mul_kernel", [&] {                   \
-        vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>             \
-            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fnuz>(),       \
-                                         input.data_ptr<scalar_t>(), d, scale.data_ptr<float>()); \
+        vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>                \
+            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fnuz>(),     \
+                                         input.data_ptr<scalar_t>(), d, d_padded,  \
+                                         scale.data_ptr<float>());                 \
       });
 
 void silu_and_mul(torch::Tensor& out,    // [..., d]
