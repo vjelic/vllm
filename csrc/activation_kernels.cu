@@ -35,8 +35,8 @@ __global__ void scaled_act_and_mul_kernel(
   for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
     const scalar_t x = VLLM_LDG(&input[token_idx * 2 * d + idx]);
     const scalar_t y = VLLM_LDG(&input[token_idx * 2 * d + d + idx]);
-    float x = static_cast<float>(ACT_FN(x) * y) / scale;
-    float r = fmax(-FP8_E4M3_MAX, fmin(x, FP8_E4M3_MAX));
+    float z = static_cast<float>(ACT_FN(x) * y) / *scale;
+    float r = fmax(-FP8_E4M3_MAX, fmin(z, FP8_E4M3_MAX));
     out[token_idx * d + idx] = static_cast<c10::Float8_e4m3fnuz>(r);
   }
 }
