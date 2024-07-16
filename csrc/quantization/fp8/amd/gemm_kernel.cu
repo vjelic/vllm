@@ -35,7 +35,7 @@
 #endif
 
 static void* workspace = nullptr;
-static size_t workspace_size, padding_size;
+static size_t workspace_size, act_padding_size, weight_padding_size;
 
 // Copied from
 // https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cuda/tunable/GemmHipblaslt.h
@@ -59,8 +59,8 @@ static size_t get_hipblaslt_workspace_size() {
   return workspace_size * 1024;
 }
 
-static size_t get_padding_size() {
-  static const char* env = getenv("VLLM_FP8_PADDING");
+static size_t get_padding_size(const char * env_name) {
+  const char* env = getenv(env_name);
   size_t padding_size = 0;
   if (env) {
     std::string s(env);
@@ -71,7 +71,8 @@ static size_t get_padding_size() {
 
 void create_workspace() {
   workspace_size = get_hipblaslt_workspace_size();
-  padding_size = get_padding_size();
+  act_padding_size = get_padding_size("VLLM_FP8_ACT_PADDING");
+  weight_padding_size = get_padding_size("VLLM_FP8_WEIGHT_PADDING");
   if (workspace_size > 0)
     CHECK_HIP_ERROR(hipMalloc(&workspace, workspace_size));
 }
@@ -90,7 +91,7 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
                   b.dtype() == torch::kFloat8_e4m3fnuz,
               "The input tensors should be in fp8.");
   TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "Input tensors must be 2-D.");
-  TORCH_CHECK(a_sizes[1] == b_sizes[0], "a dim 1 must match b dim 0.");
+  TORCH_CHECK(a_sizes[1] - act_padding_size == b_sizes[0] - weight_padding_size, "a dim 1 must match b dim 0.");
 
   auto options{
       at::TensorOptions().dtype(torch::kFloat8_e4m3fnuz).device(at::kCUDA)};
@@ -133,7 +134,7 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = b_sizes[transpose_result ? 1 : 0] - padding_size;
+  int64_t k = b_sizes[transpose_result ? 1 : 0] - act_padding_size;
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());
@@ -178,11 +179,11 @@ torch::Tensor fp8_gemm(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleD = d_scaleD;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
-  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + padding_size) : n;
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + weight_padding_size);
+  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + act_padding_size) : n;
   auto ldc = m;
-  auto strideA = m * (k + padding_size);
-  auto strideB = n * (k + padding_size);
+  auto strideA = m * (k + weight_padding_size);
+  auto strideB = n * (k + act_padding_size);
   auto strideC = m * n;
 
   CHECK_HIPBLASLT_ERROR(gemm.setProblem(m, n, k, 1, lda, ldb, ldc, ldc, strideA,
@@ -227,7 +228,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
                   b.dtype() == torch::kFloat8_e4m3fnuz,
               "The input tensors should be in fp8.");
   TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "Input tensors must be 2-D.");
-  TORCH_CHECK(a_sizes[1] == b_sizes[0], "a dim 1 must match b dim 0.");
+  TORCH_CHECK(a_sizes[1] - act_padding_size == b_sizes[0] - weight_padding_size, "a dim 1 must match b dim 0.");
 
   auto options{at::TensorOptions().dtype(torch::kFloat16).device(at::kCUDA)};
   auto result{torch::empty({a_sizes[0], b_sizes[1]}, options)};
@@ -269,7 +270,7 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   float alpha = 1.0f;
   float beta = 0.0f;
   int64_t m = a_sizes[transpose_result ? 1 : 0];
-  int64_t k = b_sizes[transpose_result ? 1 : 0] - padding_size;
+  int64_t k = b_sizes[transpose_result ? 1 : 0] - act_padding_size;
   int64_t n = b_sizes[transpose_result ? 0 : 1];
 
   void* d_a = static_cast<void*>((transpose_result ? b : a).data_ptr());
@@ -303,11 +304,11 @@ torch::Tensor fp8_gemm_16(torch::Tensor& a, torch::Tensor& b,
   inputs.scaleB = d_scaleB;
 
   auto&& problem = gemm.getProblemTypes();
-  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + padding_size);
-  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + padding_size) : n;
+  auto lda = problem.op_a == HIPBLAS_OP_N ? m : (k + weight_padding_size);
+  auto ldb = problem.op_b == HIPBLAS_OP_N ? (k + act_padding_size) : n;
   auto ldc = m;
-  auto strideA = m * (k + padding_size);
-  auto strideB = n * (k + padding_size);
+  auto strideA = m * (k + weight_padding_size);
+  auto strideB = n * (k + act_padding_size);
   auto strideC = m * n;
 
   CHECK_HIPBLASLT_ERROR(gemm.setProblem(m, n, k, 1, lda, ldb, ldc, ldc, strideA,
