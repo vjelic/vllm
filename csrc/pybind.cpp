@@ -15,6 +15,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
   // Activation ops
   ops.def("silu_and_mul", &silu_and_mul, "Activation function used in SwiGLU.");
+  ops.def("scaled_silu_and_mul", &scaled_silu_and_mul, "Scaled Activation function used in SwiGLU.");
   ops.def("gelu_and_mul", &gelu_and_mul,
           "Activation function used in GeGLU with `none` approximation.");
   ops.def("gelu_tanh_and_mul", &gelu_tanh_and_mul,

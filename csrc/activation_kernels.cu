@@ -23,6 +23,24 @@ __global__ void act_and_mul_kernel(
   }
 }
 
+#define FP8_E4M3_MAX std::numeric_limits<c10::Float8_e4m3fnuz>::max()
+
+// Scaled activation and gating kernel template.
+template <typename scalar_t, scalar_t (*ACT_FN)(const scalar_t&)>
+__global__ void scaled_act_and_mul_kernel(
+    c10::Float8_e4m3fnuz* __restrict__ out,          // [..., d]
+    const scalar_t* __restrict__ input,  // [..., 2, d]
+    const int d, const float* scale) {
+  const int64_t token_idx = blockIdx.x;
+  for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
+    const scalar_t x = VLLM_LDG(&input[token_idx * 2 * d + idx]);
+    const scalar_t y = VLLM_LDG(&input[token_idx * 2 * d + d + idx]);
+    float x = static_cast<float>(ACT_FN(x) * y) / scale;
+    float r = fmax(-FP8_E4M3_MAX, fmin(x, FP8_E4M3_MAX));
+    out[token_idx * d + idx] = static_cast<c10::Float8_e4m3fnuz>(r);
+  }
+}
+
 template <typename T>
 __device__ __forceinline__ T silu_kernel(const T& x) {
   // x * sigmoid(x)
