@@ -27,7 +27,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("rms_norm", &rms_norm,
           "Apply Root Mean Square (RMS) Normalization to the input tensor.");
 
+  ops.def("scaled_rms_norm", &scaled_rms_norm,
+          "Apply Root Mean Square (RMS) Normalization to the input tensor.");
+
   ops.def("fused_add_rms_norm", &fused_add_rms_norm,
+          "In-place fused Add and RMS Normalization");
+
+  ops.def("scaled_fused_add_rms_norm", &scaled_fused_add_rms_norm,
           "In-place fused Add and RMS Normalization");
 
   // Rotary embedding
