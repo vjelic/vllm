@@ -34,7 +34,7 @@ from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.model_executor.layers.activation import ScaledSiluAndMul
-from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.layernorm import RMSNorm, ScaledRMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
@@ -215,9 +215,9 @@ class LlamaDecoderLayer(nn.Module):
             quant_config=quant_config,
             bias=getattr(config, "mlp_bias", False),
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
+        self.input_layernorm = ScaledRMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+        self.post_attention_layernorm = ScaledRMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
     def forward(
@@ -231,10 +231,11 @@ class LlamaDecoderLayer(nn.Module):
         # Self Attention
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+            hidden_states = self.input_layernorm(hidden_states, 
+                                                 self.self_attn.qkv_proj.activation_scaling_factor)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+                hidden_states, self.self_attn.qkv_proj.activation_scaling_factor, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -244,7 +245,7 @@ class LlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
