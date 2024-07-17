@@ -31,7 +31,7 @@ class Gemm:
                                    device='cuda').to(self.indtype)
         # weights2 is used in measurement/warm iters to ensure
         # HBM fetch for weight tensors
-        self.weights2 = torch.stack([self.weights for _ in range(self.nb)])
+        self.weights2 = torch.stack([self.weights.cpu() for _ in range(self.nb)]).cuda()
         # self.weights2 = torch.randn((self.nb, self.m, self.k),
         #                            device='cuda').to(self.indtype)
         self.blob = torch.ones(128 * 1024 * 1024,
