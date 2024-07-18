@@ -114,7 +114,10 @@ class ScaledRMSNorm(nn.Module):
         scale: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        out = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
+        shape = x.shape
+        if ScaledRMSNorm.act_padding:
+            shape = x.shape[:-1] + (x.shape[-1]+256, ) 
+        out = torch.empty(shape, dtype=torch.float8_e4m3fnuz, device=x.device)
         if residual is not None:
             ops.scaled_fused_add_rms_norm(
                 out,
