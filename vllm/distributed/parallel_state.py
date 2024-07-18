@@ -3,10 +3,19 @@
 # https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 """Tensor and pipeline parallel groups."""
-from typing import List, Optional
+import contextlib
+from collections import namedtuple
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from multiprocessing import shared_memory
+from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest.mock import patch
+
+
+#from typing import List, Optional
 
 import torch
-from torch.distributed import ProcessGroup
+from torch.distributed import Backend, ProcessGroup
 
 import vllm.envs as envs
 from vllm.logger import init_logger
@@ -511,7 +520,7 @@ def graph_capture():
     ).graph_capture(context):
         yield context
 
->>>>>>> d9a252bc ([Core][Distributed] add shm broadcast (#5399))
+#>>>>>>> d9a252bc ([Core][Distributed] add shm broadcast (#5399))
 
 logger = init_logger(__name__)
 
