@@ -228,14 +228,8 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         algo = self._config._tuned.get((m, n, k))
         if algo is None:
             _save_shape(m, n, k)
-            res, _ = torch._scaled_mm(x8,
-                                      weight.t(),
-                                      out_dtype=x.dtype,
-                                      scale_a=asf,
-                                      scale_b=wsf,
-                                      bias=bias)
-        else:
-            res = vllm_ops.fp8_gemm_16(x8, weight.t(), asf, wsf, int(algo))
+            algo = 0
+        res = vllm_ops.fp8_gemm_16(x8, weight.t(), asf, wsf, int(algo))
         return res
 
     def apply_fp8_8(
@@ -257,15 +251,8 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         algo = self._config._tuned.get((m, n, k))
         if algo is None:
             _save_shape(m, n, k)
-            res, _ = torch._scaled_mm(x8,
-                                      weight.t(),
-                                      out_dtype=x8.dtype,
-                                      scale_a=asf,
-                                      scale_b=wsf,
-                                      scale_result=osf,
-                                      bias=bias)
-        else:
-            res = vllm_ops.fp8_gemm(x8, weight.t(), asf, wsf, osf, int(algo))
+            algo = 0
+        res = vllm_ops.fp8_gemm(x8, weight.t(), asf, wsf, osf, int(algo))
         res16 = torch.empty_like(res, dtype=torch.float16)
         vllm_ops.convert_fp8(res16, res, 1 / osf)
         return res16
