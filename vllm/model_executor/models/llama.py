@@ -33,7 +33,7 @@ from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
-from vllm.model_executor.layers.activation import ScaledSiluAndMul
+from vllm.model_executor.layers.activation import SiluAndMul, ScaledSiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm, ScaledRMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
@@ -51,6 +51,8 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from vllm.utils import is_hip, print_warning_once
 
+reduce_conversion_kernel: bool = True if os.getenv("VLLM_FP8_REDUCE_CONV",
+                                                   '0') == "1" else False
 
 class LlamaMLP(nn.Module):
 
@@ -75,7 +77,8 @@ class LlamaMLP(nn.Module):
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
-        self.act_fn = ScaledSiluAndMul()
+        self.act_fn = ScaledSiluAndMul(
+        ) if reduce_conversion_kernel else SiluAndMul()
 
     def forward(self, x):
         if x.shape[0] == 1 and x.shape[1] == 1:
@@ -88,7 +91,9 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
-            x = self.act_fn(gate_up, self.down_proj.activation_scaling_factor)
+            x = self.act_fn(
+                gate_up, self.down_proj.activation_scaling_factor
+            ) if reduce_conversion_kernel else self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
 
@@ -215,10 +220,14 @@ class LlamaDecoderLayer(nn.Module):
             quant_config=quant_config,
             bias=getattr(config, "mlp_bias", False),
         )
-        self.input_layernorm = ScaledRMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = ScaledRMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+        self.input_layernorm = ScaledRMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps) if reduce_conversion_kernel else RMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = ScaledRMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps) if reduce_conversion_kernel else RMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -231,11 +240,17 @@ class LlamaDecoderLayer(nn.Module):
         # Self Attention
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states, 
-                                                 self.self_attn.qkv_proj.activation_scaling_factor)
+            hidden_states = self.input_layernorm(
+                hidden_states,
+                self.self_attn.qkv_proj.activation_scaling_factor
+            ) if reduce_conversion_kernel else self.input_layernorm(
+                hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, self.self_attn.qkv_proj.activation_scaling_factor, residual)
+                hidden_states,
+                self.self_attn.qkv_proj.activation_scaling_factor, residual
+            ) if reduce_conversion_kernel else self.input_layernorm(
+                hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -245,7 +260,10 @@ class LlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor, residual)
+            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor,
+            residual
+        ) if reduce_conversion_kernel else self.post_attention_layernorm(
+            hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
