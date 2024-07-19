@@ -16,8 +16,8 @@ def main(model, tp_size, gpu, dtype: str):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
     method = fused_moe
     for bs in [
-            1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 1536,
-            2048, 3072, 4096
+            1 #, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 1536,
+            #2048, 3072, 4096
     ]:
         run_grid(bs,
                  model=model,
@@ -32,15 +32,23 @@ def run_grid(bs, model, method, gpu, tp_size, dtype: str):
         d_model = 4096
         model_intermediate_size = 14336
         num_layers = 32
+        num_total_experts = 8
+        top_k = 2
     elif model == '8x22B':
         d_model = 6144
         model_intermediate_size = 16384
         num_layers = 56
+        num_total_experts = 8
+        top_k = 2
+    elif model == 'Qwen2':
+        d_model = 3584
+        model_intermediate_size = 18944
+        num_layers = 28
+        num_total_experts = 64
+        top_k = 8
     else:
         raise ValueError(f'Unsupported Mixtral model {model}')
-    num_total_experts = 8
-    top_k = 2
-    # tp_size = 2
+
     num_calls = 100
 
     num_warmup_trials = 1
@@ -225,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument('--model',
                         type=str,
                         default='8x7B',
-                        choices=['8x7B', '8x22B'],
+                        choices=['8x7B', '8x22B', 'Qwen2'],
                         help='The Mixtral model to benchmark')
     parser.add_argument('--tp-size',
                         type=int,
