@@ -419,7 +419,7 @@ def fused_experts(hidden_states: torch.Tensor,
                     "SPLIT_K": 1,
                 }
 
-    intermediate_cache1 = torch.empty(
+    intermediate_cache1 = torch.zeros(
         (M, topk_ids.shape[1], N),
         device=hidden_states.device,
         dtype=hidden_states.dtype,
@@ -429,7 +429,7 @@ def fused_experts(hidden_states: torch.Tensor,
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
-    intermediate_cache3 = torch.empty(
+    intermediate_cache3 = torch.zeros(
         (M, topk_ids.shape[1], w2.shape[1]),
         device=hidden_states.device,
         dtype=hidden_states.dtype,
