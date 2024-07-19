@@ -12,7 +12,7 @@ hipbsolidxgemm.hipb_create_extension()
 
 rtol = 1e-5
 atol = 1
-
+first_gemm = True
 
 class Gemm:
 
@@ -22,8 +22,7 @@ class Gemm:
                  k,
                  indtype,
                  outdtype,
-                 rocblas_decode=False,
-                 first_gemm=False):
+                 rocblas_decode=False):
         self.m = m
         self.k = k
         self.n = n
@@ -59,7 +58,6 @@ class Gemm:
         # ratio of hipblaslt time
         self.hipb_prefer_ratio = 0.995
         self.rocblas_decode = rocblas_decode
-        self.first_gemm = first_gemm
 
     def find_hipblas_sols(self):
         sols = hipbsolidxgemm.hipb_findallsols(self.inp, self.weights.t(),
@@ -104,6 +102,10 @@ class Gemm:
 
     def hipb_time_sol(self, solidx, cold_iters=2, warm_iters=10):
         #print('>>>hipbtime',solidx)
+        global first_gemm
+        if first_gemm:
+            cold_iters = 500
+            first_gemm = False
         for i in range(cold_iters):
             hipbsolidxgemm.hipb_mm(self.inp, self.weights.t(), solidx,
                                    self.outdtype)
@@ -121,11 +123,7 @@ class Gemm:
     def hipb_time_all_sols(self, fast_mode=0, top_sols=0):
         coldi = 20
         warmi = 20
-        if self.first_gemm:
-            coldi = 500
-            warmi = 20
-            self.first_gemm = False
-        elif fast_mode:
+        if fast_mode:
             coldi = 2
             warmi = 2
         solutions = self.hipb_sols
@@ -144,6 +142,10 @@ class Gemm:
         print(self.hipb_gtimedf.head(self.topn))
 
     def rocb_time_sol(self, solidx, cold_iters=2, warm_iters=10):
+        global first_gemm
+        if first_gemm:
+            cold_iters = 500
+            first_gemm = False
         for i in range(cold_iters):
             rocsolidxgemm.rocb_mm(self.inp, self.weights.t(), solidx)
         self.start.record()
@@ -172,11 +174,7 @@ class Gemm:
     def rocb_time_all_sols(self, fast_mode=0, top_sols=0):
         coldi = 20
         warmi = 20
-        if self.first_gemm:
-            coldi = 500
-            warmi = 20
-            self.first_gemm = False
-        elif fast_mode:
+        if fast_mode:
             coldi = 2
             warmi = 2
         solutions = self.rocb_sols
@@ -300,7 +298,7 @@ class GemmTuner:
                            indtype=self.indtype,
                            outdtype=self.outdtype,
                            rocblas_decode=self.rocblas_decode,
-                           first_gemm=(i == 0))
+                           )
             gemmobj.find_fastest_solution()
             soldf.loc[i, 'libtype'] = gemmobj.best_libtype
             soldf.loc[i, 'solidx'] = gemmobj.best_solidx
