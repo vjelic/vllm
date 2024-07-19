@@ -14,7 +14,9 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-
+@triton.heuristics({
+    'EVEN_K': lambda args: (args['K'] % (args['BLOCK_SIZE_K'] * args['SPLIT_K'])) == 0,
+})
 @triton.jit
 def fused_moe_kernel(
     # Pointers to matrices
@@ -47,6 +49,8 @@ def fused_moe_kernel(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
+    SPLIT_K: tl.constexpr,
+    EVEN_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
@@ -83,6 +87,7 @@ def fused_moe_kernel(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid = tl.program_id(axis=0)
+    pid_z = tl.program_id(axis=1)
     num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
@@ -106,7 +111,10 @@ def fused_moe_kernel(
     token_mask = offs_token < num_valid_tokens
 
     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    offs_k = tl.arange(0, BLOCK_SIZE_K)
+    if SPLIT_K == 1:
+        offs_k = tl.arange(0, BLOCK_SIZE_K)
+    else:
+        offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
     a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am +
                       offs_k[None, :] * stride_ak)
 
@@ -125,26 +133,28 @@ def fused_moe_kernel(
     # `accumulator` will be converted back to fp16 after the loop.
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
-        a = tl.load(
-            a_ptrs,
-            mask=token_mask[:, None] &
-            (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-            other=0.0,
-        )
-        b = tl.load(b_ptrs,
-                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                    other=0.0)
+        if EVEN_K:
+            a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
+            b = tl.load(b_ptrs, other=0.0)
+        else:
+            k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
+            a = tl.load(
+                a_ptrs,
+                mask=token_mask[:, None] & (offs_k[None, :] < k_remaining),
+                other=0.0,
+            )
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < k_remaining, other=0.0)
         # We accumulate along the K dimension.
         if use_fp8:
             accumulator = tl.dot(a, b, acc=accumulator)
         else:
             accumulator += tl.dot(a, b)
         # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
+        a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
+        b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
 
     if MUL_ROUTED_WEIGHT:
         moe_weight = tl.load(topk_weights_ptr + offs_token,
@@ -162,8 +172,10 @@ def fused_moe_kernel(
     c_ptrs = (c_ptr + stride_cm * offs_token[:, None] +
               stride_cn * offs_cn[None, :])
     c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, accumulator, mask=c_mask)
-
+    if SPLIT_K == 1:
+        tl.store(c_ptrs, accumulator, mask=c_mask)
+    else:
+        tl.atomic_add(c_ptrs, accumulator, mask=c_mask)
 
 def moe_align_block_size(
         topk_ids: torch.Tensor, block_size: int,
@@ -248,10 +260,12 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         A, A_scale = ops.scaled_fp8_quant(A, A_scale)
         assert B_scale is not None
 
-    grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
-        "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
+    grid_splitK = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
+        "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), 
+        META["SPLIT_K"])
 
-    fused_moe_kernel[grid](
+    # even_k = (B.shape[2] % (config['BLOCK_SIZE_K'] * config['SPLIT_K'])) == 0
+    fused_moe_kernel[grid_splitK](
         A,
         B,
         C,
@@ -297,6 +311,8 @@ def get_moe_configs(E: int, N: int,
     kernel on a given batch size bs, the closest batch size in the grid should
     be picked and the associated configuration chosen to invoke the kernel.
     """
+    logger.info("Delete this!!!!!!!!!<-------")
+    return None
 
     # First look up if an optimized configuration is available in the configs
     # directory
@@ -395,6 +411,7 @@ def fused_experts(hidden_states: torch.Tensor,
                 "BLOCK_SIZE_N": 64,
                 "BLOCK_SIZE_K": 32,
                 "GROUP_SIZE_M": 8,
+                "SPLIT_K": 1,
             }
 
             if M <= E:
@@ -403,6 +420,7 @@ def fused_experts(hidden_states: torch.Tensor,
                     "BLOCK_SIZE_N": 32,
                     "BLOCK_SIZE_K": 64,
                     "GROUP_SIZE_M": 1,
+                    "SPILT_K": 1,
                 }
 
     intermediate_cache1 = torch.empty(
