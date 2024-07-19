@@ -138,7 +138,7 @@ def fused_moe_kernel(
         # K dimension.
         if EVEN_K:
             a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
-            b = tl.load(b_ptrs, other=0.0)
+            b = tl.load(b_ptrs)
         else:
             k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
             a = tl.load(
@@ -264,7 +264,6 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), 
         META["SPLIT_K"])
 
-    # even_k = (B.shape[2] % (config['BLOCK_SIZE_K'] * config['SPLIT_K'])) == 0
     fused_moe_kernel[grid_splitK](
         A,
         B,
@@ -311,9 +310,6 @@ def get_moe_configs(E: int, N: int,
     kernel on a given batch size bs, the closest batch size in the grid should
     be picked and the associated configuration chosen to invoke the kernel.
     """
-    logger.info("Delete this!!!!!!!!!<-------")
-    return None
-
     # First look up if an optimized configuration is available in the configs
     # directory
     json_file_name = get_config_file_name(E, N, dtype)
@@ -420,7 +416,7 @@ def fused_experts(hidden_states: torch.Tensor,
                     "BLOCK_SIZE_N": 32,
                     "BLOCK_SIZE_K": 64,
                     "GROUP_SIZE_M": 1,
-                    "SPILT_K": 1,
+                    "SPLIT_K": 1,
                 }
 
     intermediate_cache1 = torch.empty(
