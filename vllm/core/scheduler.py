@@ -111,7 +111,6 @@ class ScheduledSequenceGroup:
     # chunked, it can be smaller than that.
     token_chunk_size: int
 
-
 @dataclass
 class SchedulerOutputs:
     """The scheduling decision made from a scheduler."""
@@ -410,18 +409,78 @@ class Scheduler:
         # to keep all the sequence groups in the RUNNING state.
         # In this case, the policy is responsible for deciding which sequence
         # groups to preempt.
-        now = time.time()
-        ##sorting by priority is not needed if preemption is not commonly expected
-        ##running_queue = policy.sort_by_priority(now, running_queue)
-        running_queue = running_queue.copy()
-        t2 = time.time_ns()
         times = []
-        print('>>>Running q', len(running_queue),flush=True)
+        rqlen = len(running_queue)
+        #print('>>>Running qlen',rqlen,flush=True)
+        num_free_blocks = self.block_manager.gpu_allocator.get_num_free_blocks() 
+        #print('>>> Num free blocks',num_free_blocks,flush=True)
         #no beam search case, seqlen==1 if decode
+        if not enable_chunking and curr_loras is None and len(running_queue)<num_free_blocks:
+            #only create copy, no sort required
+            #running_queue = running_queue.copy()
+            td1 = time.time_ns()
+            #seq_groups = [sg for sg in running_queue]
+            seq_groups = list(running_queue)
+            #assume all seqs are running
+            #running_seqs = [seq_group.get_seqs()[0] for seq_group in seq_groups]
+            running_seqs = map(lambda sg: sg.get_seqs()[0],seq_groups)
 
+            ts1 = time.time_ns()
+            #[self._append_slots(seq_group, blocks_to_copy) for seq_group in seq_groups]
+            [self.block_manager.append_slots(seq) for seq in running_seqs]
+            #assume cows is always empty
+            #cows = self.block_manager.append_slots(seq, num_lookahead_slots)
+            #blocks_to_copy.extend(cows)
+            ts2 = time.time_ns()
+            #map(lambda sg: self._append_slots(sg, blocks_to_copy),seq_groups)
+            ##dsgrps = [ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1) for seq_group in seq_groups]
+            #dsgrps = map(lambda sg: ScheduledSequenceGroup(seq_group=sg, token_chunk_size=1),seq_groups)
+            ts21 = time.time_ns()
+            #decode_seq_groups.extend(dsgrps)
+            decode_seq_groups = [ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1) for seq_group in seq_groups]
+            #[decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group,
+            #                          token_chunk_size=1)) for seq_group in seq_groups]
+            ts3 = time.time_ns()
+            #map(lambda seq_group: decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group,
+            #                          token_chunk_size=1)), seq_groups)
+            #[budget.add_num_batched_tokens(seq_group.request_id,1) for seq_group in seq_groups]
+            map(lambda sg: budget.add_num_batched_tokens(sg.request_id,1),seq_groups)
+            #print('>>> DecodeFastSched possible') 
+            #check sequences are running?
+            #ltimes = []
+            #for _ in range(rqlen):
+            #    tl1 = time.time_ns()
+            #    seq_group = running_queue.popleft()
+            #    self._append_slots(seq_group, blocks_to_copy)
+            #    decode_seq_groups.append(
+            #        ScheduledSequenceGroup(seq_group=seq_group,
+            #                                token_chunk_size=1))
+            #    budget.add_num_batched_tokens(seq_group.request_id,
+            #                                  1)
+            #    tl2 = time.time_ns()
+            #    ltimes.append(tl2-tl1)
+            td2 = time.time_ns()
+            if td2-td1> 6000000:
+                print('>>> FastSched time large',td2-td1)
+                print('>>> FastSched times',ts1-td1,ts2-ts1,ts21-ts2,ts3-ts21,td2-ts3)
+                print('>>> FastSched blocks_to_copy',len(blocks_to_copy))
+                print('>>> FastSched decode SG',len(decode_seq_groups),flush=True)
+                #print('>>> FastSched ltimes',ltimes)
+            #return empty deque
+            running_queue = deque()
+        else:
+            #sorting by priority is needed if preemption is expected
+            now = time.time()
+            running_queue = policy.sort_by_priority(now, running_queue)
+
+        t2 = time.time_ns()
         while running_queue:
             tstart = time.time_ns()
             seq_group = running_queue[0]
+            seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+            #print('>>>NSeq',len(seqs))
+            #print('>>>Is prefill',seq_group.is_prefill())
+            #print('>>> Seq',[seq.get_num_new_tokens() for seq in seqs],flush=True)
             num_running_tokens = self._get_num_new_tokens(
                 seq_group, SequenceStatus.RUNNING, enable_chunking, budget)
 
