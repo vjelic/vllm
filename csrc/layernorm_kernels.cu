@@ -53,7 +53,7 @@ __global__ void rms_norm_kernel(
 
 template <typename scalar_t>
 __global__ void scaled_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,           // [..., hidden_size]
+    hip_fp8* __restrict__ out,           // [..., hidden_size]
     const scalar_t* __restrict__ input,   // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float* scale,
@@ -76,7 +76,7 @@ __global__ void scaled_rms_norm_kernel(
     float x = (float)input[blockIdx.x * hidden_size + idx];
     x = (x * s_variance) * (float)weight[idx] / (*scale);
 
-    out[blockIdx.x * hidden_size_padded + idx] = c10::Float8_e4m3fnuz(x);
+    out[blockIdx.x * hidden_size_padded + idx] = hip_fp8(x);
   }
 }
 
@@ -291,7 +291,7 @@ fused_add_rms_norm_kernel(
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists>
 scaled_fused_add_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,
+    hip_fp8* __restrict__ out,
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
@@ -392,7 +392,7 @@ fused_add_rms_norm_kernel(
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width == 0) || !_typeConvert<scalar_t>::exists>
 scaled_fused_add_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,
+    hip_fp8* __restrict__ out,
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
@@ -423,7 +423,7 @@ scaled_fused_add_rms_norm_kernel(
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = (float)residual[blockIdx.x * hidden_size + idx];
     x = (x * s_variance) * (float)weight[idx] / (*scale);
-    out[blockIdx.x * hidden_size_padded + idx] = c10::Float8_e4m3fnuz(x);
+    out[blockIdx.x * hidden_size_padded + idx] = hip_fp8(x);
   }
 }
 
@@ -462,7 +462,7 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   VLLM_DISPATCH_FLOATING_TYPES(input.scalar_type(), "rms_norm_kernel", [&] {
     vllm::scaled_rms_norm_kernel<scalar_t><<<grid, block, 0, stream>>>(
-        out.data_ptr<c10::Float8_e4m3fnuz>(), input.data_ptr<scalar_t>(),
+        reinterpret_cast<hip_fp8 *>(out.data_ptr()), input.data_ptr<scalar_t>(),
         weight.data_ptr<scalar_t>(), scale.data_ptr<float>(),
         epsilon, num_tokens, hidden_size, hidden_size_padded);
   });
@@ -482,7 +482,7 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   VLLM_DISPATCH_FLOATING_TYPES(                                                \
       input.scalar_type(), "fused_add_rms_norm_kernel", [&] {                  \
         vllm::scaled_fused_add_rms_norm_kernel<scalar_t, width>                \
-            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fnuz>(), \
+            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8 *>(out.data_ptr()), \
                                          input.data_ptr<scalar_t>(),           \
                                          residual.data_ptr<scalar_t>(),        \
                                          weight.data_ptr<scalar_t>(),          \
