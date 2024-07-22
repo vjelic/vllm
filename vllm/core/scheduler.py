@@ -5,7 +5,7 @@ import time
 import copy
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Deque, Dict, Iterable, List, Optional, Set, Tuple, Union, NamedTuple
 
 from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
@@ -422,29 +422,20 @@ class Scheduler:
             #seq_groups = [sg for sg in running_queue]
             seq_groups = list(running_queue)
             #assume all seqs are running
-            #running_seqs = [seq_group.get_seqs()[0] for seq_group in seq_groups]
-            running_seqs = map(lambda sg: sg.get_seqs()[0],seq_groups)
+            running_seqs = [seq_group.get_seqs()[0] for seq_group in seq_groups]
 
             ts1 = time.time_ns()
             #[self._append_slots(seq_group, blocks_to_copy) for seq_group in seq_groups]
-            [self.block_manager.append_slots(seq) for seq in running_seqs]
-            #assume cows is always empty
-            #cows = self.block_manager.append_slots(seq, num_lookahead_slots)
-            #blocks_to_copy.extend(cows)
+            cows_array = [self.block_manager.append_slots(seq) for seq in running_seqs]
+            #can we assume cows_array is empty and not do the extend below?
+            [blocks_to_copy.extend(cows) for cows in cows_array]
             ts2 = time.time_ns()
-            #map(lambda sg: self._append_slots(sg, blocks_to_copy),seq_groups)
-            ##dsgrps = [ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1) for seq_group in seq_groups]
-            #dsgrps = map(lambda sg: ScheduledSequenceGroup(seq_group=sg, token_chunk_size=1),seq_groups)
-            ts21 = time.time_ns()
             #decode_seq_groups.extend(dsgrps)
             decode_seq_groups = [ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1) for seq_group in seq_groups]
             #[decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group,
             #                          token_chunk_size=1)) for seq_group in seq_groups]
             ts3 = time.time_ns()
-            #map(lambda seq_group: decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group,
-            #                          token_chunk_size=1)), seq_groups)
-            #[budget.add_num_batched_tokens(seq_group.request_id,1) for seq_group in seq_groups]
-            map(lambda sg: budget.add_num_batched_tokens(sg.request_id,1),seq_groups)
+            [budget.add_num_batched_tokens(seq_group.request_id,1) for seq_group in seq_groups]
             #print('>>> DecodeFastSched possible') 
             #check sequences are running?
             #ltimes = []
@@ -460,12 +451,11 @@ class Scheduler:
             #    tl2 = time.time_ns()
             #    ltimes.append(tl2-tl1)
             td2 = time.time_ns()
-            if td2-td1> 6000000:
-                print('>>> FastSched time large',td2-td1)
-                print('>>> FastSched times',ts1-td1,ts2-ts1,ts21-ts2,ts3-ts21,td2-ts3)
-                print('>>> FastSched blocks_to_copy',len(blocks_to_copy))
-                print('>>> FastSched decode SG',len(decode_seq_groups),flush=True)
-                #print('>>> FastSched ltimes',ltimes)
+            ##if td2-td1> 1000000:
+            ##    print('>>> FastSched time large',td2-td1)
+            ##    print('>>> FastSched times',ts1-td1,ts2-ts1,ts3-ts2,td2-ts3)
+            ##    print('>>> FastSched blocks_to_copy',len(blocks_to_copy))
+            ##    print('>>> FastSched decode SG',len(decode_seq_groups),flush=True)
             #return empty deque
             running_queue = deque()
         else:
@@ -725,7 +715,7 @@ class Scheduler:
             num_free_blocks = self.block_manager.gpu_allocator.get_num_free_blocks() 
             total_blocks = self.block_manager.num_total_gpu_blocks
             pct_blocks_free = 100*num_free_blocks/total_blocks
-            #print('>>> Num free blocks',num_free_blocks,'Pct Free',pct_blocks_free,flush=True)
+            print('>>> Num free blocks',num_free_blocks,'Pct Free',pct_blocks_free,flush=True)
         t2 = time.time_ns()
         if pct_blocks_free>VLLM_SCHED_PREFILL_KVC_FREEPCT:
             # We don't sort waiting queue because we assume it is sorted.
@@ -839,9 +829,7 @@ class Scheduler:
         ##for seq_group in self.running:
         ##    budget.add_num_seqs(seq_group.request_id,
         ##                        seq_group.get_max_num_running_seqs())
-        sg_req_ids = map(lambda s: s.request_id, self.running)
-        sg_max_running_seqs = map(lambda s: s.get_max_num_running_seqs(), self.running)
-        map(budget.add_num_seqs,sg_req_ids,sg_max_running_seqs)
+        [budget.add_num_seqs(sg.request_id,sg.get_max_num_running_seqs()) for sg in self.running]
 
         curr_loras = set(
             seq_group.lora_int_id for seq_group in self.running
@@ -887,14 +875,11 @@ class Scheduler:
         self.waiting.extendleft(running_scheduled.preempted)
         # Update new running requests.
         self.running = remaining_running
-        ##self.running.extend([s.seq_group for s in prefills.seq_groups])
-        self.running.extend(map(lambda s: s.seq_group, prefills.seq_groups))
-        ##self.running.extend(
-        ##    [s.seq_group for s in running_scheduled.decode_seq_groups])
-        self.running.extend(map(lambda s: s.seq_group, running_scheduled.decode_seq_groups))
-        ##self.running.extend(
-        ##    [s.seq_group for s in swapped_in.decode_seq_groups])
-        self.running.extend(map(lambda s: s.seq_group, swapped_in.decode_seq_groups))
+        self.running.extend([s.seq_group for s in prefills.seq_groups])
+        self.running.extend(
+            [s.seq_group for s in running_scheduled.decode_seq_groups])
+        self.running.extend(
+            [s.seq_group for s in swapped_in.decode_seq_groups])
         # Update swapped requests.
         self.swapped = remaining_swapped
         self.swapped.extend(running_scheduled.swapped_out)
@@ -1115,11 +1100,12 @@ class Scheduler:
         ##for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
         ##    self.block_manager.mark_blocks_as_computed(
         ##        scheduled_seq_group.seq_group)
-        seq_groups = map(lambda s: s.seq_group, scheduler_outputs.scheduled_seq_groups)
-        map(self.block_manager.mark_blocks_as_computed,seq_groups)
+        [self.block_manager.mark_blocks_as_computed(ssg.seq_group) for ssg in scheduler_outputs.scheduled_seq_groups]
 
         t4 = time.time_ns()
-        #print('>>>schedule',t2-t1,t3-t2,t4-t3,flush=True)
+        times_report = [t2-t1,t3-t2,t4-t3]
+        times_report = [0.000001*t for t in times_report]
+        #print('>>>schedule',times_report,flush=True)
         return seq_group_metadata_list, scheduler_outputs
 
     def fork_seq(self, parent_seq: Sequence, child_seq: Sequence) -> None:
