@@ -992,65 +992,109 @@ class Scheduler:
 
         # Create input data structures.
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
-        for i, scheduled_seq_group in enumerate(
-                scheduler_outputs.scheduled_seq_groups):
-            seq_group = scheduled_seq_group.seq_group
-            token_chunk_size = scheduled_seq_group.token_chunk_size
-            seq_group.maybe_set_first_scheduled_time(now)
 
-            # seq_id -> SequenceData
-            seq_data: Dict[int, SequenceData] = {}
-            # seq_id -> physical block numbers
-            block_tables: Dict[int, List[int]] = {}
-
-            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+        #decode fast path
+        if (scheduler_outputs.num_prefill_groups==0 and scheduler_outputs.preempted==0
+                and scheduler_outputs.running_queue_size==scheduler_outputs.num_batched_tokens
+                and not self.scheduler_config.chunked_prefill_enabled):
+            #print('>>> schedule decode fast path possible',flush=True)
+            for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
+                seq_group = scheduled_seq_group.seq_group
+                #token_chunk_size = scheduled_seq_group.token_chunk_size
+                #assert token_chunk_size==1
+                #assert seq_group.metrics.first_scheduled_time is not None
+                #seq_group.maybe_set_first_scheduled_time(now)
+                # seq_id -> SequenceData
+                seq_data: Dict[int, SequenceData] = {}
+                # seq_id -> physical block numbers
+                block_tables: Dict[int, List[int]] = {}
+                seq = next(iter(seq_group.seqs_dict.values()))
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
-                self.block_manager.access_all_blocks_in_seq(seq, now)
+                common_computed_block_nums = []
+                if self.cache_config.enable_prefix_caching:
+                    self.block_manager.access_all_blocks_in_seq(seq, now)
+                    common_computed_block_nums = (
+                        self.block_manager.get_common_computed_block_ids([seq]))
+                seq_group_metadata = SequenceGroupMetadata(
+                    request_id=seq_group.request_id,
+                    is_prompt=False,
+                    seq_data=seq_data,
+                    sampling_params=seq_group.sampling_params,
+                    block_tables=block_tables,
+                    do_sample=True,
+                    pooling_params=seq_group.pooling_params,
+                    token_chunk_size=1,
+                    lora_request=seq_group.lora_request,
+                    computed_block_nums=common_computed_block_nums,
+                    state=seq_group.state,
+                    # `multi_modal_data` will only be present for the 1st comm
+                    # between engine and worker.
+                    # the subsequent comms can still use delta, but
+                    # `multi_modal_data` will be None.
+                    multi_modal_data=None,
+                )
+                seq_group_metadata_list.append(seq_group_metadata)
+        else:
+            for i, scheduled_seq_group in enumerate(
+                    scheduler_outputs.scheduled_seq_groups):
+                seq_group = scheduled_seq_group.seq_group
+                token_chunk_size = scheduled_seq_group.token_chunk_size
+                seq_group.maybe_set_first_scheduled_time(now)
 
-            common_computed_block_nums = (
-                self.block_manager.get_common_computed_block_ids(
-                    seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+                # seq_id -> SequenceData
+                seq_data: Dict[int, SequenceData] = {}
+                # seq_id -> physical block numbers
+                block_tables: Dict[int, List[int]] = {}
+                running_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+                for seq in running_seqs:
+                    seq_id = seq.seq_id
+                    seq_data[seq_id] = seq.data
+                    block_tables[seq_id] = self.block_manager.get_block_table(seq)
+                    self.block_manager.access_all_blocks_in_seq(seq, now)
 
-            do_sample = True
-            is_prompt = seq_group.is_prefill()
-            #if seq_group.is_prefill():
-            if is_prompt:
-                seqs = seq_group.get_seqs()
-                # Prefill has only 1 sequence.
-                assert len(seqs) == 1
-                # In the next iteration, all prompt tokens are not computed.
-                # It means the prefill is chunked, and we don't need sampling.
-                # NOTE: We use get_len instead of get_prompt_len because when
-                # a sequence is preempted, prefill includes previous generated
-                # output tokens.
-                if (token_chunk_size + seqs[0].data.get_num_computed_tokens() <
-                        seqs[0].data.get_len()):
-                    do_sample = False
+                common_computed_block_nums = (
+                    self.block_manager.get_common_computed_block_ids(running_seqs))
 
-            # It assumes the scheduled_seq_groups is ordered by
-            # prefill < decoding.
-            seq_group_metadata = SequenceGroupMetadata(
-                request_id=seq_group.request_id,
-                is_prompt=is_prompt,
-                seq_data=seq_data,
-                sampling_params=seq_group.sampling_params,
-                block_tables=block_tables,
-                do_sample=do_sample,
-                pooling_params=seq_group.pooling_params,
-                token_chunk_size=token_chunk_size,
-                lora_request=seq_group.lora_request,
-                computed_block_nums=common_computed_block_nums,
-                state=seq_group.state,
-                # `multi_modal_data` will only be present for the 1st comm
-                # between engine and worker.
-                # the subsequent comms can still use delta, but
-                # `multi_modal_data` will be None.
-                multi_modal_data=seq_group.multi_modal_data
-                if scheduler_outputs.num_prefill_groups > 0 else None,
-            )
-            seq_group_metadata_list.append(seq_group_metadata)
+                do_sample = True
+                is_prompt = seq_group.is_prefill()
+                #if seq_group.is_prefill():
+                if is_prompt:
+                    seqs = seq_group.get_seqs()
+                    # Prefill has only 1 sequence.
+                    assert len(seqs) == 1
+                    # In the next iteration, all prompt tokens are not computed.
+                    # It means the prefill is chunked, and we don't need sampling.
+                    # NOTE: We use get_len instead of get_prompt_len because when
+                    # a sequence is preempted, prefill includes previous generated
+                    # output tokens.
+                    if (token_chunk_size + seqs[0].data.get_num_computed_tokens() <
+                            seqs[0].data.get_len()):
+                        do_sample = False
+
+                # It assumes the scheduled_seq_groups is ordered by
+                # prefill < decoding.
+                seq_group_metadata = SequenceGroupMetadata(
+                    request_id=seq_group.request_id,
+                    is_prompt=is_prompt,
+                    seq_data=seq_data,
+                    sampling_params=seq_group.sampling_params,
+                    block_tables=block_tables,
+                    do_sample=do_sample,
+                    pooling_params=seq_group.pooling_params,
+                    token_chunk_size=token_chunk_size,
+                    lora_request=seq_group.lora_request,
+                    computed_block_nums=common_computed_block_nums,
+                    state=seq_group.state,
+                    # `multi_modal_data` will only be present for the 1st comm
+                    # between engine and worker.
+                    # the subsequent comms can still use delta, but
+                    # `multi_modal_data` will be None.
+                    multi_modal_data=seq_group.multi_modal_data
+                    if scheduler_outputs.num_prefill_groups > 0 else None,
+                )
+                seq_group_metadata_list.append(seq_group_metadata)
 
         # Now that the batch has been created, we can assume all blocks in the
         # batch will have been computed before the next scheduling invocation.
