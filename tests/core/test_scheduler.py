@@ -347,7 +347,7 @@ def test_prefill_schedule_max_prompt_len():
     Test prompt longer than max_prompt_len is aborted.
     """
     scheduler = initialize_scheduler(max_model_len=30)
-    _, seq_group = create_dummy_prompt(0, prompt_length=60)
+    _, seq_group = create_dummy_prompt("0", prompt_length=60)
     waiting = deque([seq_group])
     budget = create_token_budget()
     remaining_waiting, output = scheduler._schedule_prefills(

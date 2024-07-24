@@ -38,7 +38,7 @@ PromptLogprobs = List[Optional[Dict[int, Logprob]]]
 SampleLogprobs = List[Dict[int, Logprob]]
 
 
-class SequenceStatus(enum.Enum):
+class SequenceStatus(enum.IntEnum):
     """Status of a sequence."""
     WAITING = enum.auto()
     RUNNING = enum.auto()
@@ -50,12 +50,13 @@ class SequenceStatus(enum.Enum):
 
     @staticmethod
     def is_finished(status: "SequenceStatus") -> bool:
-        return status in [
-            SequenceStatus.FINISHED_STOPPED,
-            SequenceStatus.FINISHED_LENGTH_CAPPED,
-            SequenceStatus.FINISHED_ABORTED,
-            SequenceStatus.FINISHED_IGNORED,
-        ]
+        #return status in [
+        #    SequenceStatus.FINISHED_STOPPED,
+        #    SequenceStatus.FINISHED_LENGTH_CAPPED,
+        #    SequenceStatus.FINISHED_ABORTED,
+        #    SequenceStatus.FINISHED_IGNORED,
+        #]
+        return status >= SequenceStatus.FINISHED_STOPPED
 
     @staticmethod
     def get_finished_reason(status: "SequenceStatus") -> Union[str, None]:
