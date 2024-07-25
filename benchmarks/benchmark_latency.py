@@ -15,6 +15,7 @@ from vllm.inputs import PromptInputs
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import FlexibleArgumentParser
 
+from rpd_handler import *
 
 def main(args: argparse.Namespace):
     print(args)
@@ -103,8 +104,16 @@ def main(args: argparse.Namespace):
 
     # Benchmark.
     latencies = []
+    if args.enable_prof:
+        profiler = HipTx()
+        profiler.start_profiling()
+
     for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
         latencies.append(run_to_completion(profile_dir=None))
+
+    if args.enable_prof:
+        profiler.stop_profiling()
+
     latencies = np.array(latencies)
     percentages = [10, 25, 50, 75, 90, 99]
     percentiles = np.percentile(latencies, percentages)
@@ -150,11 +159,11 @@ if __name__ == '__main__':
     parser.add_argument('--use-beam-search', action='store_true')
     parser.add_argument('--num-iters-warmup',
                         type=int,
-                        default=10,
+                        default=5,
                         help='Number of iterations to run for warmup.')
     parser.add_argument('--num-iters',
                         type=int,
-                        default=30,
+                        default=5,
                         help='Number of iterations to run.')
     parser.add_argument('--trust-remote-code',
                         action='store_true',
@@ -281,5 +290,9 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help='Target URL to which OpenTelemetry traces will be sent.')
+    parser.add_argument(
+        "--enable-prof",
+        action='store_true',
+        help="enable profiler.")
     args = parser.parse_args()
     main(args)
