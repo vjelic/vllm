@@ -435,7 +435,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 output[:num_prefill_tokens] = out
             else:
                 # prefix-enabled attention
-                output[:num_prefill_tokens] = PagedAttention.forward_prefix(
+                PagedAttention.forward_prefix(
                     query,
                     key,
                     value,
@@ -448,11 +448,12 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     prefill_meta.max_query_len,
                     self.alibi_slopes,
                     self.sliding_window[0],
+                    output[:num_prefill_tokens],
                 )
 
         if decode_meta := attn_metadata.decode_metadata:
             # Decoding run.
-            output[num_prefill_tokens:] = PagedAttention.forward_decode(
+            PagedAttention.forward_decode(
                 decode_query,
                 key_cache,
                 value_cache,
@@ -464,6 +465,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 self.scale,
                 self.alibi_slopes,
                 kv_scale,
+                output[num_prefill_tokens:],
             )
 
         # Reshape the output tensor.

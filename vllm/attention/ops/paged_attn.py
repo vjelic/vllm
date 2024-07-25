@@ -99,12 +99,13 @@ class PagedAttention:
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
         kv_scale: float,
+        out: Optional[torch.Tensor] = None,
         tp_rank: int = 0,
         blocksparse_local_blocks: int = 0,
         blocksparse_vert_stride: int = 0,
         blocksparse_block_size: int = 64,
         blocksparse_head_sliding_step: int = 0,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor: 
         if blocksparse_vert_stride is not None and blocksparse_vert_stride > 1:
             # use blocksparse paged attention
             block_size = value_cache.size(-1)
@@ -112,8 +113,7 @@ class PagedAttention:
                     blocksparse_block_size % block_size == 0), \
                 (f"{blocksparse_block_size=} needs to be a multiple of"
                  f"{block_size=} used in block_tables.")
-
-        output = torch.empty_like(query)
+        output = out if out is not None else torch.empty_like(query)
         block_size = value_cache.shape[3]
         num_seqs, num_heads, head_size = query.shape
         gqa_ratio = num_heads // num_kv_heads
@@ -232,8 +232,9 @@ class PagedAttention:
         max_query_len: int,
         alibi_slopes: Optional[torch.Tensor],
         sliding_window: Optional[int],
+        out: Optional[torch.Tensor] = None, 
     ) -> torch.Tensor:
-        output = torch.empty_like(query)
+        output = out if out is not None else torch.empty_like(query)
         context_attention_fwd(
             query,
             key,
