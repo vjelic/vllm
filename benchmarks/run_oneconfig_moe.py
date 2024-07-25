@@ -228,8 +228,8 @@ def main():
     with open(config_file_name, 'r') as f:
         configs = json.load(f)
     config = configs[str(bs)]
-    tune_time = config["time"]
-    print(f"tune_time = {tune_time} (us)")
+    # tune_time = config["time"]
+    # print(f"tune_time = {tune_time} (us)")
     config.pop("time")
     num_calls = 100
 
@@ -262,7 +262,7 @@ def main():
         time_us = round(kernel_time * 1000, 2)
         kernel_times.append(time_us)
         kernel_times.sort()
-    print(f"kernel_time = {kernel_times} (us)")
+    # print(f"kernel_time = {kernel_times} (us)")
 
 
 if __name__ == "__main__":

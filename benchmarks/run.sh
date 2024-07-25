@@ -1,4 +1,8 @@
 ./copy_kernel.sh
 # python run_oneconfig_moe.py -bs 4 -d_model 4096 -num_expt 8 -top_k 2 -tp_size 1 -inter_size 14336 -config_file tune_config1.json
-rocprof --stats python run_oneconfig_moe.py -bs 4 -d_model 4096 -num_expt 8 -top_k 2 -tp_size 1 -inter_size 14336 -config_file tune_config1.json
-python get_kernel_time.py -rocprof_file results.csv
+# rocprof --stats python run_oneconfig_moe.py -bs 4 -d_model 4096 -num_expt 8 -top_k 2 -tp_size 1 -inter_size 14336 -config_file tune_config1.json
+rocprof --stats python run_oneconfig_moe.py -bs 4 -d_model 4096 -num_expt 8 -top_k 2 -tp_size 1 -inter_size 14336 -config_file invk1.json
+python get_kernel_time.py -rocprof_file results.csv -ki 0
+
+rocprof --stats python run_oneconfig_moe.py -bs 4 -d_model 4096 -num_expt 8 -top_k 2 -tp_size 1 -inter_size 14336 -config_file invk2.json
+python get_kernel_time.py -rocprof_file results.csv -ki 1

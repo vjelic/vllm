@@ -74,36 +74,15 @@ def main():
     # print(f"tune_time = {tune_time} (us)")
     # config.pop("time")
 
-    num_warmup_trials = 2
-    try:
-        for _ in range(num_warmup_trials):
-            run_timing(
-                num_calls=num_calls,
-                bs=bs,
-                d_model=d_model,
-                num_total_experts=num_total_experts,
-                top_k=top_k,
-                tp_size=tp_size,
-                model_intermediate_size=model_intermediate_size,
-                # config=config,
-            )
-    except triton.runtime.autotuner.OutOfResources:
-        pass
-
-    kernel_times = []
-    for _ in range(10):
-        kernel_time = run_timing(num_calls,
-                        bs,
-                        d_model,
-                        num_total_experts,
-                        top_k,
-                        tp_size,
-                        model_intermediate_size,
-                        config)
-        time_us = round(kernel_time * 1000, 2)
-        kernel_times.append(time_us)
-        kernel_times.sort()
-    print(f"kernel_time = {kernel_times} (us)")
+    run_timing(
+        bs=bs,
+        d_model=d_model,
+        num_total_experts=num_total_experts,
+        top_k=top_k,
+        tp_size=tp_size,
+        model_intermediate_size=model_intermediate_size,
+        # config=config,
+    )
 
 if __name__ == "__main__":
     main()

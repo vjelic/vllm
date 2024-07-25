@@ -15,6 +15,16 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
+
+def get_specific_configs():
+    configs = [
+        triton.Config({"BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 128, "GROUP_SIZE_M": 1, "waves_per_eu": 0, "matrix_instr_nonkdim": 16, "kpack": 2}, num_warps=2, num_stages=0),
+        triton.Config({"BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 128, "GROUP_SIZE_M": 1, "waves_per_eu": 0, "matrix_instr_nonkdim": 16, "kpack": 2}, num_warps=8, num_stages=0)
+    ]
+    
+    return configs
+
+
 ## Utilize method from rocm/Triton tuning script
 def get_full_tuning_space():
     configs = []
@@ -56,11 +66,12 @@ def get_full_tuning_space():
 
 
 ## Utilize method from rocm/Triton tuning script
-def prune_configs(configs, nargs, named_args):
-    M = named_args["EM"]
-    N = named_args["N"]
-    K = named_args["K"]
+def prune_configs(configs, nargs:dict, **named_args):
+# def prune_configs(configs, nargs:dict, **kwargs):
     BLOCK_SIZE_M = named_args["BLOCK_SIZE_M"]
+    K = nargs["K"]
+    N = nargs["N"]
+    M = nargs["EM"]
     pruned_configs = []
     elemBytes_a = 2  # [DV Note] Hard-coded for float16 (2 bytes)
     elemBytes_b = 2  # [DV Note] Hard-coded for float16 (2 bytes)
@@ -74,10 +85,14 @@ def prune_configs(configs, nargs, named_args):
 
     for config in configs:
         # BLOCK_SIZE_M = config.get("BLOCK_SIZE_M")
-        BLOCK_SIZE_N = config.get("BLOCK_SIZE_N")
-        BLOCK_SIZE_K = config.get("BLOCK_SIZE_K")
-        num_warps = config.get("num_warps")
-        matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
+        # BLOCK_SIZE_N = config.get("BLOCK_SIZE_N")
+        # BLOCK_SIZE_K = config.get("BLOCK_SIZE_K")
+        # num_warps = config.get("num_warps")
+        # matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
+        BLOCK_SIZE_N = config.kwargs.get("BLOCK_SIZE_N")
+        BLOCK_SIZE_K = config.kwargs.get("BLOCK_SIZE_K")
+        num_warps = config.kwargs.get("num_warps")
+        matrix_instr_nonkdim = config.kwargs.get("matrix_instr_nonkdim")
         # kpack = config.get("kpack")
         if matrix_instr_nonkdim > mfma:
             continue
@@ -88,7 +103,8 @@ def prune_configs(configs, nargs, named_args):
         if BLOCK_SIZE_M * BLOCK_SIZE_N < 64:
             continue
         SPLIT_K = 1  # config.get("SPLIT_K")
-        GROUP_M = config.get("GROUP_SIZE_M")
+        # GROUP_M = config.get("GROUP_SIZE_M")
+        GROUP_M = config.kwargs.get("GROUP_SIZE_M")
         if (matrix_instr_nonkdim > BLOCK_SIZE_M
                 or matrix_instr_nonkdim > BLOCK_SIZE_N):
             continue
@@ -134,6 +150,7 @@ def prune_configs(configs, nargs, named_args):
 
 @triton.autotune(
     configs = get_full_tuning_space(),
+    # configs = get_specific_configs(),
     key=['EM', 'N', 'K'],
     prune_configs_by={
         'early_config_prune': prune_configs,
@@ -586,9 +603,11 @@ def run_timing(
     )
 
 
-    block_mn_range = [16, 32, 64, 128, 256]
+    # block_mn_range = [16, 32, 64, 128, 256]
+    block_mn_range = [16]
     ##################################
     for block_m in block_mn_range:
+        print(f"block_m = {block_m}")
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
             topk_ids, block_m, E)
 
@@ -608,8 +627,9 @@ def run_timing(
                                 compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                                               else tl.float16),
                                 block_size_m=block_m,
-                                use_fp8=False), quantiles=quantiles)
+                                use_fp8=False), quantiles=quantiles, rep=40, warmup=20)
         best_config1 = fused_moe_kernel.best_config
+        print(f"invoke1, time(us) = {ms1}, best_config = {best_config1}")
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
@@ -628,11 +648,14 @@ def run_timing(
                                 compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                                               else tl.float16),
                                 block_size_m=block_m,
-                                use_fp8=False), quantiles=quantiles)
+                                use_fp8=False), quantiles=quantiles, rep=40, warmup=20)
         best_config2 = fused_moe_kernel.best_config
-
+        print(f"invoke2, time(us) = {ms2}, best_config = {best_config2}")
         return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-                        dim=1), ms1, best_config1, ms2, best_config2
+                        dim=1), ms1, best_config1
+
+        # return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
+        #                 dim=1), ms1, best_config1, ms2, best_config2
 
 
 # def tune_fused_experts(hidden_states: torch.Tensor,
