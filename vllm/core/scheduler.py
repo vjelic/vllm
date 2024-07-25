@@ -58,13 +58,13 @@ class SchedulingBudget:
     _num_batched_tokens: int = 0
     _num_curr_seqs: int = 0
 
-    def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int):
+    def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int) -> bool:
         assert num_new_tokens != 0
         assert num_new_seqs != 0
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
                 and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
 
-    def remaining_token_budget(self):
+    def remaining_token_budget(self) -> int:
         return self.token_budget - self.num_batched_tokens
 
     def add_num_batched_tokens(self, req_id: str, num_batched_tokens: int):
@@ -73,6 +73,13 @@ class SchedulingBudget:
 
         self._requeset_ids_num_batched_tokens.add(req_id)
         self._num_batched_tokens += num_batched_tokens
+
+    def create_num_batched_tokens(self, req_ids: List[str], total_num_batched_tokens: int):
+        self._requeset_ids_num_batched_tokens = set(req_ids)
+        self._num_batched_tokens = total_num_batched_tokens
+
+    def create_num_batched_tokens_noreqids(self, total_num_batched_tokens: int):
+        self._num_batched_tokens = total_num_batched_tokens
 
     def subtract_num_batched_tokens(self, req_id: str,
                                     num_batched_tokens: int):
@@ -87,17 +94,24 @@ class SchedulingBudget:
         self._requeset_ids_num_curr_seqs.add(req_id)
         self._num_curr_seqs += num_curr_seqs
 
+    def create_num_seqs(self, req_ids: List[str], total_num_curr_seqs: int):
+        self._requeset_ids_num_curr_seqs = set(req_ids)
+        self._num_curr_seqs = total_num_curr_seqs
+
+    def create_num_seqs_noreqids(self, total_num_curr_seqs: int):
+        self._num_curr_seqs = total_num_curr_seqs
+
     def subtract_num_seqs(self, req_id: str, num_curr_seqs: int):
         if req_id in self._requeset_ids_num_curr_seqs:
             self._requeset_ids_num_curr_seqs.remove(req_id)
             self._num_curr_seqs -= num_curr_seqs
 
     @property
-    def num_batched_tokens(self):
+    def num_batched_tokens(self) -> int:
         return self._num_batched_tokens
 
     @property
-    def num_curr_seqs(self):
+    def num_curr_seqs(self) -> int:
         return self._num_curr_seqs
 
 
@@ -372,6 +386,7 @@ class Scheduler:
         curr_loras: Optional[Set[int]],
         policy: Policy,
         enable_chunking: bool = False,
+        fastpath_decode: bool = False,
     ) -> Tuple[deque, SchedulerRunningOutputs]:
         """Schedule sequence groups that are running.
 
@@ -407,8 +422,21 @@ class Scheduler:
         # to keep all the sequence groups in the RUNNING state.
         # In this case, the policy is responsible for deciding which sequence
         # groups to preempt.
-        now = time.time()
-        running_queue = policy.sort_by_priority(now, running_queue)
+        rqlen = len(running_queue)
+        num_free_blocks = self.block_manager.gpu_allocator.get_num_free_blocks()
+        if not enable_chunking and curr_loras is None and len(running_queue)<num_free_blocks and self.scheduler_config.num_lookahead_slots==0 and fastpath_decode:
+            for seq_group in running_queue:
+                seq = next(iter(seq_group.seqs_dict.values()))
+                assert seq.status == SequenceStatus.RUNNING
+                cows_array = self.block_manager.append_slots(seq)
+                blocks_to_copy.extend(cows_array)
+                decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1))
+                #budget.add_num_batched_tokens(seq_group.request_id,1)
+            budget.create_num_batched_tokens_noreqids(total_num_batched_tokens=len(running_queue))
+            running_queue = deque()
+        else:
+            now = time.time()
+            running_queue = policy.sort_by_priority(now, running_queue)
         while running_queue:
             seq_group = running_queue[0]
             num_running_tokens = self._get_num_new_tokens(
@@ -642,20 +670,24 @@ class Scheduler:
         """
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[SequenceGroup] = []
-        # We don't sort waiting queue because we assume it is sorted.
-        # Copy the queue so that the input queue is not modified.
-        waiting_queue = deque([s for s in waiting_queue])
-
-        leftover_waiting_sequences: Deque[SequenceGroup] = deque()
-        pct_blocks_free = 100.0
-        #only calculate pct_blocks_free if VLLM_SCHED_PREFILL_KVC_FREEPCT feature is enabled
+        #suppress prefill scheduling if KVC is not free for offline use cases 
         if VLLM_SCHED_PREFILL_KVC_FREEPCT>0.0:
             num_free_blocks = self.block_manager.gpu_allocator.get_num_free_blocks()
             total_blocks = self.block_manager.num_total_gpu_blocks
             pct_blocks_free = 100*num_free_blocks/total_blocks
             #print('>>> Num free blocks',num_free_blocks,'Pct Free',pct_blocks_free,flush=True)
+            if pct_blocks_free<VLLM_SCHED_PREFILL_KVC_FREEPCT:
+                return waiting_queue, SchedulerPrefillOutputs(
+                seq_groups=seq_groups,
+                ignored_seq_groups=ignored_seq_groups,
+                num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True))
 
-        while pct_blocks_free>VLLM_SCHED_PREFILL_KVC_FREEPCT and self._passed_delay(time.time()) and waiting_queue:
+        # We don't sort waiting queue because we assume it is sorted.
+        # Copy the queue so that the input queue is not modified.
+        waiting_queue = deque([s for s in waiting_queue])
+        leftover_waiting_sequences: Deque[SequenceGroup] = deque()
+
+        while self._passed_delay(time.time()) and waiting_queue:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
@@ -751,9 +783,25 @@ class Scheduler:
         )
         # Make sure we include num running seqs before scheduling prefill,
         # so that we don't schedule beyond max_num_seqs for prefill.
-        for seq_group in self.running:
-            budget.add_num_seqs(seq_group.request_id,
-                                seq_group.get_max_num_running_seqs())
+        max_running_seqs = [seq_group.get_max_num_running_seqs() for seq_group in self.running]
+        fast_decode = False
+        if len(max_running_seqs)>0:
+            max_running_per_sg = max(max_running_seqs)
+            total_running_seqs = sum(max_running_seqs)
+            fast_decode = max_running_per_sg==1 and total_running_seqs==len(self.running) and len(self.swapped)==0
+
+        #for seq_group in self.running:
+        #    num_running = seq_group.get_max_num_running_seqs()
+        #    max_running_seqs.append(num_running)
+        #for i,seq_group in enumerate(self.running):
+        #    budget.add_num_seqs(seq_group.request_id,max_running_seqs[i])
+        if len(self.running)>0:
+            if len(self.waiting)==0 and len(self.swapped)==0:
+                #don't update reqids in budget to save time since there're no waiting inputs left to schedule which can change num_seqs
+                budget.create_num_seqs_noreqids(total_num_curr_seqs=total_running_seqs)
+            else:
+                budget.create_num_seqs(req_ids=[seq_group.request_id for seq_group in self.running], total_num_curr_seqs=total_running_seqs)
+
         curr_loras = set(
             seq_group.lora_int_id for seq_group in self.running
             if seq_group.lora_int_id > 0) if self.lora_enabled else None
@@ -780,7 +828,8 @@ class Scheduler:
                 budget,
                 curr_loras,
                 fcfs_policy,
-                enable_chunking=False)
+                enable_chunking=False,
+                fastpath_decode=fast_decode)
 
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
@@ -954,64 +1003,109 @@ class Scheduler:
 
         # Create input data structures.
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
-        for i, scheduled_seq_group in enumerate(
-                scheduler_outputs.scheduled_seq_groups):
-            seq_group = scheduled_seq_group.seq_group
-            token_chunk_size = scheduled_seq_group.token_chunk_size
-            seq_group.maybe_set_first_scheduled_time(now)
 
-            # seq_id -> SequenceData
-            seq_data: Dict[int, SequenceData] = {}
-            # seq_id -> physical block numbers
-            block_tables: Dict[int, List[int]] = {}
-
-            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+        #decode fast path
+        if (scheduler_outputs.num_prefill_groups==0 and scheduler_outputs.preempted==0
+                and scheduler_outputs.running_queue_size==scheduler_outputs.num_batched_tokens
+                and not self.scheduler_config.chunked_prefill_enabled):
+            #print('>>> schedule decode fast path possible',flush=True)
+            for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
+                seq_group = scheduled_seq_group.seq_group
+                #token_chunk_size = scheduled_seq_group.token_chunk_size
+                #assert token_chunk_size==1
+                #assert seq_group.metrics.first_scheduled_time is not None
+                #seq_group.maybe_set_first_scheduled_time(now)
+                # seq_id -> SequenceData
+                seq_data: Dict[int, SequenceData] = {}
+                # seq_id -> physical block numbers
+                block_tables: Dict[int, List[int]] = {}
+                seq = next(iter(seq_group.seqs_dict.values()))
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
-                self.block_manager.access_all_blocks_in_seq(seq, now)
+                common_computed_block_nums = []
+                if self.cache_config.enable_prefix_caching:
+                    self.block_manager.access_all_blocks_in_seq(seq, now)
+                    common_computed_block_nums = (
+                        self.block_manager.get_common_computed_block_ids([seq]))
+                seq_group_metadata = SequenceGroupMetadata(
+                    request_id=seq_group.request_id,
+                    is_prompt=False,
+                    seq_data=seq_data,
+                    sampling_params=seq_group.sampling_params,
+                    block_tables=block_tables,
+                    do_sample=True,
+                    pooling_params=seq_group.pooling_params,
+                    token_chunk_size=1,
+                    lora_request=seq_group.lora_request,
+                    computed_block_nums=common_computed_block_nums,
+                    state=seq_group.state,
+                    # `multi_modal_data` will only be present for the 1st comm
+                    # between engine and worker.
+                    # the subsequent comms can still use delta, but
+                    # `multi_modal_data` will be None.
+                    multi_modal_data=None,
+                )
+                seq_group_metadata_list.append(seq_group_metadata)
+        else:
+            for i, scheduled_seq_group in enumerate(
+                    scheduler_outputs.scheduled_seq_groups):
+                seq_group = scheduled_seq_group.seq_group
+                token_chunk_size = scheduled_seq_group.token_chunk_size
+                seq_group.maybe_set_first_scheduled_time(now)
 
-            common_computed_block_nums = (
-                self.block_manager.get_common_computed_block_ids(
-                    seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+                # seq_id -> SequenceData
+                seq_data: Dict[int, SequenceData] = {}
+                # seq_id -> physical block numbers
+                block_tables: Dict[int, List[int]] = {}
+                running_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+                for seq in running_seqs:
+                    seq_id = seq.seq_id
+                    seq_data[seq_id] = seq.data
+                    block_tables[seq_id] = self.block_manager.get_block_table(seq)
+                    self.block_manager.access_all_blocks_in_seq(seq, now)
 
-            do_sample = True
-            if seq_group.is_prefill():
-                seqs = seq_group.get_seqs()
-                # Prefill has only 1 sequence.
-                assert len(seqs) == 1
-                # In the next iteration, all prompt tokens are not computed.
-                # It means the prefill is chunked, and we don't need sampling.
-                # NOTE: We use get_len instead of get_prompt_len because when
-                # a sequence is preempted, prefill includes previous generated
-                # output tokens.
-                if (token_chunk_size + seqs[0].data.get_num_computed_tokens() <
-                        seqs[0].data.get_len()):
-                    do_sample = False
+                common_computed_block_nums = (
+                    self.block_manager.get_common_computed_block_ids(running_seqs))
 
-            # It assumes the scheduled_seq_groups is ordered by
-            # prefill < decoding.
-            is_prompt = seq_group.is_prefill()
-            seq_group_metadata = SequenceGroupMetadata(
-                request_id=seq_group.request_id,
-                is_prompt=is_prompt,
-                seq_data=seq_data,
-                sampling_params=seq_group.sampling_params,
-                block_tables=block_tables,
-                do_sample=do_sample,
-                pooling_params=seq_group.pooling_params,
-                token_chunk_size=token_chunk_size,
-                lora_request=seq_group.lora_request,
-                computed_block_nums=common_computed_block_nums,
-                state=seq_group.state,
-                # `multi_modal_data` will only be present for the 1st comm
-                # between engine and worker.
-                # the subsequent comms can still use delta, but
-                # `multi_modal_data` will be None.
-                multi_modal_data=seq_group.multi_modal_data
-                if scheduler_outputs.num_prefill_groups > 0 else None,
-            )
-            seq_group_metadata_list.append(seq_group_metadata)
+                do_sample = True
+                is_prompt = seq_group.is_prefill()
+                #if seq_group.is_prefill():
+                if is_prompt:
+                    seqs = seq_group.get_seqs()
+                    # Prefill has only 1 sequence.
+                    assert len(seqs) == 1
+                    # In the next iteration, all prompt tokens are not computed.
+                    # It means the prefill is chunked, and we don't need sampling.
+                    # NOTE: We use get_len instead of get_prompt_len because when
+                    # a sequence is preempted, prefill includes previous generated
+                    # output tokens.
+                    if (token_chunk_size + seqs[0].data.get_num_computed_tokens() <
+                            seqs[0].data.get_len()):
+                        do_sample = False
+
+                # It assumes the scheduled_seq_groups is ordered by
+                # prefill < decoding.
+                seq_group_metadata = SequenceGroupMetadata(
+                    request_id=seq_group.request_id,
+                    is_prompt=is_prompt,
+                    seq_data=seq_data,
+                    sampling_params=seq_group.sampling_params,
+                    block_tables=block_tables,
+                    do_sample=do_sample,
+                    pooling_params=seq_group.pooling_params,
+                    token_chunk_size=token_chunk_size,
+                    lora_request=seq_group.lora_request,
+                    computed_block_nums=common_computed_block_nums,
+                    state=seq_group.state,
+                    # `multi_modal_data` will only be present for the 1st comm
+                    # between engine and worker.
+                    # the subsequent comms can still use delta, but
+                    # `multi_modal_data` will be None.
+                    multi_modal_data=seq_group.multi_modal_data
+                    if scheduler_outputs.num_prefill_groups > 0 else None,
+                )
+                seq_group_metadata_list.append(seq_group_metadata)
 
         # Now that the batch has been created, we can assume all blocks in the
         # batch will have been computed before the next scheduling invocation.
