@@ -76,7 +76,10 @@ class SchedulingBudget:
 
     def create_num_batched_tokens(self, req_ids: List[str], total_num_batched_tokens: int):
         self._requeset_ids_num_batched_tokens = set(req_ids)
-        self._num_batched_tokens += total_num_batched_tokens
+        self._num_batched_tokens = total_num_batched_tokens
+
+    def create_num_batched_tokens_noreqids(self, total_num_batched_tokens: int):
+        self._num_batched_tokens = total_num_batched_tokens
 
     def subtract_num_batched_tokens(self, req_id: str,
                                     num_batched_tokens: int):
@@ -93,6 +96,9 @@ class SchedulingBudget:
 
     def create_num_seqs(self, req_ids: List[str], total_num_curr_seqs: int):
         self._requeset_ids_num_curr_seqs = set(req_ids)
+        self._num_curr_seqs = total_num_curr_seqs
+
+    def create_num_seqs_noreqids(self, total_num_curr_seqs: int):
         self._num_curr_seqs = total_num_curr_seqs
 
     def subtract_num_seqs(self, req_id: str, num_curr_seqs: int):
@@ -426,7 +432,7 @@ class Scheduler:
                 blocks_to_copy.extend(cows_array)
                 decode_seq_groups.append(ScheduledSequenceGroup(seq_group=seq_group, token_chunk_size=1))
                 #budget.add_num_batched_tokens(seq_group.request_id,1)
-            budget.create_num_batched_tokens(req_ids=[seq_group.request_id for seq_group in running_queue], total_num_batched_tokens=len(running_queue))
+            budget.create_num_batched_tokens_noreqids(total_num_batched_tokens=len(running_queue))
             running_queue = deque()
         else:
             now = time.time()
@@ -782,7 +788,7 @@ class Scheduler:
         if len(max_running_seqs)>0:
             max_running_per_sg = max(max_running_seqs)
             total_running_seqs = sum(max_running_seqs)
-            fast_decode = max_running_per_sg==1 and total_running_seqs==len(self.running)
+            fast_decode = max_running_per_sg==1 and total_running_seqs==len(self.running) and len(self.swapped)==0
 
         #for seq_group in self.running:
         #    num_running = seq_group.get_max_num_running_seqs()
@@ -790,7 +796,12 @@ class Scheduler:
         #for i,seq_group in enumerate(self.running):
         #    budget.add_num_seqs(seq_group.request_id,max_running_seqs[i])
         if len(self.running)>0:
-            budget.create_num_seqs(req_ids=[seq_group.request_id for seq_group in self.running], total_num_curr_seqs=total_running_seqs)
+            if len(self.waiting)==0 and len(self.swapped)==0:
+                #don't update reqids in budget to save time since there're no waiting inputs left to schedule which can change num_seqs
+                budget.create_num_seqs_noreqids(total_num_curr_seqs=total_running_seqs)
+            else:
+                budget.create_num_seqs(req_ids=[seq_group.request_id for seq_group in self.running], total_num_curr_seqs=total_running_seqs)
+
         curr_loras = set(
             seq_group.lora_int_id for seq_group in self.running
             if seq_group.lora_int_id > 0) if self.lora_enabled else None
