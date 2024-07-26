@@ -26,7 +26,7 @@ def fused_moe_kernel(
     topk_weights_ptr,
     sorted_token_ids_ptr,
     expert_ids_ptr,
-    num_tokens_post_padded_ptr,
+    num_tokens_post_padded,
     # Matrix dimensions
     N,
     K,
@@ -98,7 +98,6 @@ def fused_moe_kernel(
     # and accumulate
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -225,7 +224,7 @@ def moe_align_block_size(
         expert_ids,
         num_tokens_post_pad,
     )
-    return sorted_ids, expert_ids, num_tokens_post_pad
+    return sorted_ids, expert_ids, int(num_tokens_post_pad)
 
 
 def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
