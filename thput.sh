@@ -12,10 +12,10 @@ rocprof='rocprof --hip-trace --roctx-trace'
 rpd=runTracer.sh
 
 GEN_LEN="256"
-TP=8
+TP=4
 INPUT_LEN="256"
 ITER=10
-INP=1000
+INP=2000
 
 #rm ./trace.rpd
 #python -m rocpd.schema --create ./trace.rpd

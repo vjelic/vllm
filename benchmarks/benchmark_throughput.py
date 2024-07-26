@@ -121,6 +121,7 @@ def run_vllm(
                 max_tokens=output_len,
             ))
 
+
     start = time.perf_counter()
     llm.generate(prompts, sampling_params, use_tqdm=True)
     end = time.perf_counter()
@@ -351,6 +352,10 @@ if __name__ == "__main__":
         help='Path to the safetensor file containing the quantized weights '
         'and scaling factors. This should generally be supplied, when '
         'quantization is FP8.')
+    parser.add_argument(
+        '--profile_rpd',
+        action='store_true',
+        help='profile the generation process of a single batch using the rpd tracer')
     parser.add_argument(
         "--device",
         type=str,

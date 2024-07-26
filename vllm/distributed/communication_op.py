@@ -22,6 +22,16 @@ from .parallel_state import (get_cpu_world_group, get_pp_pynccl_communicator,
 from vllm.distributed.device_communicators.shm_broadcast import (
             ShmRingBufferIO)
 
+shm_broadcaster: Optional[ShmRingBufferIO] = None
+
+def init_shm_broadcaster(group):
+    global shm_broadcaster
+    world_size = get_tensor_model_parallel_world_size()
+
+    if world_size > 1 and is_in_the_same_node(group):
+        shm_broadcaster = ShmRingBufferIO.create_from_process_group(
+            group, 1 << 20, 6)
+
 @dataclass
 class GraphCaptureContext:
     stream: torch.cuda.Stream
@@ -197,22 +207,20 @@ def broadcast(input_: torch.Tensor,
     return input_
 
 def broadcast_object(obj: Optional[Any] = None, src: int = 0):#, group: Optional[ProcessGroup] = None):
+    #with torch.cuda.nvtx.range("broadcast_object"):
     """Broadcast the input object.
     NOTE: `src` is the local rank of the source rank.
     """
-    group = get_cpu_world_group()
     world_size = get_tensor_model_parallel_world_size()
     assert src < world_size, f"Invalid src rank ({src})"
-
-    shm_broadcaster: Optional[ShmRingBufferIO] = None
+    group = get_cpu_world_group()
+    global shm_broadcaster
 
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
         return obj
-    elif world_size > 1 and is_in_the_same_node(group):
-        shm_broadcaster = ShmRingBufferIO.create_from_process_group(
-            group, 1 << 20, 6)
-
+    if shm_broadcaster is None:
+        init_shm_broadcaster(group)
     if shm_broadcaster is not None:
         assert src == 0, "Shared memory broadcaster only supports src=0"
         return shm_broadcaster.broadcast_object(obj)
@@ -279,6 +287,7 @@ def broadcast_tensor_dict(
     group: Optional[ProcessGroup] = None,
     metadata_group: Optional[ProcessGroup] = None
 ) -> Optional[Dict[Any, Union[torch.Tensor, Any]]]:
+    #with torch.cuda.nvtx.range("broadcast_tensor_dict"):
     """Broadcast the input tensor dictionary.
     `group` is used to broadcast the tensors, while `metadata_group` is used
      to broadcast the metadata of the dict (e.g. dict structure, tensor sizes,
@@ -363,6 +372,7 @@ def broadcast_tensor_dict(
     return tensor_dict
 
 def is_in_the_same_node(pg: ProcessGroup):
+    #with torch.cuda.nvtx.range("is_in_the_same_node"):
     """
     This is a collective operation that checks if all processes in the group
     are in the same node. It tests if all processes are attached to the same
