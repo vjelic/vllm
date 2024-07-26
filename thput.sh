@@ -11,11 +11,13 @@ MODEL_SIZE=`echo $MODEL | sed 's/.*\(.[0-9][bB]\).*/\1/'`
 rocprof='rocprof --hip-trace --roctx-trace'
 rpd=runTracer.sh
 
-GEN_LEN="256"
+GEN_LEN="128"
 TP=4
-INPUT_LEN="256"
+INPUT_LEN="128"
+#"2048"
 ITER=10
-INP=2000
+INP=1000
+#2000
 
 #rm ./trace.rpd
 #python -m rocpd.schema --create ./trace.rpd

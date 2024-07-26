@@ -9,6 +9,7 @@ from torch.distributed import ProcessGroup
 # for shm
 from multiprocessing import shared_memory
 from unittest.mock import patch
+import atexit
 
 from vllm.utils import is_hip
 
@@ -435,3 +436,11 @@ def is_in_the_same_node(pg: ProcessGroup):
     torch.distributed.all_reduce(is_in_the_same_node, group=pg)
 
     return is_in_the_same_node.sum().item() == world_size
+
+def destroy_shm_broadcaster():
+    global shm_broadcaster
+    #if shm_broadcaster:
+        #shm_broadcaster.destroy()
+    shm_broadcaster = None
+
+atexit.register(destroy_shm_broadcaster)
