@@ -11,8 +11,8 @@ import torch
 from torch import nn
 
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoadFormat,
-                         LoRAConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig, VisionLanguageConfig)
+                         LoRAConfig, ModelConfig, MultiModalConfig, VisionLanguageConfig,
+                         ParallelConfig, SchedulerConfig)
 from vllm.envs import VLLM_USE_MODELSCOPE
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.base_config import (
@@ -80,10 +80,13 @@ def _get_model_initialization_kwargs(
     return extra_kwargs
 
 
-def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
-                      lora_config: Optional[LoRAConfig],
-                      vision_language_config: Optional[VisionLanguageConfig],
-                      cache_config: CacheConfig) -> nn.Module:
+def _initialize_model(
+        model_config: ModelConfig,
+        load_config: LoadConfig,
+        lora_config: Optional[LoRAConfig],
+        multimodal_config: Optional[MultiModalConfig],
+        cache_config: CacheConfig,
+        scheduler_config: Optional[SchedulerConfig] = None) -> nn.Module:
     """Initialize a model with the given configurations."""
     model_class = get_model_architecture(model_config)[0]
     quant_config = _get_quantization_config(model_config, load_config)
@@ -92,8 +95,9 @@ def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
                        cache_config=cache_config,
                        quant_config=quant_config,
                        **_get_model_initialization_kwargs(
-                           model_class, lora_config, vision_language_config))
-
+                           model_class, lora_config, multimodal_config,
+                        #   scheduler_config
+			))
 
 class BaseModelLoader(ABC):
     """Base class for model loaders."""
@@ -231,14 +235,14 @@ class DefaultModelLoader(BaseModelLoader):
     def load_model(self, *, model_config: ModelConfig,
                    device_config: DeviceConfig,
                    lora_config: Optional[LoRAConfig],
-                   vision_language_config: Optional[VisionLanguageConfig],
+                   vision_language_config: Optional[MultiModalConfig],
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig,
                    cache_config: CacheConfig) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
-                                          lora_config, vision_language_config,
+                                          lora_config, multimodal_config,
                                           cache_config)
             model.load_weights(
                 self._get_weights_iterator(model_config.model,
