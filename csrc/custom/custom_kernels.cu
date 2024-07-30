@@ -1859,6 +1859,443 @@ __global__ void wvSpltK_hf_m4_(const int K, const int N, const DTYPE* B,
   }
 }
 
+#undef YTILE
+#undef UNRL
+#define YTILE 6
+#define UNRL 1
+#define M_BLOCK 4
+
+#undef M
+template <int M>
+__global__ void 
+__launch_bounds__(WvPrGrp*THRDS)
+wvSpltK_fsdMoe_hf_(
+                               const DTYPE* __restrict__ A, 
+                               const DTYPE* __restrict__ B, 
+			       DTYPE* C,
+                               const float* __restrict__ topk_weights, 
+                               const int* __restrict__ topk_ids, 
+                               const int* __restrict__ sorted_token_ids, 
+                               const int* __restrict__ expert_ids, 
+                               const int* __restrict__ num_tokens_post_padded, 
+		               const int M_in, const int N, const int K, const int E, 
+                               const int num_valid_tokens, 
+		               const int stride_am,
+                               const int stride_ak,
+                               const int stride_be,
+                               const int stride_bk,
+                               const int stride_bn,
+                               const int stride_cm,
+                               const int stride_cn,
+		               const bool mul_routed_weight, 
+		               const int top_k,
+		               const int CuCount 
+			       ) { 
+  union bigType {
+    DTYPE h[A_CHUNK];
+    float f[A_CHUNK / 2];
+    float2 f2[A_CHUNK / 4];
+    double d[A_CHUNK / 4];
+    half8 h8;
+  };
+
+  __shared__ half s[1024 * 32];
+
+  uint32_t commitColumn[YTILE];
+  for (uint32_t i = 0; i < YTILE; i++) {
+    commitColumn[i] = 1;
+  }
+
+  uint32_t n = (blockIdx.x * WvPrGrp + threadIdx.y) * YTILE;
+
+  if (n < N && (n + YTILE) >= N) {
+    uint32_t startColumn = N - YTILE;
+    for (uint32_t i = 0; i < (n - startColumn); i++) {
+      commitColumn[i] = 0;
+    }
+    n = startColumn;
+  }
+
+#define PCML
+#ifndef PCML
+  for (uint32_t k = 0; k < min(K * M_in, 32 * 1024);
+       k += THRDS * WvPrGrp * A_CHUNK) {
+    uint32_t k_in = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);
+
+    if (k_in >= min(K * M, 32 * 1024)) break;
+
+    *((bigType*)(&s[k_in])) = *((bigType*)(&A[k_in]));
+  }
+  __syncthreads();
+#endif
+
+  #define YW (YTILE * WvPrGrp)
+  #define TWC (THRDS * WvPrGrp * A_CHUNK)
+  #define TUC (THRDS * UNRL * A_CHUNK)
+  uint32_t kBase = 0;
+  //find biggest k size that fits in LDS
+  uint32_t kFit = (32*1024)/M_BLOCK;
+  //kFit = (kFit%TWC==0) ? kFit : (kFit-kFit%TWC+TWC); //round up to multiple of TUC
+  kFit = (kFit%TUC==0) ? kFit : (kFit-kFit%TUC); //round down to multiple of TUC
+  //if (kFit == 0) kFit = TUC;
+  kFit = min(kFit, K);
+
+  float sum[M_BLOCK][YTILE];
+
+  //TRITON
+  //offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+  //offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
+  //token_mask = offs_token < num_valid_tokens
+  int offs_token[M_BLOCK];
+  bool token_mask[M_BLOCK];  // add to A[] /top_k*k
+  int off_experts;  // add to B[] *K*N loads
+
+
+#ifdef PCML
+  uint32_t Nrndp = (N%YW==0) ? N : (N-N%YW+YW); // Note: All waves in the group need to stay alive to the bitter end, just in case they're needed for cooperative loading of next chunk of A[] into LDS. Such Zomby waves are prevented from doing any real work with continues in the loop below.   
+  while (n < Nrndp) {
+#else 
+  while (n < N) {
+#endif
+    //----------------------------------------------------
+    for (uint32_t e = 0; e < num_tokens_post_padded[0]; e+=M_BLOCK) { 
+    
+    for (int m=0; m<M_BLOCK; m++) {
+	// get the list of Ms corresponding to this M_BLOCK
+        offs_token[m] = sorted_token_ids[e+m];
+        token_mask[m] = offs_token[m] < num_valid_tokens;
+    }
+    
+    //set the expert for this M_BLOCK
+    off_experts = expert_ids[e/M_BLOCK];
+    
+    // If all M in this block are dead, make it a zomby, for now.
+    // note: wave needs to stay alive to participate in LDS loading
+    bool zomby = true;
+    for (int m=0; m<M_BLOCK; m++) if (token_mask[m]) { zomby = false; break; }
+    if (zomby) continue;
+
+    for (int i = 0; i < YTILE; i++)
+      for (int m = 0; m < M_BLOCK; m++) 
+	      sum[m][i] = 0;
+
+    bigType bigA[M_BLOCK][UNRL];
+    bigType bigB0[UNRL];
+#if (YTILE >= 2)
+    bigType bigB1[UNRL];
+#endif
+#if (YTILE >= 3)
+    bigType bigB2[UNRL];
+#endif
+#if (YTILE >= 4)
+    bigType bigB3[UNRL];
+#endif
+#if (YTILE >= 5)
+    bigType bigB4[UNRL];
+#endif
+#if (YTILE >= 6)
+    bigType bigB5[UNRL];
+#endif
+#if (YTILE >= 7)
+    bigType bigB6[UNRL];
+#endif
+#if (YTILE >= 8)
+    bigType bigB7[UNRL];
+#endif
+#if (YTILE >= 9)
+    bigType bigB8[UNRL];
+#endif
+#if (YTILE >= 10)
+    bigType bigB9[UNRL];
+#endif
+#if (YTILE >= 11)
+    bigType bigB10[UNRL];
+#endif
+    //----------------------------------------------------
+    for (uint32_t k1 = 0; k1 < K; k1 += THRDS * A_CHUNK * UNRL) {
+
+#ifdef PCML
+        if ((k1 == 0) || (k1 == kBase + kFit)) { // load next chunk of A[] to LDS
+                if (k1 != 0) kBase += kFit;
+		__syncthreads();
+                for (uint32_t k = 0; k < kFit; k += TWC) {
+	            uint32_t kOff = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);    
+                    if (kBase + kOff >= K) break;
+                    if (kOff >= kFit) break;
+                    for (uint32_t m = 0; m < M_BLOCK; m++) {
+		      if (!token_mask[m]) continue;
+                      uint32_t k_in = kBase + (offs_token[m]/top_k) * K    + kOff;
+                      uint32_t k_ot =         m                     * kFit + kOff;
+ 		      *((bigType*)(&s[k_ot])) = *((bigType*)(&A[k_in]));
+		    }
+		}
+                __syncthreads();
+	}
+#endif
+      if (n >= N) continue;
+      if (zomby) continue;
+
+#pragma unroll
+      for (uint32_t k2 = 0; k2 < UNRL; k2++) {
+        uint32_t k = k1 + k2 * THRDS * A_CHUNK;
+        uint32_t k_ = k + threadIdx.x * A_CHUNK;
+        if (k_ >= K) break;
+
+        // load only 1 column of weights, despite the moe-gate, made possible by expert list.
+	const half* B_ = &B[(n + 0) * K + k_ + off_experts*K*N];
+        bigB0[k2].h8 = (loadnt((half8*)(&B_[0 * K])));
+        //----------------------------------------------------
+#if (YTILE >= 2)
+        bigB1[k2].h8 = (loadnt((half8*)(&B_[1 * K])));
+#endif
+#if (YTILE >= 3)
+        bigB2[k2].h8 = (loadnt((half8*)(&B_[2 * K])));
+#endif
+#if (YTILE >= 4)
+        bigB3[k2].h8 = (loadnt((half8*)(&B_[3 * K])));
+#endif
+#if (YTILE >= 5)
+        bigB4[k2].h8 = (loadnt((half8*)(&B_[4 * K])));
+#endif
+#if (YTILE >= 6)
+        bigB5[k2].h8 = (loadnt((half8*)(&B_[5 * K])));
+#endif
+#if (YTILE >= 7)
+        bigB6[k2].h8 = (loadnt((half8*)(&B_[6 * K])));
+#endif
+#if (YTILE >= 8)
+        bigB7[k2].h8 = (loadnt((half8*)(&B_[7 * K])));
+#endif
+      }
+
+      // Fetch activation matrix from either just LDS or from both LDS / memory
+#pragma unroll
+      for (uint32_t k2 = 0; k2 < UNRL; k2++) {
+        uint32_t k = k1 + k2 * THRDS * A_CHUNK;
+        uint32_t k_ = k + threadIdx.x * A_CHUNK;
+        if (k_ >= K) break;
+
+        // Fetch A activation matrix in interleaved fashion from LDS or memory
+
+        for (int m = 0; m < M_BLOCK; m++) 
+	{
+	  if (!token_mask[m]) continue;
+#ifdef PCML
+          //bigA[m][k2] = *((const bigType*)(&(s[k_-kBase + kFit*m])));
+	  // skip A[] fetches for Ms that are disabled
+          bigA[m][k2] = *((const bigType*)(&(s[k_-kBase + m*kFit ])));
+#else
+	  int aidx = k_ + (offs_token[m]/top_k) * K;
+          //if (aidx + A_CHUNK <= 32 * 1024)
+          //  bigA[m][k2] = *((const bigType*)(&(s[aidx])));
+          //else
+            bigA[m][k2] = *((const bigType*)(&(A[aidx])));
+#endif
+        }
+      }
+
+      // Do the matrix multiplication in interleaved manner
+#pragma unroll
+      for (uint32_t k2 = 0; k2 < UNRL; k2++) {
+        uint32_t k = k1 + k2 * THRDS * A_CHUNK;
+        uint32_t k_ = k + threadIdx.x * A_CHUNK;
+        if (k_ >= K) break;
+#pragma unroll
+        for (uint32_t m = 0; m < M_BLOCK; m++) {
+	  // skip compute for Ms that are disabled
+	  if (!token_mask[m]) continue;
+          // Do the matrix multiplication of activation and weight matrix
+          // - Remember the accumulation is happening for K-split of 64!
+#pragma unroll
+          for (uint32_t b = 0; b < A_CHUNK / 2; b++) {
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][0])
+                : "0"(sum[m][0]), "v"(bigA[m][k2].f[b]), "v"(bigB0[k2].f[b]));
+
+#if (YTILE >= 2)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][1])
+                : "0"(sum[m][1]), "v"(bigA[m][k2].f[b]), "v"(bigB1[k2].f[b]));
+#endif
+#if (YTILE >= 3)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][2])
+                : "0"(sum[m][2]), "v"(bigA[m][k2].f[b]), "v"(bigB2[k2].f[b]));
+#endif
+#if (YTILE >= 4)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][3])
+                : "0"(sum[m][3]), "v"(bigA[m][k2].f[b]), "v"(bigB3[k2].f[b]));
+#endif
+#if (YTILE >= 5)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][4])
+                : "0"(sum[m][4]), "v"(bigA[m][k2].f[b]), "v"(bigB4[k2].f[b]));
+#endif
+#if (YTILE >= 6)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][5])
+                : "0"(sum[m][5]), "v"(bigA[m][k2].f[b]), "v"(bigB5[k2].f[b]));
+#endif
+#if (YTILE >= 7)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][6])
+                : "0"(sum[m][6]), "v"(bigA[m][k2].f[b]), "v"(bigB6[k2].f[b]));
+#endif
+#if (YTILE >= 8)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][7])
+                : "0"(sum[m][7]), "v"(bigA[m][k2].f[b]), "v"(bigB7[k2].f[b]));
+#endif
+#if (YTILE >= 9)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][8])
+                : "0"(sum[m][8]), "v"(bigA[m][k2].f[b]), "v"(bigB8[k2].f[b]));
+#endif
+#if (YTILE >= 10)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][9])
+                : "0"(sum[m][9]), "v"(bigA[m][k2].f[b]), "v"(bigB9[k2].f[b]));
+#endif
+#if (YTILE >= 11)
+            asm("v_dot2c_f32_f16 %0, %2, %3"
+                : "=v"(sum[m][10])
+                : "0"(sum[m][10]), "v"(bigA[m][k2].f[b]), "v"(bigB10[k2].f[b]));
+#endif
+          }
+        }
+      }
+    }
+
+    //zomby waves skip write-out and reduce
+#ifdef PCML
+    if (n>=N || zomby) {
+        n += CuCount * WvPrGrp * YTILE;
+        kBase = 0;
+        continue;
+    }
+#else
+    if (zomby) {
+        n += CuCount * WvPrGrp * YTILE;
+        continue;
+    }
+#endif
+
+    //----------------------------------------------------
+    // Final reduction step using shuffle
+    //----------------------------------------------------
+    for (int m = 0; m < M_BLOCK; m++) {
+      // skip reduce for Ms that are disabled
+      if (!token_mask[m]) continue;
+
+      for (int y = 0; y < YTILE; y++) {
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 row_shr:8 bound_ctrl:0 "
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 row_shr:4 bound_ctrl:0 "
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 row_shr:2 bound_ctrl:0 "
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 wave_shr:1 bound_ctrl:0"
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 row_bcast:15 bound_ctrl:0"
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+          asm("s_nop 0\n\tv_add_f32 %0, %2, %3 row_bcast:31 bound_ctrl:0"
+              : "=v"(sum[m][y])
+              : "0"(sum[m][y]), "v"(sum[m][y]), "v"(sum[m][y]));
+       }
+    }
+
+    if (threadIdx.x == 63) {
+      for (int m = 0; m < M_BLOCK; m++) {
+        for (int i = 0; i < YTILE; i++) 
+	{
+	  // skip write out for Ms that are disabled
+	  if (!token_mask[m]) continue;
+  	  if (mul_routed_weight)
+              sum[m][i] *= token_mask[m] ? topk_weights[offs_token[m]/top_k] : 0;
+          int oidx = n + i + offs_token[m] * N;
+          if (commitColumn[i]) 
+		  C[oidx] = __float2half(sum[m][i]);
+        }
+      }
+    }
+    }
+
+    n += CuCount * WvPrGrp * YTILE;
+    kBase = 0;
+
+    // if (threadIdx.x == 0)
+    // n = atomicAdd(((unsigned int*)(C)), YTILE);
+    // n = __shfl(n, 0, 64);
+
+    // Check whether there will be fragmenation!
+    // This will happen only for the last wave!
+    if (n < N && (n + YTILE) >= N) {
+      uint32_t startColumn = N - YTILE;
+      for (uint32_t i = 0; i < (n - startColumn); i++) {
+        commitColumn[i] = 0;
+      }
+      n = startColumn;
+    }
+  }
+}
+ 
+
+// a = torch.randn((m, k)
+// b1 = torch.randn((e, 2 * n, k)
+// b2 = torch.randn((e, k, n)
+// topk_weights = torch.randn((m, e), device='cuda', dtype=dtype)
+
+void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c, 
+		     void* topk_weights, 
+		     void* topk_ids, 
+		     void* sorted_token_ids, 
+		     void* expert_ids,
+		     void* num_tokens_post_padded, 
+		     const int M_in, const int N_in, const int K_in, const int E, 
+		     const int num_valid_tokens, 
+		     const int stride_am,
+                     const int stride_ak,
+                     const int stride_be,
+                     const int stride_bk,
+                     const int stride_bn,
+                     const int stride_cm,
+                     const int stride_cn,
+		     const bool mul_routed_weight, 
+		     const int top_k,
+		     cudaStream_t stream, const int CuCount) {
+  dim3 grid(CuCount);
+  dim3 block(THRDS, WvPrGrp);
+  auto* a = reinterpret_cast<const half*>(in_a);
+  auto* b = reinterpret_cast<const half*>(in_b);
+  auto* c = reinterpret_cast<half*>(out_c);
+  auto* topk_weights_ = reinterpret_cast<const float*>(topk_weights);
+  auto* topk_ids_ = reinterpret_cast<const int*>(topk_ids);
+  auto* sorted_token_ids_ = reinterpret_cast<const int*>(sorted_token_ids);
+  auto* expert_ids_ = reinterpret_cast<const int*>(expert_ids);
+  auto* num_tokens_post_padded_ = reinterpret_cast<const int*>(num_tokens_post_padded); 
+
+  wvSpltK_fsdMoe_hf_<4/*BLOCK_M*/><<<grid, block, 0, stream>>>(
+	   a, b, c, 
+           topk_weights_,
+	   topk_ids_, 
+	   sorted_token_ids_, 
+	   expert_ids_,
+           num_tokens_post_padded_,
+	   M_in, N_in, K_in, E,
+	   num_valid_tokens,
+	   stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn,
+	   mul_routed_weight, top_k,
+           CuCount);
+
+}
+
+
 void wvSpltK_(void* in_a, void* in_b, void* out_c, const int M_in,
               const int K_in, const int N_in, cudaStream_t stream,
               const int CuCount = 0) {
