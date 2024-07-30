@@ -13,7 +13,7 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceStatus)
-
+from vllm.utils import rpd_trace
 logger = init_logger(__name__)
 
 # Test-only. If configured, decode is preempted with
@@ -377,7 +377,8 @@ class Scheduler:
             self.swapped) != 0
 
     def get_num_unfinished_seq_groups(self) -> int:
-        return len(self.waiting) + len(self.running) + len(self.swapped)
+        with rpd_trace(f"scheduler w={len(self.waiting)} r={len(self.running)} s={len(self.swapped)}"):
+            return len(self.waiting) + len(self.running) + len(self.swapped)
 
     def _schedule_running(
         self,
@@ -993,7 +994,7 @@ class Scheduler:
             seq_group=seq_group,
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill),
         )
-
+    @rpd_trace()
     def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler

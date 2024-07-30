@@ -49,13 +49,13 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, kv_cache_scales_loader)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
-from vllm.utils import is_hip, print_warning_once
+from vllm.utils import is_hip, print_warning_once, rpd_trace, ENABLE_TRACING_RPD_VERBOSE
 
 reduce_conversion_kernel: bool = True if os.getenv("VLLM_FP8_REDUCE_CONV",
                                                    '0') == "1" else False
 
 class LlamaMLP(nn.Module):
-
+    @rpd_trace()
     def __init__(
         self,
         hidden_size: int,
@@ -80,26 +80,31 @@ class LlamaMLP(nn.Module):
         self.act_fn = ScaledSiluAndMul(
         ) if reduce_conversion_kernel else SiluAndMul()
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(self, x):
         if x.shape[0] == 1 and x.shape[1] == 1:
-            out = torch.empty(x.shape[0],
-                              self.gate_up_proj.weight.shape[0] // 2,
-                              dtype=x.dtype,
-                              device=x.device)
-            _custom_C.LLMM_Silu(self.gate_up_proj.weight,
-                                x.view(-1, x.size(-1)), out, 8)
-            x = out.view(x.shape[0], x.shape[1], out.shape[1])
+            with rpd_trace("LLMM_Silu", skip=not ENABLE_TRACING_RPD_VERBOSE):
+                out = torch.empty(x.shape[0],
+                                self.gate_up_proj.weight.shape[0] // 2,
+                                dtype=x.dtype,
+                                device=x.device)
+                _custom_C.LLMM_Silu(self.gate_up_proj.weight,
+                                    x.view(-1, x.size(-1)), out, 8)
+                x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
-            gate_up, _ = self.gate_up_proj(x)
-            x = self.act_fn(
-                gate_up, self.down_proj.activation_scaling_factor
-            ) if reduce_conversion_kernel else self.act_fn(gate_up)
-        x, _ = self.down_proj(x)
+            with rpd_trace("gate_up + act-fn", skip=not ENABLE_TRACING_RPD_VERBOSE):
+                gate_up, _ = self.gate_up_proj(x)
+                x = self.act_fn(
+                    gate_up, self.down_proj.activation_scaling_factor
+                ) if reduce_conversion_kernel else self.act_fn(gate_up)
+        with rpd_trace("down proj", skip=not ENABLE_TRACING_RPD_VERBOSE):    
+            x, _ = self.down_proj(x)
         return x
 
 
 class LlamaAttention(nn.Module):
 
+    @rpd_trace()
     def __init__(
         self,
         hidden_size: int,
@@ -164,6 +169,7 @@ class LlamaAttention(nn.Module):
                               cache_config=cache_config,
                               quant_config=quant_config)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         positions: torch.Tensor,
@@ -171,16 +177,22 @@ class LlamaAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        output, _ = self.o_proj(attn_output)
+        with rpd_trace("qkv_proj", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            qkv, _ = self.qkv_proj(hidden_states)
+        with rpd_trace("qkv.split", skip=not ENABLE_TRACING_RPD_VERBOSE):        
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        with rpd_trace("rotary_emb", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            q, k = self.rotary_emb(positions, q, k)
+        with rpd_trace("attn", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        with rpd_trace("o_proj", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            output, _ = self.o_proj(attn_output)
         return output
 
 
 class LlamaDecoderLayer(nn.Module):
 
+    @rpd_trace()
     def __init__(
         self,
         config: LlamaConfig,
@@ -229,6 +241,7 @@ class LlamaDecoderLayer(nn.Module):
             eps=config.rms_norm_eps) if reduce_conversion_kernel else RMSNorm(
                 config.hidden_size, eps=config.rms_norm_eps)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         positions: torch.Tensor,
@@ -270,6 +283,7 @@ class LlamaDecoderLayer(nn.Module):
 
 class LlamaModel(nn.Module):
 
+    @rpd_trace()
     def __init__(
         self,
         config: LlamaConfig,
@@ -297,9 +311,11 @@ class LlamaModel(nn.Module):
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         input_ids: Optional[torch.Tensor],
@@ -350,6 +366,7 @@ class LlamaForCausalLM(nn.Module):
     }
     embedding_padding_modules = ["lm_head"]
 
+    @rpd_trace()
     def __init__(
         self,
         config: LlamaConfig,
@@ -383,6 +400,7 @@ class LlamaForCausalLM(nn.Module):
                                                 config.vocab_size, logit_scale)
         self.sampler = Sampler()
 
+    @rpd_trace()
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -394,12 +412,14 @@ class LlamaForCausalLM(nn.Module):
                                    attn_metadata)
         return hidden_states
 
+    @rpd_trace()
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head.weight, hidden_states,
                                        sampling_metadata)
         return logits
 
+    @rpd_trace()
     def sample(
         self,
         logits: torch.Tensor,
@@ -408,6 +428,7 @@ class LlamaForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
+    @rpd_trace()
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
@@ -459,6 +480,7 @@ class LlamaForCausalLM(nn.Module):
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
 
+    @rpd_trace()
     def load_quantized_weights(self, weights: Iterable[Tuple[str,
                                                              torch.Tensor]]):
 
@@ -576,6 +598,7 @@ class LlamaForCausalLM(nn.Module):
     # If this function is called, it should always initialize KV cache scale
     # factors (or else raise an exception). Thus, handled exceptions should
     # make sure to leave KV cache scale factors in a known good (dummy) state
+    @rpd_trace()
     def load_kv_cache_scales(self, quantization_param_path: str) -> None:
         tp_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()

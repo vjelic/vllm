@@ -20,6 +20,7 @@ from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.usage.usage_lib import UsageContext
+from vllm.utils import rpd_trace, async_rpd_trace
 
 logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
@@ -84,6 +85,7 @@ class AsyncStream:
 class RequestTracker:
     """Synchronous abstraction for tracking requests."""
 
+    @rpd_trace()
     def __init__(self) -> None:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
@@ -97,6 +99,7 @@ class RequestTracker:
     def __len__(self) -> int:
         return len(self._request_streams)
 
+    @rpd_trace()
     def propagate_exception(self,
                             exc: Exception,
                             request_id: Optional[str] = None) -> None:
@@ -110,6 +113,7 @@ class RequestTracker:
                 stream.put(exc)
                 self.abort_request(rid)
 
+    @rpd_trace()
     def process_request_output(self,
                                request_output: Union[RequestOutput,
                                                      EmbeddingRequestOutput],
@@ -124,6 +128,7 @@ class RequestTracker:
                 logger.info("Finished request %s.", request_id)
             self.abort_request(request_id)
 
+    @rpd_trace()
     def process_exception(self,
                           request_id: str,
                           exception: Exception,
@@ -135,6 +140,7 @@ class RequestTracker:
             logger.info("Finished request %s.", request_id)
         self.abort_request(request_id)
 
+    @rpd_trace()
     def add_request(self, request_id: str,
                     **engine_add_request_kwargs) -> AsyncStream:
         """Add a request to be sent to the engine on the next background
@@ -152,6 +158,7 @@ class RequestTracker:
 
         return stream
 
+    @rpd_trace()
     def abort_request(self, request_id: str, *, verbose: bool = False) -> None:
         """Abort a request during next background loop iteration."""
         if verbose:
@@ -166,6 +173,7 @@ class RequestTracker:
 
         self._request_streams[request_id].finish()
 
+    @rpd_trace()
     def get_new_and_finished_requests(self) -> Tuple[List[Dict], Set[str]]:
         """Get the new requests and finished requests to be
         sent to the engine."""
@@ -188,11 +196,13 @@ class RequestTracker:
 
         return new_requests, finished_requests
 
+    @async_rpd_trace()
     async def wait_for_new_requests(self):
         if not self.has_new_requests():
             await self.new_requests_event.wait()
         self.new_requests_event.clear()
 
+    @rpd_trace()
     def has_new_requests(self):
         return not self._new_requests.empty()
 
@@ -200,6 +210,7 @@ class RequestTracker:
 class _AsyncLLMEngine(LLMEngine):
     """Extension of LLMEngine to add async methods."""
 
+    # @async_rpd_trace()
     async def step_async(
             self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
@@ -211,40 +222,42 @@ class _AsyncLLMEngine(LLMEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        with rpd_trace(f"Step reqs={self.scheduler.get_num_unfinished_seq_groups()}"):
+            seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
-        if not scheduler_outputs.is_empty():
-            # Execute the model.
-            execute_model_req = ExecuteModelRequest(
-                seq_group_metadata_list=seq_group_metadata_list,
-                blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
-                blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
-                blocks_to_copy=scheduler_outputs.blocks_to_copy,
-                num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
-                running_queue_size=scheduler_outputs.running_queue_size,
-            )
-            output = await self.model_executor.execute_model_async(
-                execute_model_req)
-        else:
-            output = []
+            if not scheduler_outputs.is_empty():
+                # Execute the model.
+                execute_model_req = ExecuteModelRequest(
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs.running_queue_size,
+                )
+                output = await self.model_executor.execute_model_async(
+                    execute_model_req)
+            else:
+                output = []
 
-        request_outputs = self._process_model_outputs(
-            output, scheduler_outputs.scheduled_seq_groups,
-            scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+            request_outputs = self._process_model_outputs(
+                output, scheduler_outputs.scheduled_seq_groups,
+                scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
-        # Log stats.
-        self.do_log_stats(scheduler_outputs, output)
+            # Log stats.
+            self.do_log_stats(scheduler_outputs, output)
 
-        if not request_outputs:
-            # Stop the execute model loop in parallel workers until there are
-            # more requests to process. This avoids waiting indefinitely in
-            # torch.distributed ops which may otherwise timeout, and unblocks
-            # the RPC thread in the workers so that they can process any other
-            # queued control plane messages, such as add/remove lora adapters.
-            await self.model_executor.stop_remote_worker_execution_loop_async()
+            if not request_outputs:
+                # Stop the execute model loop in parallel workers until there are
+                # more requests to process. This avoids waiting indefinitely in
+                # torch.distributed ops which may otherwise timeout, and unblocks
+                # the RPC thread in the workers so that they can process any other
+                # queued control plane messages, such as add/remove lora adapters.
+                await self.model_executor.stop_remote_worker_execution_loop_async()
 
         return request_outputs
 
+    @async_rpd_trace()
     async def process_model_inputs_async(
         self,
         request_id: str,
@@ -269,6 +282,7 @@ class _AsyncLLMEngine(LLMEngine):
                          prompt=inputs.get("prompt"),
                          multi_modal_data=inputs.get("multi_modal_data"))
 
+    @async_rpd_trace()
     async def add_request_async(
         self,
         request_id: str,
@@ -294,6 +308,7 @@ class _AsyncLLMEngine(LLMEngine):
             lora_request=lora_request,
         )
 
+    @async_rpd_trace()
     async def check_health_async(self) -> None:
         self.model_executor.check_health()
 
@@ -325,6 +340,7 @@ class AsyncLLMEngine:
 
     _engine_class: Type[_AsyncLLMEngine] = _AsyncLLMEngine
 
+    @rpd_trace()
     def __init__(self,
                  worker_use_ray: bool,
                  engine_use_ray: bool,
@@ -425,6 +441,7 @@ class AsyncLLMEngine:
         else:
             return self.engine.get_tokenizer()
 
+    @rpd_trace()
     def start_background_loop(self) -> None:
         """Start the background loop."""
         if self.errored:
@@ -442,6 +459,7 @@ class AsyncLLMEngine:
                     error_callback=self._error_callback))
         self.background_loop = asyncio.shield(self._background_loop_unshielded)
 
+    @rpd_trace()
     def _init_engine(self, *args,
                      **kwargs) -> Union[_AsyncLLMEngine, "ray.ObjectRef"]:
         if not self.engine_use_ray:
@@ -461,6 +479,7 @@ class AsyncLLMEngine:
                 self._engine_class).remote
         return engine_class(*args, **kwargs)
 
+    @async_rpd_trace()
     async def engine_step(self) -> bool:
         """Kick the engine to process the waiting requests.
 
@@ -501,12 +520,14 @@ class AsyncLLMEngine:
 
         return len(request_outputs) > 0
 
+    @async_rpd_trace()
     async def _engine_abort(self, request_ids: Iterable[str]):
         if self.engine_use_ray:
             await self.engine.abort_request.remote(request_ids)  # type: ignore
         else:
             self.engine.abort_request(request_ids)
 
+    @async_rpd_trace()
     async def run_engine_loop(self):
         has_requests_in_progress = False
         while True:
@@ -527,6 +548,7 @@ class AsyncLLMEngine:
                 raise
             await asyncio.sleep(0)
 
+    @async_rpd_trace()
     async def add_request(
         self,
         request_id: str,
@@ -591,6 +613,7 @@ class AsyncLLMEngine:
 
         return stream
 
+    # @async_rpd_trace(is_iterator=True)
     async def generate(
         self,
         inputs: PromptInputs,
@@ -659,14 +682,18 @@ class AsyncLLMEngine:
             >>> # Process and return the final output
             >>> ...
         """
+        idx = 0
         async for output in self._process_request(
                 request_id,
                 inputs,
                 sampling_params,
                 lora_request=lora_request,
         ):
-            yield LLMEngine.validate_output(output, RequestOutput)
+            async with async_rpd_trace(name=f"generate|_process_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, RequestOutput)
+            idx += 1
 
+    # @async_rpd_trace(is_iterator=True)
     async def encode(
         self,
         inputs: PromptInputs,
@@ -733,14 +760,18 @@ class AsyncLLMEngine:
             >>> # Process and return the final output
             >>> ...
         """
-        async for output in self._process_request(
+        idx = 0
+        async for idx, output in self._process_request(
                 request_id,
                 inputs,
                 pooling_params,
                 lora_request=lora_request,
         ):
-            yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            async with async_rpd_trace(name=f"encode|_process_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            idx += 1
 
+    # @async_rpd_trace(is_iterator=True)
     async def _process_request(
         self,
         request_id: str,
@@ -762,12 +793,16 @@ class AsyncLLMEngine:
         )
 
         try:
+            idx = 0
             async for request_output in stream:
-                yield request_output
+                async with async_rpd_trace(name=f"_process_request {idx}", args=idx, is_iterator=True):
+                    yield request_output
+                idx += 1
         except (Exception, asyncio.CancelledError) as e:
             self._abort(request_id)
             raise e
 
+    @async_rpd_trace()
     async def abort(self, request_id: str) -> None:
         """Abort a request.
 
@@ -786,6 +821,7 @@ class AsyncLLMEngine:
 
         return self._abort(request_id)
 
+    @rpd_trace()
     def _abort(self, request_id: str) -> None:
         """Abort a request.
 
@@ -798,6 +834,7 @@ class AsyncLLMEngine:
         self._request_tracker.abort_request(request_id,
                                             verbose=self.log_requests)
 
+    @async_rpd_trace()
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the vLLM engine."""
         if self.engine_use_ray:
@@ -805,6 +842,7 @@ class AsyncLLMEngine:
         else:
             return self.engine.get_model_config()
 
+    @async_rpd_trace()
     async def get_decoding_config(self) -> DecodingConfig:
         """Get the decoding configuration of the vLLM engine."""
         if self.engine_use_ray:
@@ -813,6 +851,7 @@ class AsyncLLMEngine:
         else:
             return self.engine.get_decoding_config()
 
+    @async_rpd_trace()
     async def do_log_stats(
             self,
             scheduler_outputs: Optional[SchedulerOutputs] = None,
@@ -823,6 +862,7 @@ class AsyncLLMEngine:
         else:
             self.engine.do_log_stats()
 
+    @async_rpd_trace()
     async def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
         t = time.perf_counter()

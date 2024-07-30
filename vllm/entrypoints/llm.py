@@ -16,7 +16,7 @@ from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import MultiModalData
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import Counter, deprecate_kwargs
+from vllm.utils import Counter, deprecate_kwargs, rpd_trace
 
 logger = init_logger(__name__)
 
@@ -496,6 +496,7 @@ class LLM:
 
         return inputs
 
+    @rpd_trace()
     def _validate_and_add_requests(
         self,
         inputs: Union[PromptStrictInputs, Sequence[PromptStrictInputs]],
@@ -521,6 +522,7 @@ class LLM:
                 lora_request=lora_request,
             )
 
+    @rpd_trace()
     def _add_request(
         self,
         inputs: PromptInputs,
@@ -532,7 +534,7 @@ class LLM:
                                     inputs,
                                     params,
                                     lora_request=lora_request)
-
+    @rpd_trace()
     def _run_engine(
             self, *, use_tqdm: bool
     ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
@@ -549,18 +551,19 @@ class LLM:
         outputs: List[Union[RequestOutput, EmbeddingRequestOutput]] = []
         total_toks = 0
         while self.llm_engine.has_unfinished_requests():
-            step_outputs = self.llm_engine.step()
-            for output in step_outputs:
-                if output.finished:
-                    outputs.append(output)
-                    if use_tqdm:
-                        if isinstance(output, RequestOutput):
-                            # Calculate tokens only for RequestOutput
-                            total_toks += sum(
-                                len(stp.token_ids) for stp in output.outputs)
-                            spd = total_toks / pbar.format_dict["elapsed"]
-                            pbar.postfix = f"Generation Speed: {spd:.2f} toks/s"
-                        pbar.update(1)
+            with rpd_trace(f"Step reqs={self.llm_engine.get_num_unfinished_requests()}"):
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if output.finished:
+                        outputs.append(output)
+                        if use_tqdm:
+                            if isinstance(output, RequestOutput):
+                                # Calculate tokens only for RequestOutput
+                                total_toks += sum(
+                                    len(stp.token_ids) for stp in output.outputs)
+                                spd = total_toks / pbar.format_dict["elapsed"]
+                                pbar.postfix = f"Generation Speed: {spd:.2f} toks/s"
+                            pbar.update(1)
         if use_tqdm:
             pbar.close()
         # Sort the outputs by request ID.

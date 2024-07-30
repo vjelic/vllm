@@ -22,7 +22,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (MultiModalData, SamplerOutput, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
-                        is_pin_memory_available, make_tensor_with_pad)
+                        is_pin_memory_available, make_tensor_with_pad, rpd_trace)
 
 logger = init_logger(__name__)
 
@@ -70,6 +70,7 @@ class ModelInput(NamedTuple):
 
 class ModelRunner:
 
+    @rpd_trace()
     def __init__(
         self,
         model_config: ModelConfig,
@@ -129,6 +130,7 @@ class ModelRunner:
         # Set after load_model.
         self.lora_manager: Optional[LRUCacheWorkerLoRAManager] = None
 
+    @rpd_trace()
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
             self.model = get_model(
@@ -195,6 +197,7 @@ class ModelRunner:
                     "provided. Defaulting to scaling factors of 1.0. "
                     "This may lead to less accurate results!")
 
+    @rpd_trace()
     def save_sharded_state(
         self,
         path: str,
@@ -213,6 +216,7 @@ class ModelRunner:
         block_size = self.block_size
         return (self.max_seq_len_to_capture + block_size - 1) // block_size
 
+    @rpd_trace()
     def _prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -629,6 +633,7 @@ class ModelRunner:
             num_prefills=num_prefills,
         )
 
+    @rpd_trace()
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
@@ -696,53 +701,61 @@ class ModelRunner:
                 sampling_metadata, lora_requests, lora_mapping,
                 multi_modal_input)
 
+    @rpd_trace()
     @torch.inference_mode()
     def execute_model(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[torch.Tensor],
     ) -> Optional[SamplerOutput]:
-        (input_tokens, input_positions, attn_metadata, sampling_metadata,
-         lora_requests, lora_mapping, multi_modal_input
-         ) = self.prepare_input_tensors(seq_group_metadata_list)
+        with rpd_trace("execute_model:prepare"):
+            (input_tokens, input_positions, attn_metadata, sampling_metadata,
+            lora_requests, lora_mapping, multi_modal_input
+            ) = self.prepare_input_tensors(seq_group_metadata_list)
 
-        if self.lora_config:
-            self.set_active_loras(lora_requests, lora_mapping)
+            if self.lora_config:
+                self.set_active_loras(lora_requests, lora_mapping)
 
-        # Currently cuda graph is only supported by the decode phase.
-        prefill_meta = attn_metadata.prefill_metadata
-        decode_meta = attn_metadata.decode_metadata
-        if prefill_meta is None and decode_meta.use_cuda_graph:
-            graph_batch_size = input_tokens.shape[0]
-            model_executable = self.graph_runners[graph_batch_size]
-        else:
-            model_executable = self.model
-        execute_model_kwargs = {
-            "input_ids": input_tokens,
-            "positions": input_positions,
-            "kv_caches": kv_caches,
-            "attn_metadata": attn_metadata,
-        }
-        if self.vision_language_config:
-            execute_model_kwargs.update({"image_input": multi_modal_input})
-        hidden_states = model_executable(**execute_model_kwargs)
+        with rpd_trace(f"execute_model:set args prefill={attn_metadata.prefill_metadata is not None} decode={attn_metadata.decode_metadata is not None}"):
+            # Currently cuda graph is only supported by the decode phase.
+            prefill_meta = attn_metadata.prefill_metadata
+            decode_meta = attn_metadata.decode_metadata
+            if prefill_meta is None and decode_meta.use_cuda_graph:
+                graph_batch_size = input_tokens.shape[0]
+                model_executable = self.graph_runners[graph_batch_size]
+            else:
+                model_executable = self.model
+            execute_model_kwargs = {
+                "input_ids": input_tokens,
+                "positions": input_positions,
+                "kv_caches": kv_caches,
+                "attn_metadata": attn_metadata,
+            }
+            if self.vision_language_config:
+                execute_model_kwargs.update({"image_input": multi_modal_input})
+        with rpd_trace(f"EXEC {'P' if prefill_meta is not None else ''} ids_len={input_tokens.shape[0]}"):
+            with rpd_trace("execute_model:model_executable"):
+                hidden_states = model_executable(**execute_model_kwargs)
 
-        # Compute the logits.
-        logits = self.model.compute_logits(hidden_states, sampling_metadata)
+            with rpd_trace("execute_model:logits"):
+                # Compute the logits.
+                logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
-        # Only perform sampling in the driver worker.
-        if not self.is_driver_worker:
-            return None
+            # Only perform sampling in the driver worker.
+            if not self.is_driver_worker:
+                return None
 
-        # Sample the next token.
-        output = self.model.sample(
-            logits=logits,
-            sampling_metadata=sampling_metadata,
-        )
+            with rpd_trace("execute_model:sample"):
+                # Sample the next token.
+                output = self.model.sample(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
 
         return output
 
     @torch.inference_mode()
+    @rpd_trace()
     def profile_run(self) -> None:
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
@@ -837,6 +850,7 @@ class ModelRunner:
         return self.lora_manager.list_loras()
 
     @torch.inference_mode()
+    @rpd_trace()
     def capture_model(self, kv_caches: List[torch.Tensor]) -> None:
         """Cuda graph capture a model.
 
@@ -873,9 +887,11 @@ class ModelRunner:
 
         graph_batch_size = _get_graph_batch_size(
             self.scheduler_config.max_num_seqs)
+        print(f"{graph_batch_size=}")
         batch_size_capture_list = [
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
+        print(f"{batch_size_capture_list=}")
 
         with graph_capture() as graph_capture_context:
             # NOTE: Capturing the largest batch size first may help reduce the
@@ -922,6 +938,7 @@ class ModelRunner:
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
         logger.info("Graph capturing finished in %.0f secs.", elapsed_time)
+        print(f"{len(self.graph_runners)=}")
 
     @property
     def vocab_size(self) -> int:
@@ -930,6 +947,7 @@ class ModelRunner:
 
 class CUDAGraphRunner:
 
+    @rpd_trace()
     def __init__(self, model: nn.Module):
         self.model = model
         self.input_buffers: Dict[str, torch.Tensor] = {}
@@ -942,6 +960,7 @@ class CUDAGraphRunner:
         assert self._graph is not None
         return self._graph
 
+    @rpd_trace()
     def capture(
         self,
         input_ids: torch.Tensor,
@@ -989,6 +1008,7 @@ class CUDAGraphRunner:
         self.output_buffers = {"hidden_states": hidden_states}
         return
 
+    @rpd_trace()
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -997,23 +1017,28 @@ class CUDAGraphRunner:
         attn_metadata: AttentionMetadata,
         **kwargs,
     ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them.
-        del kv_caches
+        with rpd_trace("del kv_caches"):
+            # KV caches are fixed tensors, so we don't need to copy them.
+            del kv_caches
 
-        # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
-        self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
-        self.input_buffers["seq_lens_tensor"].copy_(
-            attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
-        self.input_buffers["block_tables"].copy_(
-            attn_metadata.decode_metadata.block_tables, non_blocking=True)
-        # Run the graph.
-        self.graph.replay()
+        with rpd_trace("copy input"):
+            # Copy the input tensors to the input buffers.
+            self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
+            self.input_buffers["positions"].copy_(positions, non_blocking=True)
+            self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
+                                                    non_blocking=True)
+            self.input_buffers["seq_lens_tensor"].copy_(
+                attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
+            self.input_buffers["block_tables"].copy_(
+                attn_metadata.decode_metadata.block_tables, non_blocking=True)
+        with rpd_trace("replay"):
+            # Run the graph.
+            self.graph.replay()
 
-        # Return the output tensor.
-        return self.output_buffers["hidden_states"]
+        with rpd_trace("copy output"):
+            # Return the output tensor.
+            result = self.output_buffers["hidden_states"]
+        return result
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)

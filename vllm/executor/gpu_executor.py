@@ -5,14 +5,14 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.sequence import ExecuteModelRequest, PoolerOutput, SamplerOutput
 from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
-                        make_async)
+                        make_async, rpd_trace, async_rpd_trace)
 from vllm.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
 
 
 class GPUExecutor(ExecutorBase):
-
+    @rpd_trace()
     def _init_executor(self) -> None:
         """Initialize the worker and load the model.
         """
@@ -48,6 +48,7 @@ class GPUExecutor(ExecutorBase):
             is_driver_worker=rank == 0,
         )
 
+    @rpd_trace()
     def _create_worker(self,
                        local_rank: int = 0,
                        rank: int = 0,
@@ -85,6 +86,7 @@ class GPUExecutor(ExecutorBase):
 
         self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
+    @rpd_trace()
     def execute_model(
         self, execute_model_req: ExecuteModelRequest
     ) -> List[Union[SamplerOutput, PoolerOutput]]:
@@ -110,6 +112,7 @@ class GPUExecutor(ExecutorBase):
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
 
+    @async_rpd_trace()
     async def execute_model_async(
         self,
         execute_model_req: ExecuteModelRequest,
