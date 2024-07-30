@@ -26,7 +26,7 @@ def fused_moe_kernel(
     topk_weights_ptr,
     sorted_token_ids_ptr,
     expert_ids_ptr,
-    num_tokens_post_padded_ptr,
+    num_tokens_post_padded,
     # Matrix dimensions
     N,
     K,
@@ -98,7 +98,6 @@ def fused_moe_kernel(
     # and accumulate
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -132,7 +131,7 @@ def fused_moe_kernel(
             a_ptrs,
             mask=token_mask[:, None] &
             (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-            other=0.0,
+            other=0.0
         )
         b = tl.load(b_ptrs,
                     mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
@@ -211,7 +210,7 @@ def moe_align_block_size(
                              device=topk_ids.device)
     sorted_ids.fill_(topk_ids.numel())
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty((max_num_m_blocks, ),
+    expert_ids = torch.zeros((max_num_m_blocks, ),
                              dtype=torch.int32,
                              device=topk_ids.device)
     num_tokens_post_pad = torch.empty((1),
@@ -251,6 +250,19 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
     grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
         "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
 
+    print("==================================================================================")
+    print(f"grid = {triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N'])}")
+    print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
+    print(f"config in moe = {config}")
+    print(f"A shape = {A.shape}")
+    print(f"B shape = {B.shape}")
+    print(f"num valid tokens = {topk_ids.numel()}")
+    print(f"sorted_token_ids = {sorted_token_ids[0]}")
+    print(f"expert_ids = {expert_ids}")
+    print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
+    
+
     fused_moe_kernel[grid](
         A,
         B,
@@ -260,7 +272,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         topk_weights,
         sorted_token_ids,
         expert_ids,
-        num_tokens_post_padded,
+        num_tokens_post_padded[0].item(),
         B.shape[1],
         B.shape[2],
         sorted_token_ids.shape[0],
