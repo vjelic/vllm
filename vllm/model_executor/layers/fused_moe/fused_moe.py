@@ -102,7 +102,6 @@ def fused_moe_kernel(
     # and accumulate
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -220,7 +219,7 @@ def moe_align_block_size(
                              device=topk_ids.device)
     sorted_ids.fill_(topk_ids.numel())
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty((max_num_m_blocks, ),
+    expert_ids = torch.zeros((max_num_m_blocks, ),
                              dtype=torch.int32,
                              device=topk_ids.device)
     num_tokens_post_pad = torch.empty((1),
@@ -254,7 +253,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         assert B_scale is None
 
     grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
-        'BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], META['BLOCK_SIZE_N']), )
+        "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
 
     fused_moe_kernel[grid](
         A,
@@ -265,7 +264,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         topk_weights,
         sorted_token_ids,
         expert_ids,
-        num_tokens_post_padded,
+        num_tokens_post_padded[0].item(),
         B.shape[1],
         B.shape[2] - padding_size,
         sorted_token_ids.shape[0],
