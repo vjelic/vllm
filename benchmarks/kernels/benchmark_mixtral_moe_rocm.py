@@ -23,24 +23,24 @@ def main(args):
     os.environ["OPTIMIZE_EPILOGUE"] = "1"
 
     for bs in [
-            1,
-            2,
-            4,
+            # 1,
+            # 2,
+            # 4,
             8,
-            16,
-            24,
-            32,
-            48,
-            64,
-            96,
-            128,
-            256,
-            512,
-            1024,
-            1536,
-            2048,
-            3072,
-            4096,
+            # 16,
+            # 24,
+            # 32,
+            # 48,
+            # 64,
+            # 96,
+            # 128,
+            # 256,
+            # 512,
+            # 1024,
+            # 1536,
+            # 2048,
+            # 3072,
+            # 4096,
     ]:
         run_grid(bs, model=args.model, TP=args.TP)
 
@@ -367,6 +367,7 @@ def run_timing(
         dtype=hidden_states.dtype,
     )
 
+    print(f"topk_ids = {topk_ids}")
     sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
         topk_ids, config["BLOCK_SIZE_M"], E)
 

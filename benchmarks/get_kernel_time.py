@@ -28,8 +28,9 @@ def main():
     # print(f"df_list = {time_list}")
     kernel_time = [round(time_list[i]/1000, 2) for i in range(len(time_list)) if i % 2 == kernel_index]
     # kernel2_time = [round(time_list[i]/1000, 2) for i in range(len(time_list)) if i % 2 == 1]
-
+    print("*************************************************************************")
     print(f"kerle_{kernel_index}_time (us): {kernel_time}")
+    print("*************************************************************************")
 
 if __name__ == "__main__":
     main()

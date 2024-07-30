@@ -137,6 +137,7 @@ def run_timing(
             sorted_token_ids,
             expert_ids,
             num_tokens_post_padded,
+            # int(num_tokens_post_padded[0]),
             False,
             topk_ids.shape[1],
             config,
@@ -147,24 +148,25 @@ def run_timing(
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-        invoke_fused_moe_kernel(
-            intermediate_cache2,
-            w2,
-            intermediate_cache3,
-            None,  # a2_scale
-            None,  # w2_scale
-            topk_weights,
-            topk_ids,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            True,
-            1,
-            config,
-            compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
-                          else tl.float16),
-            use_fp8=False,
-        )
+        # invoke_fused_moe_kernel(
+        #     intermediate_cache2,
+        #     w2,
+        #     intermediate_cache3,
+        #     None,  # a2_scale
+        #     None,  # w2_scale
+        #     topk_weights,
+        #     topk_ids,
+        #     sorted_token_ids,
+        #     expert_ids,
+        #     num_tokens_post_padded,
+        #     # int(num_tokens_post_padded[0]),
+        #     True,
+        #     1,
+        #     config,
+        #     compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
+        #                   else tl.float16),
+        #     use_fp8=False,
+        # )
 
     end_event.record()
     end_event.synchronize()

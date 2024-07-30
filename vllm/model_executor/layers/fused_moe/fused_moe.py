@@ -14,7 +14,9 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-
+@triton.heuristics({
+    'EVEN_K': lambda args: args['K'] % (args['BLOCK_SIZE_K']) == 0,    
+})
 @triton.jit
 def fused_moe_kernel(
     # Pointers to matrices
@@ -26,6 +28,7 @@ def fused_moe_kernel(
     topk_weights_ptr,
     sorted_token_ids_ptr,
     expert_ids_ptr,
+    # num_tokens_post_padded: int,
     num_tokens_post_padded_ptr,
     # Matrix dimensions
     N,
@@ -52,6 +55,7 @@ def fused_moe_kernel(
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     use_fp8: tl.constexpr,
+    EVEN_K: tl.constexpr,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -103,11 +107,12 @@ def fused_moe_kernel(
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
+    offs_token_a = offs_token % num_valid_tokens
     token_mask = offs_token < num_valid_tokens
 
     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am +
+    a_ptrs = a_ptr + (offs_token_a[:, None] // top_k * stride_am +
                       offs_k[None, :] * stride_ak)
 
     off_experts = tl.load(expert_ids_ptr + pid_m)
@@ -128,15 +133,28 @@ def fused_moe_kernel(
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
+        # if EVEN_K:
+        #     # a = tl.load(a_ptrs, cache_modifier=".cg")
+        #     # b = tl.load(b_ptrs, cache_modifier=".cg")
+        #     a = tl.load(a_ptrs)
+        #     b = tl.load(b_ptrs)
+        # else:
+            # a = tl.load(
+            #     a_ptrs,
+            #     mask=(offs_k[None, :] < K - k * BLOCK_SIZE_K),
+            #     other=0.0)
+            # b = tl.load(b_ptrs,
+            #             mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+            #             other=0.0)
         a = tl.load(
             a_ptrs,
-            mask=token_mask[:, None] &
-            (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+            mask=(offs_k[None, :] < K - k * BLOCK_SIZE_K),
             other=0.0,
-        )
+            cache_modifier=".cg")
         b = tl.load(b_ptrs,
                     mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                    other=0.0)
+                    other=0.0,
+                    cache_modifier=".cg")
         # We accumulate along the K dimension.
         if use_fp8:
             accumulator = tl.dot(a, b, acc=accumulator)
@@ -205,7 +223,12 @@ def moe_align_block_size(
     - The padding ensures that the total number of tokens is now divisible
         by block_size for proper block matrix operations.
     """
+    print(f"topk_ids_num = {topk_ids.shape}")
+    print(f"num_expers = {num_experts}")
+    print(f"block_size = {block_size}")
+
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
+    print(f"max_num_tokens_padded = {max_num_tokens_padded}")
     sorted_ids = torch.empty((max_num_tokens_padded, ),
                              dtype=torch.int32,
                              device=topk_ids.device)
@@ -225,6 +248,7 @@ def moe_align_block_size(
         expert_ids,
         num_tokens_post_pad,
     )
+    print(f"num_tokens_post_pad = {num_tokens_post_pad}")
     return sorted_ids, expert_ids, num_tokens_post_pad
 
 
@@ -251,6 +275,13 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
     grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
         "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
 
+    print(f"block_size_m = {config['BLOCK_SIZE_M']}")
+    print(f"shape = {sorted_token_ids.shape}\n sorted_token_ids = \n{sorted_token_ids}")
+    print(f"A_shape = {A.shape}")
+    print(f"num_valid_tokens = {topk_ids.numel()}")
+    print(f"top_k = {top_k}")
+    print(f"B_shape = {B.shape}")
+    print(f"expert_ids_shape = {expert_ids.shape}\nexpert_ids = {expert_ids}")
     fused_moe_kernel[grid](
         A,
         B,
@@ -435,7 +466,7 @@ def fused_experts(hidden_states: torch.Tensor,
                             topk_ids,
                             sorted_token_ids,
                             expert_ids,
-                            num_tokens_post_padded,
+                            int(num_tokens_post_padded[0]),
                             False,
                             topk_ids.shape[1],
                             config,
@@ -453,7 +484,7 @@ def fused_experts(hidden_states: torch.Tensor,
                             topk_ids,
                             sorted_token_ids,
                             expert_ids,
-                            num_tokens_post_padded,
+                            int(num_tokens_post_padded[0]),
                             True,
                             1,
                             config,

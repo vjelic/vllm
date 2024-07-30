@@ -91,7 +91,7 @@ def prune_configs(configs, nargs:dict, **named_args):
         # matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
         BLOCK_SIZE_N = config.kwargs.get("BLOCK_SIZE_N")
         BLOCK_SIZE_K = config.kwargs.get("BLOCK_SIZE_K")
-        num_warps = config.kwargs.get("num_warps")
+        num_warps = config.num_warps
         matrix_instr_nonkdim = config.kwargs.get("matrix_instr_nonkdim")
         # kpack = config.get("kpack")
         if matrix_instr_nonkdim > mfma:
@@ -130,7 +130,7 @@ def prune_configs(configs, nargs:dict, **named_args):
         # TODO (zhanglx): This does not consider the LDS usage in the epilogue
         LDS = (BLOCK_SIZE_K * BLOCK_SIZE_M * elemBytes_a +
                BLOCK_SIZE_K * BLOCK_SIZE_N * elemBytes_b)
-        if LDS > 65536:
+        if LDS >= 65536:
             continue
         # Skip small block sizes and num_warps for large gemm
         # For fp16 and f8, we want to only use BLOCK_SIZE >= 64
@@ -143,6 +143,7 @@ def prune_configs(configs, nargs:dict, **named_args):
                 continue
 
         pruned_configs.append(config)
+    print(f"config_num = {len(pruned_configs)}")
 
     return pruned_configs
 
@@ -250,14 +251,12 @@ def fused_moe_kernel(
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
+    offs_token_a = offs_token % num_valid_tokens
     token_mask = offs_token < num_valid_tokens
 
     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    # offs_bn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    # offs_bn = tl.max_contiguous(tl.multiple_of(offs_bn % N, BLOCK_SIZE_N), BLOCK_SIZE_N)
-
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am +
+    a_ptrs = a_ptr + (offs_token_a[:, None] // top_k * stride_am +
                       offs_k[None, :] * stride_ak)
 
     off_experts = tl.load(expert_ids_ptr + pid_m)
@@ -278,15 +277,15 @@ def fused_moe_kernel(
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
-        a = tl.load(
-            a_ptrs,
-            mask=token_mask[:, None] &
-            (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-            other=0.0,
-        )
         if EVEN_K:
+            a = tl.load(a_ptrs)
             b = tl.load(b_ptrs)
         else:
+            a = tl.load(
+                a_ptrs,
+                mask=(offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                other=0.0,
+            )
             b = tl.load(b_ptrs,
                         mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
                         other=0.0)
@@ -603,8 +602,8 @@ def run_timing(
     )
 
 
-    # block_mn_range = [16, 32, 64, 128, 256]
-    block_mn_range = [16]
+    block_mn_range = [16, 32, 64, 128, 256]
+    # block_mn_range = [64, 128]
     ##################################
     for block_m in block_mn_range:
         print(f"block_m = {block_m}")
@@ -651,11 +650,9 @@ def run_timing(
                                 use_fp8=False), quantiles=quantiles, rep=40, warmup=20)
         best_config2 = fused_moe_kernel.best_config
         print(f"invoke2, time(us) = {ms2}, best_config = {best_config2}")
-        return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-                        dim=1), ms1, best_config1
 
-        # return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-        #                 dim=1), ms1, best_config1, ms2, best_config2
+    return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
+                    dim=1), ms1, best_config1, ms2, best_config2
 
 
 # def tune_fused_experts(hidden_states: torch.Tensor,
