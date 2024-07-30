@@ -49,7 +49,7 @@ from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 from vllm.utils import (DeviceMemoryProfiler, GiB_bytes, PyObjectCache,
                         async_tensor_h2d, flatten_2d_lists,
                         is_pin_memory_available, rpd_mark, supports_dynamo,
-                        weak_ref_tensor)
+                        weak_ref_tensor, rpd_trace)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
     _add_attn_metadata_broadcastable_dict,
@@ -971,6 +971,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     _model_input_cls: Type[TModelInputForGPU]
     _builder_cls: Type[ModelInputForGPUBuilder]
 
+    @rpd_trace()
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -1068,6 +1069,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
               SamplingMetadataCache() \
                 if self.parallel_config.pipeline_parallel_size == 1 else None
 
+    @rpd_trace()
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
         with DeviceMemoryProfiler() as m:
@@ -1149,6 +1151,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 fullgraph=envs.VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE,
                 backend=backend)
 
+    @rpd_trace()
     def save_sharded_state(
         self,
         path: str,
@@ -1177,6 +1180,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         block_size = self.block_size
         return (self.max_seq_len_to_capture + block_size - 1) // block_size
 
+    @rpd_trace()
     def _prepare_model_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1205,6 +1209,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         return builder.build()  # type: ignore
 
     @torch.inference_mode()
+    @rpd_trace()
     def profile_run(self) -> None:
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
@@ -1382,6 +1387,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         return self.prompt_adapter_manager.list_adapters()
 
     @torch.inference_mode()
+    @rpd_trace()
     def capture_model(self, kv_caches: List[List[torch.Tensor]]) -> None:
         """Cuda graph capture a model.
 
@@ -1435,6 +1441,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         batch_size_capture_list = [
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
+        print(f"{batch_size_capture_list=}")
 
         with self.attn_state.graph_capture(
                 max_batch_size), graph_capture() as graph_capture_context:
@@ -1597,6 +1604,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                    virtual_engine=virtual_engine)
 
     @rpd_mark()
+    @rpd_trace()
     @torch.inference_mode()
     @dump_input_when_exception(exclude_args=[0], exclude_kwargs=["self"])
     def execute_model(
@@ -1736,7 +1744,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 # NOTE: this is nn.Module so the profiler can properly capture/group
 #  kernels calls made within the graph
 class CUDAGraphRunner(nn.Module):
-
+    @rpd_trace()
     def __init__(self, model: nn.Module, backend_name: str,
                  attn_state: AttentionState, is_encoder_decoder_model: bool):
         super().__init__()
@@ -1755,6 +1763,7 @@ class CUDAGraphRunner(nn.Module):
         assert self._graph is not None
         return self._graph
 
+    @rpd_trace()
     def capture(
         self,
         input_ids: torch.Tensor,
@@ -1834,6 +1843,7 @@ class CUDAGraphRunner(nn.Module):
         else:
             self.output_buffers = hidden_or_intermediate_states
 
+    @rpd_trace()
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -1843,41 +1853,44 @@ class CUDAGraphRunner(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         **kwargs,
     ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them.
-        del kv_caches
+        with rpd_trace("del kv_caches"):
+            # KV caches are fixed tensors, so we don't need to copy them.
+            del kv_caches
 
-        # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
-        self.input_buffers["positions"].copy_(positions, non_blocking=True)
+        with rpd_trace("copy input"):
+            # Copy the input tensors to the input buffers.
+            self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
+            self.input_buffers["positions"].copy_(positions, non_blocking=True)
 
-        if self.backend_name != "NO_ATTENTION":
-            self.input_buffers["slot_mapping"].copy_(
-                attn_metadata.slot_mapping, non_blocking=True)
+            if self.backend_name != "NO_ATTENTION":
+                self.input_buffers["slot_mapping"].copy_(
+                    attn_metadata.slot_mapping, non_blocking=True)
 
-        self.attn_state.prepare_graph_input_buffers(
-            self.input_buffers, attn_metadata, self._is_encoder_decoder_model)
+            self.attn_state.prepare_graph_input_buffers(
+                self.input_buffers, attn_metadata, self._is_encoder_decoder_model)
 
-        if "seqlen_agnostic_capture_inputs" in self.input_buffers:
-            self.model.copy_inputs_before_cuda_graphs(self.input_buffers,
-                                                      **kwargs)
+            if "seqlen_agnostic_capture_inputs" in self.input_buffers:
+                self.model.copy_inputs_before_cuda_graphs(self.input_buffers,
+                                                        **kwargs)
 
-        if "previous_hidden_states" in self.input_buffers:
-            self.input_buffers["previous_hidden_states"].copy_(
-                kwargs["previous_hidden_states"], non_blocking=True)
+            if "previous_hidden_states" in self.input_buffers:
+                self.input_buffers["previous_hidden_states"].copy_(
+                    kwargs["previous_hidden_states"], non_blocking=True)
 
-        if intermediate_tensors is not None:
-            for key in intermediate_tensors.tensors:
-                if key != "model_execute_time" and key != "model_forward_time":
-                    self.input_buffers[key].copy_(intermediate_tensors[key],
-                                                  non_blocking=True)
-        if self._is_encoder_decoder_model:
-            self.input_buffers["encoder_input_ids"].copy_(
-                kwargs['encoder_input_ids'], non_blocking=True)
-            self.input_buffers["encoder_positions"].copy_(
-                kwargs['encoder_positions'], non_blocking=True)
+            if intermediate_tensors is not None:
+                for key in intermediate_tensors.tensors:
+                    if key != "model_execute_time" and key != "model_forward_time":
+                        self.input_buffers[key].copy_(intermediate_tensors[key],
+                                                    non_blocking=True)
+            if self._is_encoder_decoder_model:
+                self.input_buffers["encoder_input_ids"].copy_(
+                    kwargs['encoder_input_ids'], non_blocking=True)
+                self.input_buffers["encoder_positions"].copy_(
+                    kwargs['encoder_positions'], non_blocking=True)
 
-        # Run the graph.
-        self.graph.replay()
+        with rpd_trace("copy output"):
+            # Run the graph.
+            self.graph.replay()
         # Return the output tensor.
         if get_pp_group().is_last_rank:
             return self.output_buffers["hidden_states"]

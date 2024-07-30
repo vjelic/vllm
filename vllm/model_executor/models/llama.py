@@ -54,7 +54,7 @@ from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors, PoolerOutput
-from vllm.utils import is_navi
+from vllm.utils import is_navi, rpd_trace, ENABLE_TRACING_RPD_VERBOSE
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
@@ -63,7 +63,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
 
 
 class LlamaMLP(nn.Module):
-
+    @rpd_trace()
     def __init__(
         self,
         hidden_size: int,
@@ -96,25 +96,30 @@ class LlamaMLP(nn.Module):
                              "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(self, x):
         if current_platform.is_rocm() and x.shape[0] == 1 and x.shape[1] == 1:
-            out = torch.empty(x.shape[0],
-                              self.gate_up_proj.weight.shape[0] // 2,
-                              dtype=x.dtype,
-                              device=x.device)
-            ops.LLMM_Silu(self.gate_up_proj.weight, x.view(-1, x.size(-1)),
-                          out, 8)
-            x = out.view(x.shape[0], x.shape[1], out.shape[1])
+            with rpd_trace("LLMM_Silu", skip=not ENABLE_TRACING_RPD_VERBOSE):
+                out = torch.empty(x.shape[0],
+                                self.gate_up_proj.weight.shape[0] // 2,
+                                dtype=x.dtype,
+                                device=x.device)
+                ops.LLMM_Silu(self.gate_up_proj.weight, x.view(-1, x.size(-1)),
+                            out, 8)
+                x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
-            x, _ = self.gate_up_proj(x)
-            x = self.act_fn(
-                x, self.down_proj.input_scale if self.use_fp8 else None)
-        x, _ = self.down_proj(x)
+            with rpd_trace("gate_up + act-fn", skip=not ENABLE_TRACING_RPD_VERBOSE):
+                x, _ = self.gate_up_proj(x)
+                x = self.act_fn(
+                    x, self.down_proj.input_scale if self.use_fp8 else None)
+        with rpd_trace("down proj", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            x, _ = self.down_proj(x)
         return x
 
 
 class LlamaAttention(nn.Module):
 
+    @rpd_trace()
     def __init__(
         self,
         config: LlamaConfig,
@@ -198,6 +203,7 @@ class LlamaAttention(nn.Module):
                             and not is_navi() \
                             and isinstance(quant_config, Fp8Config)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         positions: torch.Tensor,
@@ -205,22 +211,28 @@ class LlamaAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q,
-                                k,
-                                v,
-                                kv_cache,
-                                attn_metadata,
-                                fp8_out_scale=self.o_proj.input_scale
-                                if self.attn_fp8_out else None)
-        output, _ = self.o_proj(attn_output)
+        with rpd_trace("qkv_proj", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            qkv, _ = self.qkv_proj(hidden_states)
+        with rpd_trace("qkv.split", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        with rpd_trace("rotary_emb", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            q, k = self.rotary_emb(positions, q, k)
+        with rpd_trace("attn", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            attn_output = self.attn(q,
+                                    k,
+                                    v,
+                                    kv_cache,
+                                    attn_metadata,
+                                    fp8_out_scale=self.o_proj.input_scale
+                                    if self.attn_fp8_out else None)
+        with rpd_trace("o_proj", skip=not ENABLE_TRACING_RPD_VERBOSE):
+            output, _ = self.o_proj(attn_output)
         return output
 
 
 class LlamaDecoderLayer(nn.Module):
 
+    @rpd_trace()
     def __init__(
         self,
         config: LlamaConfig,
@@ -272,6 +284,7 @@ class LlamaDecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         positions: torch.Tensor,
@@ -304,7 +317,7 @@ class LlamaDecoderLayer(nn.Module):
 
 @support_torch_compile
 class LlamaModel(nn.Module):
-
+    @rpd_trace()
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
 
@@ -346,9 +359,11 @@ class LlamaModel(nn.Module):
             make_empty_intermediate_tensors_factory(
                 ["hidden_states", "residual"], config.hidden_size))
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
+    @rpd_trace(skip=not ENABLE_TRACING_RPD_VERBOSE)
     def forward(
         self,
         input_ids: Optional[torch.Tensor],
@@ -450,6 +465,7 @@ class LlamaModel(nn.Module):
     # If this function is called, it should always initialize KV cache scale
     # factors (or else raise an exception). Thus, handled exceptions should
     # make sure to leave KV cache scale factors in a known good (dummy) state
+    @rpd_trace()
     def load_kv_cache_scales(self, quantization_param_path: str) -> None:
         tp_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
@@ -530,6 +546,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         "norm": "model.norm"
     }
 
+    @rpd_trace()
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
@@ -580,6 +597,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.get_input_embeddings(input_ids)
 
+    @rpd_trace()
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -594,6 +612,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                                   inputs_embeds)
         return model_output
 
+    @rpd_trace()
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
@@ -611,11 +630,13 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         logits = self.compute_logits(hidden_states, None)
         return self._pooler(logits, pooling_metadata)
 
+    @rpd_trace()
     def sample(self, logits: torch.Tensor,
                sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
+    @rpd_trace()
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
         loader = AutoWeightsLoader(
@@ -627,6 +648,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             self.maybe_remap_mistral(name, loaded_weight)
             for name, loaded_weight in weights)
 
+    @rpd_trace()
     def load_kv_cache_scales(self, quantization_param_path: str) -> None:
         self.model.load_kv_cache_scales(quantization_param_path)
 

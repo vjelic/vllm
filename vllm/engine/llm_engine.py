@@ -59,8 +59,10 @@ from vllm.transformers_utils.tokenizer_group import (
     BaseTokenizerGroup, init_tokenizer_from_configs)
 from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
-from vllm.utils import Counter, Device, deprecate_kwargs, weak_bind
+from vllm.utils import Counter, Device, deprecate_kwargs, weak_bind, rpd_trace
 from vllm.version import __version__ as VLLM_VERSION
+import os
+import gc
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -219,6 +221,7 @@ class LLMEngine:
 
     tokenizer: Optional[BaseTokenizerGroup]
 
+    @rpd_trace()
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -325,6 +328,7 @@ class LLMEngine:
 
         # Ensure that the function doesn't contain a reference to self,
         # to avoid engine GC issues
+        @rpd_trace()
         def get_tokenizer_for_seq(sequence: Sequence) -> AnyTokenizer:
             assert tokenizer_group, ("tokenizer_group cannot be None, "
                                      "make sure skip_tokenizer_init is False")
@@ -475,6 +479,7 @@ class LLMEngine:
 
         self.seq_id_to_seq_group: Dict[str, SequenceGroupBase] = {}
 
+    @rpd_trace()
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
 
@@ -601,6 +606,7 @@ class LLMEngine:
         if model_executor := getattr(self, "model_executor", None):
             model_executor.shutdown()
 
+    @rpd_trace()
     def get_tokenizer_group(
         self,
         group_type: Type[_G] = BaseTokenizerGroup,
@@ -623,6 +629,7 @@ class LLMEngine:
     ) -> AnyTokenizer:
         return self.get_tokenizer_group().get_lora_tokenizer(lora_request)
 
+    @rpd_trace()
     def _init_tokenizer(self) -> BaseTokenizerGroup:
         return init_tokenizer_from_configs(
             model_config=self.model_config,
@@ -630,6 +637,7 @@ class LLMEngine:
             parallel_config=self.parallel_config,
             enable_lora=bool(self.lora_config))
 
+    @rpd_trace()
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
@@ -641,6 +649,7 @@ class LLMEngine:
             self.prompt_adapter_config.verify_with_model_config(
                 self.model_config)
 
+    @rpd_trace()
     def _add_processed_request(
         self,
         request_id: str,
@@ -729,6 +738,7 @@ class LLMEngine:
         self.model_executor.stop_remote_worker_execution_loop()
 
     @overload  # DEPRECATED
+    @rpd_trace()
     def add_request(
         self,
         request_id: str,
@@ -884,6 +894,7 @@ class LLMEngine:
                 raise ValueError(
                     "Token id {} is out of vocabulary".format(max_input_id))
 
+    @rpd_trace()
     def _create_sequence_group_with_sampling(
         self,
         request_id: str,
@@ -929,6 +940,7 @@ class LLMEngine:
 
         return seq_group
 
+    @rpd_trace()
     def _create_sequence_group_with_pooling(
         self,
         request_id: str,
@@ -955,6 +967,7 @@ class LLMEngine:
             priority=priority)
         return seq_group
 
+    @rpd_trace()
     def abort_request(self, request_id: Union[str, Iterable[str]]) -> None:
         """Aborts a request(s) with the given ID.
 
@@ -1013,6 +1026,7 @@ class LLMEngine:
         return self.scheduler[virtual_engine].has_unfinished_seqs()
 
     @staticmethod
+    @rpd_trace()
     def _process_sequence_group_outputs(
         seq_group: SequenceGroup,
         outputs: List[EmbeddingSequenceGroupOutput],
@@ -1063,6 +1077,7 @@ class LLMEngine:
             seq_group.update_num_computed_tokens(
                 seq_group_meta.token_chunk_size)
 
+    @rpd_trace()
     def _process_model_outputs(self,
                                ctx: SchedulerContext,
                                request_id: Optional[str] = None) -> None:
@@ -1323,6 +1338,7 @@ class LLMEngine:
                 else:
                     seq.append_token_id(sample.output_token, sample.logprobs)
 
+    @rpd_trace()
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -1599,6 +1615,7 @@ class LLMEngine:
             raise KeyError(f"Logger with name {logger_name} does not exist.")
         del self.stat_loggers[logger_name]
 
+    @rpd_trace()
     def do_log_stats(self,
                      scheduler_outputs: Optional[SchedulerOutputs] = None,
                      model_output: Optional[List[SamplerOutput]] = None,
@@ -1903,6 +1920,7 @@ class LLMEngine:
     def list_prompt_adapters(self) -> List[int]:
         return self.model_executor.list_prompt_adapters()
 
+    @rpd_trace()
     def check_health(self) -> None:
         if self.tokenizer:
             self.tokenizer.check_health()

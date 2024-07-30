@@ -16,7 +16,7 @@ from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceGroupMetadataDelta,
                            SequenceStatus)
-from vllm.utils import Device, PyObjectCache
+from vllm.utils import Device, PyObjectCache, rpd_trace
 
 logger = init_logger(__name__)
 
@@ -481,7 +481,8 @@ class Scheduler:
         return self.block_manager.get_prefix_cache_hit_rate(device)
 
     def get_num_unfinished_seq_groups(self) -> int:
-        return len(self.waiting) + len(self.running) + len(self.swapped)
+        with rpd_trace(f"scheduler w={len(self.waiting)} r={len(self.running)} s={len(self.swapped)}"):
+            return len(self.waiting) + len(self.running) + len(self.swapped)
 
     def get_and_reset_finished_requests_ids(self) -> List[str]:
         """Flushes the list of request ids of previously finished seq_groups."""
@@ -1208,6 +1209,7 @@ class Scheduler:
             seq_group.sampling_params.n == 1)
         return no_single_seq
 
+    @rpd_trace()
     def schedule(
             self
     ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs, bool]:

@@ -32,7 +32,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import ExecuteModelRequest
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import deprecate_kwargs, weak_bind
+from vllm.utils import deprecate_kwargs, weak_bind, rpd_trace, async_rpd_trace
 
 logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
@@ -126,6 +126,7 @@ class AsyncStream:
 class RequestTracker:
     """Synchronous abstraction for tracking requests."""
 
+    @rpd_trace()
     def __init__(self) -> None:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._aborted_requests: asyncio.Queue[str] = asyncio.Queue()
@@ -139,6 +140,7 @@ class RequestTracker:
     def __len__(self) -> int:
         return len(self._request_streams)
 
+    @rpd_trace()
     def propagate_exception(self,
                             exc: Exception,
                             request_id: Optional[str] = None) -> None:
@@ -152,6 +154,7 @@ class RequestTracker:
             for rid in tuple(self._request_streams.keys()):
                 self.abort_request(rid, exception=exc)
 
+    @rpd_trace()
     def process_request_output(self,
                                request_output: Union[RequestOutput,
                                                      EmbeddingRequestOutput],
@@ -175,6 +178,7 @@ class RequestTracker:
         if verbose and finished:
             logger.info("Finished request %s.", request_id)
 
+    @rpd_trace()
     def process_exception(self,
                           request_id: str,
                           exception: BaseException,
@@ -185,6 +189,7 @@ class RequestTracker:
             logger.info("Finished request %s.", request_id)
         self.abort_request(request_id, exception=exception)
 
+    @rpd_trace()
     def add_request(self,
                     request_id: str,
                     *,
@@ -208,7 +213,8 @@ class RequestTracker:
             logger.info("Added request %s.", request_id)
 
         return stream
-
+        
+    @rpd_trace()
     def abort_request(self,
                       request_id: str,
                       *,
@@ -225,6 +231,7 @@ class RequestTracker:
         if stream is not None:
             stream.finish(exception=exception)
 
+    @rpd_trace()
     def get_new_and_aborted_requests(self) -> Tuple[List[Dict], Set[str]]:
         """Get the new requests and finished requests to be
         sent to the engine."""
@@ -248,11 +255,13 @@ class RequestTracker:
 
         return new_requests, finished_requests
 
+    @async_rpd_trace()
     async def wait_for_new_requests(self):
         if not self.has_new_requests():
             await self.new_requests_event.wait()
         self.new_requests_event.clear()
 
+    @rpd_trace()
     def has_new_requests(self):
         return not self._new_requests.empty()
 
@@ -514,6 +523,7 @@ class _AsyncLLMEngine(LLMEngine):
             priority=priority,
         )
 
+    @async_rpd_trace()
     async def check_health_async(self) -> None:
         if self.tokenizer:
             self.tokenizer.check_health()
@@ -569,6 +579,7 @@ class AsyncLLMEngine(EngineClient):
 
     _engine_class: Type[_AsyncLLMEngine] = _AsyncLLMEngine
 
+    @rpd_trace()
     def __init__(self,
                  *args,
                  log_requests: bool = True,
@@ -739,6 +750,7 @@ class AsyncLLMEngine(EngineClient):
     ) -> AnyTokenizer:
         return await self.engine.get_tokenizer_async(lora_request)
 
+    @rpd_trace()
     def start_background_loop(self) -> None:
         """Start the background loop."""
         if self.errored:
@@ -817,6 +829,7 @@ class AsyncLLMEngine(EngineClient):
 
         return all_finished
 
+    @async_rpd_trace()
     async def _engine_abort(self, request_ids: Iterable[str]):
         self.engine.abort_request(request_ids)
 
@@ -972,6 +985,7 @@ class AsyncLLMEngine(EngineClient):
 
         return stream.generator()
 
+    # @async_rpd_trace(is_iterator=True)
     async def generate(
         self,
         prompt: PromptType,
@@ -1057,8 +1071,11 @@ class AsyncLLMEngine(EngineClient):
                 prompt_adapter_request=prompt_adapter_request,
                 priority=priority,
         ):
-            yield LLMEngine.validate_output(output, RequestOutput)
+            async with async_rpd_trace(name=f"generate|_process_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, RequestOutput)
+            idx += 1
 
+    # @async_rpd_trace(is_iterator=True)
     async def encode(
         self,
         prompt: PromptType,
@@ -1138,7 +1155,9 @@ class AsyncLLMEngine(EngineClient):
                 trace_headers=trace_headers,
                 priority=priority,
         ):
-            yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            async with async_rpd_trace(name=f"encode|_process_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            idx += 1
 
     async def abort(self, request_id: str) -> None:
         """Abort a request.
@@ -1158,6 +1177,7 @@ class AsyncLLMEngine(EngineClient):
 
         return self._abort(request_id)
 
+    @rpd_trace()
     def _abort(self, request_id: str) -> None:
         """Abort a request.
 
@@ -1171,6 +1191,7 @@ class AsyncLLMEngine(EngineClient):
                                             exception=asyncio.CancelledError,
                                             verbose=self.log_requests)
 
+    @async_rpd_trace()
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the vLLM engine."""
         return self.engine.get_model_config()
@@ -1179,6 +1200,7 @@ class AsyncLLMEngine(EngineClient):
         """Get the parallel configuration of the vLLM engine."""
         return self.engine.get_parallel_config()
 
+    @async_rpd_trace()
     async def get_decoding_config(self) -> DecodingConfig:
         """Get the decoding configuration of the vLLM engine."""
         return self.engine.get_decoding_config()
@@ -1191,12 +1213,14 @@ class AsyncLLMEngine(EngineClient):
         """Get the lora configuration of the vLLM engine."""
         return self.engine.get_lora_config()
 
+    @async_rpd_trace()
     async def do_log_stats(
             self,
             scheduler_outputs: Optional[SchedulerOutputs] = None,
             model_output: Optional[List[SamplerOutput]] = None) -> None:
         self.engine.do_log_stats()
 
+    @async_rpd_trace()
     async def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
         t = time.perf_counter()
