@@ -27,9 +27,6 @@ def fused_moe_kernel(
     sorted_token_ids_ptr,
     expert_ids_ptr,
     num_tokens_post_padded_ptr,
-    # Matrix dimensions
-    N,
-    K,
     EM,
     num_valid_tokens,
     # The stride variables represent how much to increase the ptr by when
@@ -42,12 +39,17 @@ def fused_moe_kernel(
     stride_bk,
     stride_bn,
     stride_cm,
+    stride_c_split_k,
     stride_cn,
     # Meta-parameters
+    N: tl.constexpr,
+    K: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
+    SPLIT_K: tl.constexpr,
+    EVEN_K: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
@@ -82,9 +84,12 @@ def fused_moe_kernel(
     # -----------------------------------------------------------
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
-    pid = tl.program_id(axis=0)
+    # pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_pid_mn = num_pid_m * num_pid_n
+    # The leading dimension is split-k.
+    pid = tl.program_id(axis=0) % num_pid_mn
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
     group_id = pid // num_pid_in_group
     first_pid_m = group_id * GROUP_SIZE_M
@@ -114,6 +119,20 @@ def fused_moe_kernel(
     b_ptrs = (b_ptr + off_experts * stride_be +
               (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn))
 
+    # ----------------------------------------------------------
+    # Split-K
+    if SPLIT_K > 1:
+        pid_z = tl.program_id(axis=0) // num_pid_mn
+        # Move the starting pointers to the correct position.
+        start_k = pid_z * BLOCK_SIZE_K
+        a_ptrs += start_k * stride_ak
+        b_ptrs += start_k * stride_bk
+        K_STRIDE = BLOCK_SIZE_K * SPLIT_K
+    else:
+        pid_z = 0
+        start_k = 0
+        K_STRIDE = BLOCK_SIZE_K
+
     if use_fp8:
         a_scale = tl.load(a_scale_ptr)
         b_scale = tl.load(b_scale_ptr + off_experts)
@@ -125,26 +144,27 @@ def fused_moe_kernel(
     # `accumulator` will be converted back to fp16 after the loop.
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+    for k in range(0, tl.cdiv(K, K_STRIDE)):
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
-        a = tl.load(
-            a_ptrs,
-            mask=token_mask[:, None] &
-            (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-            other=0.0,
-        )
-        b = tl.load(b_ptrs,
-                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                    other=0.0)
+        if EVEN_K:
+            a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
+            b = tl.load(b_ptrs)
+        else:
+            k_remaining = K - (start_k + k * K_STRIDE)
+            a = tl.load(a_ptrs,
+                        mask=token_mask[:, None] &
+                        (offs_k[None, :] < k_remaining),
+                        other=0.0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < k_remaining, other=0.0)
         # We accumulate along the K dimension.
         if use_fp8:
             accumulator = tl.dot(a, b, acc=accumulator)
         else:
             accumulator += tl.dot(a, b)
         # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
+        a_ptrs += K_STRIDE * stride_ak
+        b_ptrs += K_STRIDE * stride_bk
 
     if MUL_ROUTED_WEIGHT:
         moe_weight = tl.load(topk_weights_ptr + offs_token,
@@ -161,6 +181,7 @@ def fused_moe_kernel(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = (c_ptr + stride_cm * offs_token[:, None] +
               stride_cn * offs_cn[None, :])
+    c_ptrs = c_ptrs + pid_z * stride_c_split_k
     c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
     tl.store(c_ptrs, accumulator, mask=c_mask)
 
@@ -248,13 +269,27 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         A, A_scale = ops.scaled_fp8_quant(A, A_scale)
         assert B_scale is not None
 
-    grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
-        "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
+    num_m_blocks = triton.cdiv(sorted_token_ids.shape[0],
+                               config['BLOCK_SIZE_M'])
+    num_n_blocks = triton.cdiv(B.shape[1], config['BLOCK_SIZE_N'])
+    split_k = config['SPLIT_K']
+    even_k = (B.shape[2] % (config['BLOCK_SIZE_K'] * split_k)) == 0
+    grid = lambda META: (split_k * num_m_blocks * num_n_blocks, )
+
+    if split_k == 1:
+        D = C.unsqueeze(dim=2)
+    else:
+        D = torch.empty(C.shape[0],
+                        C.shape[1],
+                        split_k,
+                        C.shape[2],
+                        device=C.device,
+                        dtype=C.dtype)
 
     fused_moe_kernel[grid](
         A,
         B,
-        C,
+        D,
         A_scale,
         B_scale,
         topk_weights,
@@ -270,14 +305,20 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         B.stride(0),
         B.stride(2),
         B.stride(1),
-        C.stride(1),
-        C.stride(2),
+        D.stride(1),
+        D.stride(2),
+        D.stride(3),
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         top_k=top_k,
         compute_type=compute_type,
         use_fp8=use_fp8,
+        N=B.shape[1],
+        K=B.shape[2],
+        EVEN_K=even_k,
         **config,
     )
+    if split_k > 1:
+        torch.sum(D, dim=2, out=C)
 
 
 def get_config_file_name(E: int, N: int, dtype: Optional[str]) -> str:
@@ -394,6 +435,7 @@ def fused_experts(hidden_states: torch.Tensor,
                 "BLOCK_SIZE_M": 64,
                 "BLOCK_SIZE_N": 64,
                 "BLOCK_SIZE_K": 32,
+                "SPLIT_K": 1,
                 "GROUP_SIZE_M": 8,
             }
 
@@ -402,6 +444,7 @@ def fused_experts(hidden_states: torch.Tensor,
                     "BLOCK_SIZE_M": 16,
                     "BLOCK_SIZE_N": 32,
                     "BLOCK_SIZE_K": 64,
+                    "SPLIT_K": 1,
                     "GROUP_SIZE_M": 1,
                 }
 
