@@ -176,7 +176,7 @@ def fused_moe_persistent_kernel(
     topk_weights_ptr,
     sorted_token_ids_ptr,
     expert_ids_ptr,
-    num_tokens_post_padded,
+    num_tokens_post_padded_ptr,
     # Matrix dimensions
     N,
     K,
@@ -256,6 +256,8 @@ def fused_moe_persistent_kernel(
     offs_bn = tl.arange(0, BLOCK_SIZE_N)
 
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    offs_token = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int32)
+    token_mask = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int1)
 
     # load runtime constant outside the loop
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
@@ -263,7 +265,20 @@ def fused_moe_persistent_kernel(
         a_scale = tl.load(a_scale_ptr)
         b_scale = tl.load(b_scale_ptr + off_experts)
 
-    for _ in range(0, k_tiles * tiles_per_SM):
+    # compute when it reaches the invalid region
+    pid_m = 0
+    tile_id2 = -1
+    tile_counter = -1
+    while pid_m * BLOCK_SIZE_M < num_tokens_post_padded:
+        tile_counter += 1
+        tile_id2 += NUM_SMS
+        group_id = tile_id2 // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + ((tile_id2 % num_pid_in_group) % group_size_m)
+
+    # print("tile_counter: ", tile_counter)
+    for _ in range(0, k_tiles * tile_counter):
         # Increment ki or loop back to the start of each tile
         ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
         # Prologue of each tile
@@ -274,10 +289,6 @@ def fused_moe_persistent_kernel(
             group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
             pid_m = first_pid_m + ((tile_id % num_pid_in_group) % group_size_m)
             pid_n = (tile_id % num_pid_in_group) // group_size_m
-            # pid_m increases monotonically in persistent loop, so break once
-            # it enters non-valid region
-            if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
-                break
             # compute the base pointer of A, B for each tile
             offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
             offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
@@ -485,7 +496,7 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
             ), )
 
     print("==================================================================================")
-    print(f"grid = NUM_SMS: {NUM_SMS} or num_full_grids: {triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])}")
+    # print(f"grid = NUM_SMS: {NUM_SMS} or num_full_grids: {triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])}")
     print(f"sorted token ids shape = {sorted_token_ids.shape}")
     print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
     print(f"config in moe = {config}")
@@ -642,6 +653,7 @@ def fused_experts(hidden_states: torch.Tensor,
                 "BLOCK_SIZE_N": 64,
                 "BLOCK_SIZE_K": 32,
                 "GROUP_SIZE_M": 8,
+                "num_stages": 1,
             }
 
             if M <= E:
@@ -650,6 +662,7 @@ def fused_experts(hidden_states: torch.Tensor,
                     "BLOCK_SIZE_N": 32,
                     "BLOCK_SIZE_K": 64,
                     "GROUP_SIZE_M": 1,
+                    "num_stages": 1,
                 }
 
     intermediate_cache1 = torch.empty(
@@ -673,7 +686,8 @@ def fused_experts(hidden_states: torch.Tensor,
     compute_type = (tl.bfloat16
                     if hidden_states.dtype == torch.bfloat16 else tl.float16)
 
-    invoke_fused_moe_kernel(hidden_states,
+    invoke_fused_moe_persistent_kernel(hidden_states,
+    # invoke_fused_moe_kernel(hidden_states,
                             w1,
                             intermediate_cache1,
                             a1_scale,
@@ -691,7 +705,8 @@ def fused_experts(hidden_states: torch.Tensor,
 
     ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-    invoke_fused_moe_kernel(intermediate_cache2,
+    invoke_fused_moe_persistent_kernel(intermediate_cache2,
+    # invoke_fused_moe_kernel(intermediate_cache2,
                             w2,
                             intermediate_cache3,
                             a2_scale,

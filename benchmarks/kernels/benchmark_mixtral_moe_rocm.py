@@ -13,6 +13,7 @@ import vllm._moe_C as moe_kernels
 from vllm._C import ops
 from vllm.model_executor.layers.fused_moe import (get_config_file_name,
                                                   invoke_fused_moe_kernel,
+                                                  invoke_fused_moe_persistent_kernel,
                                                   moe_align_block_size)
 
 
@@ -39,7 +40,7 @@ def get_full_tuning_space():
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
-    num_stage_range = [0]
+    num_stage_range = [1]
     waves_per_eu_range = [0]
     matrix_instr_nonkdim_range = [16]
     kpack_range = [2]
@@ -290,7 +291,7 @@ def run_timing(
 
     start_event.record()
     for i in range(num_calls):
-        invoke_fused_moe_kernel(
+        invoke_fused_moe_persistent_kernel(
             hidden_states,
             w1,
             intermediate_cache1,
