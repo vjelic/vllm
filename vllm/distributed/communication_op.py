@@ -208,7 +208,6 @@ def broadcast(input_: torch.Tensor,
     return input_
 
 def broadcast_object(obj: Optional[Any] = None, src: int = 0):#, group: Optional[ProcessGroup] = None):
-    #with torch.cuda.nvtx.range("broadcast_object"):
     """Broadcast the input object.
     NOTE: `src` is the local rank of the source rank.
     """
@@ -288,7 +287,6 @@ def broadcast_tensor_dict(
     group: Optional[ProcessGroup] = None,
     metadata_group: Optional[ProcessGroup] = None
 ) -> Optional[Dict[Any, Union[torch.Tensor, Any]]]:
-    #with torch.cuda.nvtx.range("broadcast_tensor_dict"):
     """Broadcast the input tensor dictionary.
     `group` is used to broadcast the tensors, while `metadata_group` is used
      to broadcast the metadata of the dict (e.g. dict structure, tensor sizes,
@@ -373,7 +371,6 @@ def broadcast_tensor_dict(
     return tensor_dict
 
 def is_in_the_same_node(pg: ProcessGroup):
-    #with torch.cuda.nvtx.range("is_in_the_same_node"):
     """
     This is a collective operation that checks if all processes in the group
     are in the same node. It tests if all processes are attached to the same
@@ -439,8 +436,6 @@ def is_in_the_same_node(pg: ProcessGroup):
 
 def destroy_shm_broadcaster():
     global shm_broadcaster
-    #if shm_broadcaster:
-        #shm_broadcaster.destroy()
     shm_broadcaster = None
 
 atexit.register(destroy_shm_broadcaster)
