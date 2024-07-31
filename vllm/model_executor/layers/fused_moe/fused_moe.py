@@ -465,7 +465,11 @@ def fused_experts(hidden_states: torch.Tensor,
     #print("M1:", hidden_states.shape[0], "M2:", intermediate_cache2.shape[0])
     #if hidden_states.shape[0] <= 256 and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= 256 and not use_fp8 :
     WVSPLTK_M_THRSHLD = 256
-    if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD and not use_fp8 :
+    if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
+            and hidden_states.shape[1] % 8 == 0 \
+            and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
+            and intermediate_cache2.shape[1] % 8 == 0 \
+            and not use_fp8 :
     #if 0:
         config2 = { "BLOCK_SIZE_M": 4 } 
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(

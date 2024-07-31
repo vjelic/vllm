@@ -1861,14 +1861,13 @@ __global__ void wvSpltK_hf_m4_(const int K, const int N, const DTYPE* B,
 
 #undef YTILE
 #undef UNRL
-#define YTILE 6
+#define YTILE 4
 #define UNRL 1
 #define M_BLOCK 4
 
 #undef M
-template <int M>
 __global__ void 
-__launch_bounds__(WvPrGrp*THRDS)
+__launch_bounds__(WvPrGrp * THRDS)
 wvSpltK_fsdMoe_hf_(
                                const DTYPE* __restrict__ A, 
                                const DTYPE* __restrict__ B, 
@@ -1891,6 +1890,7 @@ wvSpltK_fsdMoe_hf_(
 		               const int top_k,
 		               const int CuCount 
 			       ) { 
+  bool PCML = (K * M_in <= 32*1024); 
   union bigType {
     DTYPE h[A_CHUNK];
     float f[A_CHUNK / 2];
@@ -1916,18 +1916,17 @@ wvSpltK_fsdMoe_hf_(
     n = startColumn;
   }
 
-#define PCML
-#ifndef PCML
+  if (!PCML) {
   for (uint32_t k = 0; k < min(K * M_in, 32 * 1024);
        k += THRDS * WvPrGrp * A_CHUNK) {
     uint32_t k_in = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);
 
-    if (k_in >= min(K * M, 32 * 1024)) break;
+    if (k_in >= min(K * M_in, 32 * 1024)) break;
 
     *((bigType*)(&s[k_in])) = *((bigType*)(&A[k_in]));
   }
   __syncthreads();
-#endif
+  }
 
   #define YW (YTILE * WvPrGrp)
   #define TWC (THRDS * WvPrGrp * A_CHUNK)
@@ -1940,6 +1939,8 @@ wvSpltK_fsdMoe_hf_(
   //if (kFit == 0) kFit = TUC;
   kFit = min(kFit, K);
 
+  //if (kFit < TUC) PCML = false; 
+
   float sum[M_BLOCK][YTILE];
 
   //TRITON
@@ -1950,13 +1951,9 @@ wvSpltK_fsdMoe_hf_(
   bool token_mask[M_BLOCK];  // add to A[] /top_k*k
   int off_experts;  // add to B[] *K*N loads
 
-
-#ifdef PCML
   uint32_t Nrndp = (N%YW==0) ? N : (N-N%YW+YW); // Note: All waves in the group need to stay alive to the bitter end, just in case they're needed for cooperative loading of next chunk of A[] into LDS. Such Zomby waves are prevented from doing any real work with continues in the loop below.   
+  if (!PCML) Nrndp = N; //unless its not peicmeal
   while (n < Nrndp) {
-#else 
-  while (n < N) {
-#endif
     //----------------------------------------------------
     for (uint32_t e = 0; e < num_tokens_post_padded[0]; e+=M_BLOCK) { 
     
@@ -2013,8 +2010,7 @@ wvSpltK_fsdMoe_hf_(
 #endif
     //----------------------------------------------------
     for (uint32_t k1 = 0; k1 < K; k1 += THRDS * A_CHUNK * UNRL) {
-
-#ifdef PCML
+    if (PCML) {
         if ((k1 == 0) || (k1 == kBase + kFit)) { // load next chunk of A[] to LDS
                 if (k1 != 0) kBase += kFit;
 		__syncthreads();
@@ -2031,9 +2027,9 @@ wvSpltK_fsdMoe_hf_(
 		}
                 __syncthreads();
 	}
-#endif
-      if (n >= N) continue;
-      if (zomby) continue;
+    } 
+    if (n >= N) continue;
+    if (zomby) continue;
 
 #pragma unroll
       for (uint32_t k2 = 0; k2 < UNRL; k2++) {
@@ -2080,17 +2076,17 @@ wvSpltK_fsdMoe_hf_(
         for (int m = 0; m < M_BLOCK; m++) 
 	{
 	  if (!token_mask[m]) continue;
-#ifdef PCML
+        if (PCML) {
           //bigA[m][k2] = *((const bigType*)(&(s[k_-kBase + kFit*m])));
 	  // skip A[] fetches for Ms that are disabled
           bigA[m][k2] = *((const bigType*)(&(s[k_-kBase + m*kFit ])));
-#else
+        } else {
 	  int aidx = k_ + (offs_token[m]/top_k) * K;
-          //if (aidx + A_CHUNK <= 32 * 1024)
-          //  bigA[m][k2] = *((const bigType*)(&(s[aidx])));
-          //else
+          if (aidx + A_CHUNK <= 32 * 1024)
+            bigA[m][k2] = *((const bigType*)(&(s[aidx])));
+          else
             bigA[m][k2] = *((const bigType*)(&(A[aidx])));
-#endif
+        }
         }
       }
 
@@ -2167,19 +2163,12 @@ wvSpltK_fsdMoe_hf_(
       }
     }
 
-    //zomby waves skip write-out and reduce
-#ifdef PCML
+    //[TODO: this is just to be safe, can probably be removed.
     if (n>=N || zomby) {
         n += CuCount * WvPrGrp * YTILE;
         kBase = 0;
         continue;
     }
-#else
-    if (zomby) {
-        n += CuCount * WvPrGrp * YTILE;
-        continue;
-    }
-#endif
 
     //----------------------------------------------------
     // Final reduction step using shuffle
@@ -2279,8 +2268,7 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
   auto* sorted_token_ids_ = reinterpret_cast<const int*>(sorted_token_ids);
   auto* expert_ids_ = reinterpret_cast<const int*>(expert_ids);
   auto* num_tokens_post_padded_ = reinterpret_cast<const int*>(num_tokens_post_padded); 
-
-  wvSpltK_fsdMoe_hf_<4/*BLOCK_M*/><<<grid, block, 0, stream>>>(
+      wvSpltK_fsdMoe_hf_<<<grid, block, 0, stream>>>(
 	   a, b, c, 
            topk_weights_,
 	   topk_ids_, 
@@ -2292,7 +2280,6 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
 	   stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn,
 	   mul_routed_weight, top_k,
            CuCount);
-
 }
 
 
