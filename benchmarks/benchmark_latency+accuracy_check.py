@@ -13,6 +13,7 @@ from vllm import LLM, SamplingParams
 from vllm.inputs import PromptStrictInputs
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 
+from data_loader import *
 from rpd_handler import *
 
 def main(args: argparse.Namespace):
@@ -51,12 +52,20 @@ def main(args: argparse.Namespace):
         max_tokens=args.output_len,
     )
     print(sampling_params)
-    dummy_prompt_token_ids = np.random.randint(10000,
-                                               size=(args.batch_size,
-                                                     args.input_len))
-    dummy_inputs: List[PromptStrictInputs] = [{
-        "prompt_token_ids": batch
-    } for batch in dummy_prompt_token_ids.tolist()]
+    #dummy_prompt_token_ids = np.random.randint(10000,
+    #                                           size=(args.batch_size,
+    #                                                 args.input_len))
+    #dummy_inputs: List[PromptStrictInputs] = [{
+    #    "prompt_token_ids": batch
+    #} for batch in dummy_prompt_token_ids.tolist()]
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("hpcai-tech/grok-1", trust_remote_code=True)
+    input_tokens = get_input_sentences(args.batch_size, args.input_len, "wikitext", 'wikitext-2-raw-v1', tokenizer)
+    prompts = [tokenizer.decode(sample) for sample in input_tokens]
+
+    #dummy_inputs: List[PromptStrictInputs] = [{
+    #    "prompt_token_ids": batch
+    #} for batch in input_tokens]
 
     def run_to_completion(profile_dir: Optional[str] = None):
         if profile_dir:
@@ -67,16 +76,20 @@ def main(args: argparse.Namespace):
                     ],
                     on_trace_ready=torch.profiler.tensorboard_trace_handler(
                         str(profile_dir))) as p:
-                llm.generate(dummy_inputs,
+                llm.generate(prompts,
                              sampling_params=sampling_params,
                              use_tqdm=False)
             print(p.key_averages())
         else:
             start_time = time.perf_counter()
-            llm.generate(dummy_inputs,
+            outputs = llm.generate(prompts,
                          sampling_params=sampling_params,
                          use_tqdm=False)
             end_time = time.perf_counter()
+            for output in outputs:
+                prompt = output.prompt
+                generated_text = output.outputs[0].text
+                print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
             latency = end_time - start_time
             return latency
 
@@ -151,7 +164,7 @@ if __name__ == '__main__':
                         help='Number of iterations to run for warmup.')
     parser.add_argument('--num-iters',
                         type=int,
-                        default=5,
+                        default=1,
                         help='Number of iterations to run.')
     parser.add_argument('--trust-remote-code',
                         action='store_true',
