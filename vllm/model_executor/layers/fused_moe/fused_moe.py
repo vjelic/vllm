@@ -267,7 +267,7 @@ def fused_moe_persistent_kernel(
 
     # compute when it reaches the invalid region
     pid_m = 0
-    tile_id2 = -1
+    tile_id2 = start_pid - NUM_SMS
     tile_counter = -1
     while pid_m * BLOCK_SIZE_M < num_tokens_post_padded:
         tile_counter += 1
