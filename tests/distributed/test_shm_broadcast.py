@@ -80,4 +80,3 @@ def test_singe_process():
     writer.enqueue([1])
     assert reader.dequeue() == [0]
     assert reader.dequeue() == [1]
-

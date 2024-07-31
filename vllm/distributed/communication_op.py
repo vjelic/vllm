@@ -1,15 +1,15 @@
+import atexit
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
+from multiprocessing import shared_memory
 from typing import Any, Dict, List, Optional, Tuple, Union
+from unittest.mock import patch
 
 import torch
 from torch.distributed import ProcessGroup
 
-from multiprocessing import shared_memory
-from unittest.mock import patch
-import atexit
-
+from vllm.distributed.device_communicators.shm_broadcast import ShmRingBufferIO
 from vllm.utils import is_hip
 
 from .parallel_state import (get_cpu_world_group, get_pp_pynccl_communicator,
@@ -19,8 +19,6 @@ from .parallel_state import (get_cpu_world_group, get_pp_pynccl_communicator,
                              get_tp_ca_communicator,
                              get_tp_pynccl_communicator)
 
-from vllm.distributed.device_communicators.shm_broadcast import (
-    ShmRingBufferIO)
 
 shm_broadcaster: Optional[ShmRingBufferIO] = None
 
@@ -207,6 +205,7 @@ def broadcast(input_: torch.Tensor,
     # Broadcast.
     torch.distributed.broadcast(input_, src=src, group=group)
     return input_
+
 
 def broadcast_object(obj: Optional[Any] = None, src: int = 0):
     """Broadcast the input object.
