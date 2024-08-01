@@ -333,11 +333,11 @@ def run_timing(
 
     end_event.record()
     end_event.synchronize()
-    print(f"config = {config}")
-    print(f"sorted token ids = {sorted_token_ids}")
-    print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    print(f"expert ids = {expert_ids}")
-    print(f"num_tokens_post_padded = {num_tokens_post_padded}")
+    # print(f"config = {config}")
+    # print(f"sorted token ids = {sorted_token_ids}")
+    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    # print(f"expert ids = {expert_ids}")
+    # print(f"num_tokens_post_padded = {num_tokens_post_padded}")
 
     dur_ms = start_event.elapsed_time(end_event) / num_calls
     return dur_ms

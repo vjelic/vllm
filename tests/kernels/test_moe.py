@@ -35,6 +35,12 @@ def torch_moe(a, w1, w2, score, topk):
 @pytest.mark.parametrize("e", [8, 64])
 @pytest.mark.parametrize("topk", [2, 6])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+# @pytest.mark.parametrize("m", [1])
+# @pytest.mark.parametrize("n", [2048])
+# @pytest.mark.parametrize("k", [128])
+# @pytest.mark.parametrize("e", [8])
+# @pytest.mark.parametrize("topk", [2])
+# @pytest.mark.parametrize("dtype", [torch.float16])
 def test_fused_moe(
     m: int,
     n: int,
