@@ -663,17 +663,18 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
                 triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])
             ), )
 
-    # print("==================================================================================")
-    # print(f"grid = NUM_SMS: {min(NUM_SMS, triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N']) )}")
-    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    # print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
-    # print(f"config in moe = {config}")
-    # print(f"A shape = {A.shape}")
-    # print(f"B shape = {B.shape}")
-    # print(f"num valid tokens = {topk_ids.numel()}")
-    # print(f"sorted_token_ids = {sorted_token_ids[0]}")
-    # print(f"expert_ids = {expert_ids}")
-    # print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
+    print("==================================================================================")
+    print(f"grid = NUM_SMS: {min(NUM_SMS, triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N']) )}")
+    print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
+    print(f"config in moe = {config}")
+    print(f"A shape = {A.shape}")
+    print(f"B shape = {B.shape}")
+    print(f"num valid tokens = {topk_ids.numel()}")
+    print(f"sorted_token_ids = {sorted_token_ids[0]}")
+    print(f"expert_ids = {expert_ids}")
+    print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
+    print("Calling persistent kernel")
 
 
     fused_moe_persistent_kernelV2[grid](
@@ -704,6 +705,7 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
         use_fp8=use_fp8,
         **config,
     )
+    print("Exiting kernel")
 
 
 def get_config_file_name(E: int, N: int, dtype: Optional[str]) -> str:
