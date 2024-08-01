@@ -13,6 +13,7 @@ import vllm._moe_C as moe_kernels
 from vllm._C import ops
 from vllm.model_executor.layers.fused_moe import (get_config_file_name,
                                                   invoke_fused_moe_kernel,
+                                                  invoke_fused_moe_persistent_kernel,
                                                   moe_align_block_size)
 
 
@@ -30,11 +31,11 @@ def main(args):
 def get_full_tuning_space():
     configs = []
 
-    block_m_range = [16]
-    block_n_range = [64]
+    block_m_range = [32]
+    block_n_range = [128]
     block_k_range = [128]
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
-    num_warps_range = [4]
+    num_warps_range = [8]
     group_m_range = [1]
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
@@ -290,7 +291,7 @@ def run_timing(
 
     start_event.record()
     for i in range(num_calls):
-        invoke_fused_moe_kernel(
+        invoke_fused_moe_persistent_kernel(
             hidden_states,
             w1,
             intermediate_cache1,
@@ -332,11 +333,14 @@ def run_timing(
 
     end_event.record()
     end_event.synchronize()
-    print(f"config = {config}")
-    print(f"sorted token ids = {sorted_token_ids}")
-    print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    print(f"expert ids = {expert_ids}")
-    print(f"num_tokens_post_padded = {num_tokens_post_padded}")
+    # print(f"intermediate 0 shape = {intermediate_cache1.shape}")
+    # print(f"intermediate 1 shape = {intermediate_cache2.shape}")
+    # print(f"intermediate 2 shape = {intermediate_cache3.shape}")
+    # print(f"config = {config}")
+    # print(f"sorted token ids = {sorted_token_ids}")
+    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    # print(f"expert ids = {expert_ids}")
+    # print(f"num_tokens_post_padded = {num_tokens_post_padded}")
 
     dur_ms = start_event.elapsed_time(end_event) / num_calls
     return dur_ms

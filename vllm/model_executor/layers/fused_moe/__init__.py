@@ -24,5 +24,6 @@ if HAS_TRITON:
         "get_config_file_name",
         "grouped_topk",
         "invoke_fused_moe_kernel",
+        "invoke_fused_moe_persistent_kernel", 
         "moe_align_block_size",
     ]
