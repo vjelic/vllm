@@ -7,32 +7,32 @@ import pytest
 import torch
 from transformers import AutoTokenizer
 
-from vllm.config import VisionLanguageConfig
+from vllm.config import MultiModalConfig
 
 model_and_vl_config = [
     ("llava-hf/llava-1.5-7b-hf",
-     VisionLanguageConfig(
-         image_input_type=VisionLanguageConfig.ImageInputType.PIXEL_VALUES,
+     MultiModalConfig(
+         image_input_type=MultiModalConfig.ImageInputType.PIXEL_VALUES,
          image_feature_size=576,
          image_token_id=32000,
          image_input_shape=(1, 3, 336, 336))),
     ("llava-hf/llava-1.5-7b-hf",
-     VisionLanguageConfig(
-         image_input_type=VisionLanguageConfig.ImageInputType.IMAGE_FEATURES,
+     MultiModalConfig(
+         image_input_type=MultiModalConfig.ImageInputType.IMAGE_FEATURES,
          image_feature_size=576,
          image_token_id=32000,
          image_input_shape=(1, 576, 1024)))
 ]
 
 
-def as_dict(vision_language_config: VisionLanguageConfig) -> Dict:
+def as_dict(multimodal_config: MultiModalConfig) -> Dict:
     """Flatten vision language config to pure args.
 
     Compatible with what llm entrypoint expects.
     """
     result = {}
-    for field in fields(vision_language_config):
-        value = getattr(vision_language_config, field.name)
+    for field in fields(multimodal_config):
+        value = getattr(multimodal_config, field.name)
         if isinstance(value, Enum):
             result[field.name] = value.name.lower()
         elif isinstance(value, tuple):
@@ -43,7 +43,7 @@ def as_dict(vision_language_config: VisionLanguageConfig) -> Dict:
 
 
 def sanitize_vllm_output(vllm_output: Tuple[List[int], str],
-                         vision_language_config: VisionLanguageConfig,
+                         multimodal_config: MultiModalConfig,
                          model_id: str):
     """Sanitize vllm output to be comparable with hf output.
     The function reduces `input_ids` from 1, 32000, 32000, ..., 32000,
@@ -51,12 +51,12 @@ def sanitize_vllm_output(vllm_output: Tuple[List[int], str],
     It also reduces `output_str` from "<image><image>bla" to "bla".
     """
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    image_token_str = tokenizer.decode(vision_language_config.image_token_id)
+    image_token_str = tokenizer.decode(multimodal_config.image_token_id)
     image_token_str_len = len(image_token_str)
     input_ids, output_str = vllm_output
-    sanitized_input_ids = input_ids[0:2] + input_ids[2 + vision_language_config
+    sanitized_input_ids = input_ids[0:2] + input_ids[2 + multimodal_config
                                                      .image_feature_size - 1:]
-    sanitzied_output_str = output_str[vision_language_config.
+    sanitzied_output_str = output_str[multimodal_config.
                                       image_feature_size *
                                       image_token_str_len:]
     return sanitized_input_ids, sanitzied_output_str
@@ -78,7 +78,7 @@ def test_models(hf_runner, vllm_runner, hf_image_prompts, hf_images,
     Note, the text input is also adjusted to abide by vllm contract.
     The text output is sanitized to be able to compare with hf.
     """
-    model_id, vision_language_config = model_and_config
+    model_id, multimodal_config = model_and_config
     hf_model = hf_runner(model_id, dtype=dtype)
     hf_outputs = hf_model.generate_greedy(hf_image_prompts,
                                           max_tokens,
@@ -88,7 +88,7 @@ def test_models(hf_runner, vllm_runner, hf_image_prompts, hf_images,
     vllm_model = vllm_runner(model_id,
                              dtype=dtype,
                              worker_use_ray=worker_use_ray,
-                             **as_dict(vision_language_config))
+                             **as_dict(multimodal_config))
     vllm_outputs = vllm_model.generate_greedy(vllm_image_prompts,
                                               max_tokens,
                                               images=vllm_images)
@@ -100,7 +100,7 @@ def test_models(hf_runner, vllm_runner, hf_image_prompts, hf_images,
     for i in range(len(hf_image_prompts)):
         hf_output_ids, hf_output_str = hf_outputs[i]
         vllm_output_ids, vllm_output_str = sanitize_vllm_output(
-            vllm_outputs[i], vision_language_config, model_id)
+            vllm_outputs[i], multimodal_config, model_id)
         assert hf_output_str == vllm_output_str, (
             f"Test{i}:\nHF: {hf_output_str!r}\nvLLM: {vllm_output_str!r}")
         assert hf_output_ids == vllm_output_ids, (

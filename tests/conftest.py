@@ -10,7 +10,7 @@ from transformers import (AutoModelForCausalLM, AutoProcessor, AutoTokenizer,
                           LlavaConfig, LlavaForConditionalGeneration)
 
 from vllm import LLM, SamplingParams
-from vllm.config import TokenizerPoolConfig, VisionLanguageConfig
+from vllm.config import TokenizerPoolConfig, MultiModalConfig
 from vllm.distributed import destroy_model_parallel
 from vllm.inputs import PromptInputs
 from vllm.logger import init_logger
@@ -89,10 +89,10 @@ def hf_images() -> List[Image.Image]:
 
 @pytest.fixture()
 def vllm_images(request) -> "torch.Tensor":
-    vision_language_config = request.getfixturevalue("model_and_config")[1]
+    multimodal_config = request.getfixturevalue("model_and_config")[1]
     all_images = []
-    if vision_language_config.image_input_type == (
-            VisionLanguageConfig.ImageInputType.IMAGE_FEATURES):
+    if multimodal_config.image_input_type == (
+            MultiModalConfig.ImageInputType.IMAGE_FEATURES):
         filenames = _IMAGE_FEATURES_FILES
     else:
         filenames = _PIXEL_VALUES_FILES
@@ -103,9 +103,9 @@ def vllm_images(request) -> "torch.Tensor":
 
 @pytest.fixture()
 def vllm_image_prompts(request) -> List[str]:
-    vision_language_config = request.getfixturevalue("model_and_config")[1]
+    multimodal_config = request.getfixturevalue("model_and_config")[1]
     return [
-        "<image>" * (vision_language_config.image_feature_size - 1) + p
+        "<image>" * (multimodal_config.image_feature_size - 1) + p
         for p in _IMAGE_PROMPTS
     ]
 

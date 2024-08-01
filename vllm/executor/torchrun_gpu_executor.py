@@ -5,7 +5,7 @@ import torch
 import vllm.envs as envs
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
-                         SpeculativeConfig, VisionLanguageConfig)
+                         SpeculativeConfig, MultiModalConfig)
 from vllm.distributed import (broadcast_object_list,
                               tensor_model_parallel_all_gather)
 from vllm.executor.executor_base import ExecutorAsyncBase
@@ -30,14 +30,14 @@ class TorchrunGPUExecutor(GPUExecutor):
                  scheduler_config: SchedulerConfig,
                  device_config: DeviceConfig, load_config: LoadConfig,
                  lora_config: Optional[LoRAConfig],
-                 vision_language_config: Optional[VisionLanguageConfig],
+                 multimodal_config: Optional[MultiModalConfig],
                  speculative_config: Optional[SpeculativeConfig]) -> None:
         self.local_rank = envs.LOCAL_RANK
         self.rank = envs.RANK
         self.is_driver_worker = self.rank == 0
         super().__init__(model_config, cache_config, parallel_config,
                          scheduler_config, device_config, load_config,
-                         lora_config, vision_language_config,
+                         lora_config, multimodal_config,
                          speculative_config)
 
     def _init_executor(self):

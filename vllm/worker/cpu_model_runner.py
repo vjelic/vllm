@@ -6,7 +6,7 @@ from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, SchedulerConfig,
-                         VisionLanguageConfig)
+                         MultiModalConfig)
 from vllm.distributed import broadcast_tensor_dict
 from vllm.logger import init_logger
 from vllm.model_executor import SamplingMetadata
@@ -30,7 +30,7 @@ class CPUModelRunner:
         cache_config: CacheConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         *args,
@@ -44,7 +44,7 @@ class CPUModelRunner:
         self.device_config = device_config
         self.cache_config = cache_config
         self.lora_config = lora_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 
@@ -71,7 +71,7 @@ class CPUModelRunner:
             model_config=self.model_config,
             load_config=self.load_config,
             device_config=self.device_config,
-            vision_language_config=self.vision_language_config,
+            multimodal_config=self.multimodal_config,
             lora_config=self.lora_config,
             parallel_config=self.parallel_config,
             scheduler_config=self.scheduler_config,
@@ -135,7 +135,7 @@ class CPUModelRunner:
                 slot_mapping.append(slot)
 
         if multi_modal_input_list:
-            assert self.vision_language_config, (
+            assert self.multimodal_config, (
                 "Multi-modal inputs are only supported by "
                 "vision language models.")
             multi_modal_input = torch.cat(multi_modal_input_list,
@@ -326,7 +326,7 @@ class CPUModelRunner:
             "kv_caches": kv_caches,
             "attn_metadata": attn_metadata,
         }
-        if self.vision_language_config:
+        if self.multimodal_config:
             execute_model_kwargs.update({"image_input": multi_modal_input})
 
         hidden_states = model_executable(**execute_model_kwargs)

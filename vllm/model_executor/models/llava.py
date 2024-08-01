@@ -7,7 +7,7 @@ from torch import nn
 from transformers import CLIPVisionModel, LlavaConfig
 
 from vllm.attention import AttentionMetadata
-from vllm.config import CacheConfig, VisionLanguageConfig
+from vllm.config import CacheConfig, MultiModalConfig
 from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
@@ -86,15 +86,15 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
 
     def __init__(self,
                  config: LlavaConfig,
-                 vision_language_config: VisionLanguageConfig,
+                 multimodal_config: MultiModalConfig,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
-        super().__init__(vision_language_config)
+        super().__init__(multimodal_config)
 
         self.config = config
 
-        if self.vision_language_config.image_input_type == (
-                VisionLanguageConfig.ImageInputType.PIXEL_VALUES):
+        if self.multimodal_config.image_input_type == (
+                MultiModalConfig.ImageInputType.PIXEL_VALUES):
             self.vision_tower = CLIPVisionModel(config.vision_config)
         else:
             self.vision_tower = None
@@ -119,10 +119,10 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
 
     def _validate_image_data(self, data: torch.Tensor) -> torch.Tensor:
         if list(data.shape[1:]) != list(
-                self.vision_language_config.image_input_shape[1:]):
+                self.multimodal_config.image_input_shape[1:]):
             raise ValueError(
                 f"The expected image tensor shape is batch dimension plus "
-                f"{self.vision_language_config.image_input_shape[1:]}. "
+                f"{self.multimodal_config.image_input_shape[1:]}. "
                 f"You supplied {data.shape}. "
                 f"If you are using vLLM's entrypoint, make sure your "
                 f"supplied image input is consistent with "
@@ -132,8 +132,8 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
 
     def _parse_and_validate_image_input(
             self, data: object) -> Optional[LlavaImageInputs]:
-        expected_input_type = self.vision_language_config.image_input_type
-        ImageInputType = VisionLanguageConfig.ImageInputType
+        expected_input_type = self.multimodal_config.image_input_type
+        ImageInputType = MultiModalConfig.ImageInputType
 
         if data is None:
             return None
@@ -251,7 +251,7 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
 
             inputs_embeds = _merge_vision_embeddings(
                 input_ids, inputs_embeds, vision_embeddings,
-                self.vision_language_config.image_token_id)
+                self.multimodal_config.image_token_id)
 
             input_ids = None
         else:
