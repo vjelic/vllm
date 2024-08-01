@@ -33,7 +33,7 @@ def get_full_tuning_space():
 
     block_m_range = [32]
     block_n_range = [128]
-    block_k_range = [128]
+    block_k_range = [256]
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [8]
     group_m_range = [1]
@@ -289,8 +289,10 @@ def run_timing(
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
 
+    print(f"Starting run...")
     start_event.record()
     for i in range(num_calls):
+        print(f"i = {i}, num_calls = {num_calls}")
         invoke_fused_moe_persistent_kernel(
             hidden_states,
             w1,
@@ -309,6 +311,7 @@ def run_timing(
                           else tl.float16),
             use_fp8=False,
         )
+        print(f"i = {i}, num_calls = {num_calls}")
 
         # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
@@ -333,14 +336,14 @@ def run_timing(
 
     end_event.record()
     end_event.synchronize()
-    # print(f"intermediate 0 shape = {intermediate_cache1.shape}")
-    # print(f"intermediate 1 shape = {intermediate_cache2.shape}")
-    # print(f"intermediate 2 shape = {intermediate_cache3.shape}")
-    # print(f"config = {config}")
-    # print(f"sorted token ids = {sorted_token_ids}")
-    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    # print(f"expert ids = {expert_ids}")
-    # print(f"num_tokens_post_padded = {num_tokens_post_padded}")
+    print(f"intermediate 0 shape = {intermediate_cache1.shape}")
+    print(f"intermediate 1 shape = {intermediate_cache2.shape}")
+    print(f"intermediate 2 shape = {intermediate_cache3.shape}")
+    print(f"config = {config}")
+    print(f"sorted token ids = {sorted_token_ids}")
+    print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    print(f"expert ids = {expert_ids}")
+    print(f"num_tokens_post_padded = {num_tokens_post_padded}")
 
     dur_ms = start_event.elapsed_time(end_event) / num_calls
     return dur_ms
