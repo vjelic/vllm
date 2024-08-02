@@ -1890,7 +1890,7 @@ wvSpltK_fsdMoe_hf_(
 		               const int top_k,
 		               const int CuCount 
 			       ) { 
-  bool PCML = (K * M_in <= 32*1024); 
+  bool PCML = (K * M_in > 32*1024); 
   union bigType {
     DTYPE h[A_CHUNK];
     float f[A_CHUNK / 2];
@@ -1956,6 +1956,7 @@ wvSpltK_fsdMoe_hf_(
   while (n < Nrndp) {
     //----------------------------------------------------
     for (uint32_t e = 0; e < num_tokens_post_padded[0]; e+=M_BLOCK) { 
+    kBase = 0;
     
     for (int m=0; m<M_BLOCK; m++) {
 	// get the list of Ms corresponding to this M_BLOCK
