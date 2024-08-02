@@ -31,9 +31,9 @@ def main(args):
 def get_full_tuning_space():
     configs = []
 
-    block_m_range = [32]
+    block_m_range = [4]
     block_n_range = [128]
-    block_k_range = [256]
+    block_k_range = [128]
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [8]
     group_m_range = [1]
@@ -106,7 +106,7 @@ def run_grid(bs, model, TP):
     num_total_experts = 8
     top_k = 2
     tp_size = TP
-    num_calls = 100
+    num_calls = 10
 
     num_warmup_trials = 1
     num_trials = 10

@@ -479,10 +479,16 @@ def fused_moe_persistent_kernelV2(
                 other=0.0
             )
             # We accumulate along the K dimension.
-            if use_fp8:
-                accumulator = tl.dot(a, b, acc=accumulator)
-            else:
-                accumulator += tl.dot(a, b)
+            # if use_fp8:
+            #     accumulator = tl.dot(a, b, acc=accumulator)
+            #     a_bc = a.reshape(BLOCK_SIZE_M, 1, TILE_SIZE_K).broadcast_to(BLOCK_SIZE_M, BLOCK_SIZE_N, TILE_SIZE_K)
+            #     b_bc = b.reshape(1, BLOCK_SIZE_N, TILE_SIZE_K).broadcast_to(BLOCK_SIZE_M, BLOCK_SIZE_N, TILE_SIZE_K)
+            # else:
+            a_bc = a.reshape(BLOCK_SIZE_M, 1, BLOCK_SIZE_K).broadcast_to(BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
+            b_bc = b.reshape(1, BLOCK_SIZE_N, BLOCK_SIZE_K).broadcast_to(BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
+            a_f32 = a_bc.to(tl.float32)
+            b_f32 = b_bc.to(tl.float32)
+            accumulator += tl.sum(a_f32 * b_f32, axis=-1)
             # Advance the ptrs to the next K block.
             a_ptrs += BLOCK_SIZE_K * stride_ak
             b_ptrs += BLOCK_SIZE_K * stride_bk
