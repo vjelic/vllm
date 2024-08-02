@@ -1954,7 +1954,7 @@ wvSpltK_fsdMoe_hf_(
   uint32_t Nrndp = (N%YW==0) ? N : (N-N%YW+YW); // Note: All waves in the group need to stay alive to the bitter end, just in case they're needed for cooperative loading of next chunk of A[] into LDS. Such Zomby waves are prevented from doing any real work with continues in the loop below.   
   if (!PCML) Nrndp = N; //unless its not peicmeal
   while (n < Nrndp) {
-    //----------------------------------------------------
+    kBase = 0;
     for (uint32_t e = 0; e < num_tokens_post_padded[0]; e+=M_BLOCK) { 
     kBase = 0;
     
@@ -1967,12 +1967,6 @@ wvSpltK_fsdMoe_hf_(
     //set the expert for this M_BLOCK
     off_experts = expert_ids[e/M_BLOCK];
     
-    // If all M in this block are dead, make it a zomby, for now.
-    // note: wave needs to stay alive to participate in LDS loading
-    bool zomby = true;
-    for (int m=0; m<M_BLOCK; m++) if (token_mask[m]) { zomby = false; break; }
-    if (zomby) continue;
-
     for (int i = 0; i < YTILE; i++)
       for (int m = 0; m < M_BLOCK; m++) 
 	      sum[m][i] = 0;
@@ -2029,8 +2023,9 @@ wvSpltK_fsdMoe_hf_(
                 __syncthreads();
 	}
     } 
+    
+    // kept alive just to participate in A[] loads
     if (n >= N) continue;
-    if (zomby) continue;
 
 #pragma unroll
       for (uint32_t k2 = 0; k2 < UNRL; k2++) {
@@ -2164,13 +2159,6 @@ wvSpltK_fsdMoe_hf_(
       }
     }
 
-    //[TODO: this is just to be safe, can probably be removed.
-    if (n>=N || zomby) {
-        n += CuCount * WvPrGrp * YTILE;
-        kBase = 0;
-        continue;
-    }
-
     //----------------------------------------------------
     // Final reduction step using shuffle
     //----------------------------------------------------
@@ -2217,7 +2205,6 @@ wvSpltK_fsdMoe_hf_(
     }
 
     n += CuCount * WvPrGrp * YTILE;
-    kBase = 0;
 
     // if (threadIdx.x == 0)
     // n = atomicAdd(((unsigned int*)(C)), YTILE);
