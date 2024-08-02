@@ -464,7 +464,7 @@ def fused_experts(hidden_states: torch.Tensor,
     #print(intermediate_cache2.shape) 
     #print("M1:", hidden_states.shape[0], "M2:", intermediate_cache2.shape[0])
     #if hidden_states.shape[0] <= 256 and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= 256 and not use_fp8 :
-    WVSPLTK_M_THRSHLD = 256
+    WVSPLTK_M_THRSHLD = 16
     if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
             and hidden_states.shape[1] % 8 == 0 \
             and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
