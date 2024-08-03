@@ -66,6 +66,7 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
                      const int stride_bn,
                      const int stride_cm,
                      const int stride_cn,
+                     const int m_blck_sz,
 		     const bool mul_routed_weight, 
 		     const int top_k,
 		     cudaStream_t stream, const int CuCount);
@@ -85,6 +86,7 @@ void wvSpltK_fsdMoe(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c,
                      const int stride_bn,
                      const int stride_cm,
                      const int stride_cn,
+                     const int m_blck_sz,
 		     const bool mul_routed_weight, 
 		     const int top_k,
                      const int CuCount) {
@@ -100,7 +102,7 @@ void wvSpltK_fsdMoe(at::Tensor in_a, at::Tensor in_b, at::Tensor out_c,
 	   M, N, K, EM,
 	   num_valid_tokens,
 	   stride_am, stride_ak,stride_be,stride_bk,stride_bn,stride_cm,stride_cn,
-	   mul_routed_weight,top_k,
+	   m_blck_sz, mul_routed_weight,top_k,
            at::cuda::getCurrentCUDAStream(), CuCount);
 }
 

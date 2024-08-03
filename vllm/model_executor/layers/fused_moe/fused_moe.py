@@ -234,7 +234,7 @@ def invoke_mega_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tens
                             sorted_token_ids: torch.Tensor,
                             expert_ids: torch.Tensor,
                             num_tokens_post_padded: torch.Tensor,
-                            mul_routed_weight: bool, top_k: int,
+                            m_blck_sz: int, mul_routed_weight: bool, top_k: int,
                             use_fp8: bool) -> None:
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
@@ -261,6 +261,7 @@ def invoke_mega_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tens
         B.stride(1),
         C.stride(1),
         C.stride(2),
+        m_blck_sz,
         mul_routed_weight,
         top_k,
         80)
@@ -464,16 +465,19 @@ def fused_experts(hidden_states: torch.Tensor,
     #print(intermediate_cache2.shape) 
     #print("M1:", hidden_states.shape[0], "M2:", intermediate_cache2.shape[0])
     #if hidden_states.shape[0] <= 256 and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= 256 and not use_fp8 :
-    WVSPLTK_M_THRSHLD = 16
+    WVSPLTK_M_THRSHLD = 16  
+    m_blck_sz = -(-(M*topk_ids.shape[1]*3)//E) # target 75%  of expert distribution for this M size
+
     if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
             and hidden_states.shape[1] % 8 == 0 \
             and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
             and intermediate_cache2.shape[1] % 8 == 0 \
             and not use_fp8 :
     #if 0:
-        config2 = { "BLOCK_SIZE_M": 4 } 
+        #print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-            topk_ids, config2['BLOCK_SIZE_M'], E)
+            topk_ids, m_blck_sz, E) # target 75% of expert distribution for this M size
+            #topk_ids, config2['BLOCK_SIZE_M'],E)
         #print("\nsrtd_tkn:", sorted_token_ids)
         invoke_mega_fused_moe_kernel(hidden_states,
                             w1,
@@ -483,6 +487,7 @@ def fused_experts(hidden_states: torch.Tensor,
                             sorted_token_ids,
                             expert_ids,
                             num_tokens_post_padded,
+                            m_blck_sz,
                             False,
                             topk_ids.shape[1],
                             use_fp8=use_fp8)
@@ -500,6 +505,7 @@ def fused_experts(hidden_states: torch.Tensor,
                             sorted_token_ids,
                             expert_ids,
                             num_tokens_post_padded,
+                            m_blck_sz,
                             True,
                             1,
                             use_fp8=use_fp8)

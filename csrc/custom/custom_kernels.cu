@@ -1859,13 +1859,14 @@ __global__ void wvSpltK_hf_m4_(const int K, const int N, const DTYPE* B,
   }
 }
 
+#undef M
 #undef YTILE
 #undef UNRL
 #define YTILE 4
 #define UNRL 1
-#define M_BLOCK 4
+//#define M_BLOCK 4
 
-#undef M
+template <int M_BLOCK>
 __global__ void 
 __launch_bounds__(WvPrGrp * THRDS)
 wvSpltK_fsdMoe_hf_(
@@ -2243,6 +2244,7 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
                      const int stride_bn,
                      const int stride_cm,
                      const int stride_cn,
+		     const int m_blck_sz, 
 		     const bool mul_routed_weight, 
 		     const int top_k,
 		     cudaStream_t stream, const int CuCount) {
@@ -2256,18 +2258,26 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
   auto* sorted_token_ids_ = reinterpret_cast<const int*>(sorted_token_ids);
   auto* expert_ids_ = reinterpret_cast<const int*>(expert_ids);
   auto* num_tokens_post_padded_ = reinterpret_cast<const int*>(num_tokens_post_padded); 
-      wvSpltK_fsdMoe_hf_<<<grid, block, 0, stream>>>(
-	   a, b, c, 
-           topk_weights_,
-	   topk_ids_, 
-	   sorted_token_ids_, 
-	   expert_ids_,
-           num_tokens_post_padded_,
-	   M_in, N_in, K_in, E,
-	   num_valid_tokens,
-	   stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn,
-	   mul_routed_weight, top_k,
-           CuCount);
+  switch (m_blck_sz) {
+    case 1:
+      wvSpltK_fsdMoe_hf_<1><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+    case 2:
+      wvSpltK_fsdMoe_hf_<2><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+    case 3:
+      wvSpltK_fsdMoe_hf_<3><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+    case 4:
+      wvSpltK_fsdMoe_hf_<4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+    case 5:
+      wvSpltK_fsdMoe_hf_<5><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+    case 6:
+      wvSpltK_fsdMoe_hf_<6><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+  }
 }
 
 
