@@ -1862,11 +1862,10 @@ __global__ void wvSpltK_hf_m4_(const int K, const int N, const DTYPE* B,
 #undef M
 #undef YTILE
 #undef UNRL
-#define YTILE 4
 #define UNRL 1
 //#define M_BLOCK 4
 
-template <int M_BLOCK>
+template <int M_BLOCK, int YTILE>
 __global__ void 
 __launch_bounds__(WvPrGrp * THRDS)
 wvSpltK_fsdMoe_hf_(
@@ -1929,9 +1928,9 @@ wvSpltK_fsdMoe_hf_(
   __syncthreads();
   }
 
-  #define YW (YTILE * WvPrGrp)
-  #define TWC (THRDS * WvPrGrp * A_CHUNK)
-  #define TUC (THRDS * UNRL * A_CHUNK)
+  int YW = (YTILE * WvPrGrp);
+  int TWC = (THRDS * WvPrGrp * A_CHUNK);
+  int TUC = (THRDS * UNRL * A_CHUNK);
   uint32_t kBase = 0;
   //find biggest k size that fits in LDS
   uint32_t kFit = (32*1024)/M_BLOCK;
@@ -1974,36 +1973,13 @@ wvSpltK_fsdMoe_hf_(
 
     bigType bigA[M_BLOCK][UNRL];
     bigType bigB0[UNRL];
-#if (YTILE >= 2)
     bigType bigB1[UNRL];
-#endif
-#if (YTILE >= 3)
     bigType bigB2[UNRL];
-#endif
-#if (YTILE >= 4)
     bigType bigB3[UNRL];
-#endif
-#if (YTILE >= 5)
     bigType bigB4[UNRL];
-#endif
-#if (YTILE >= 6)
     bigType bigB5[UNRL];
-#endif
-#if (YTILE >= 7)
     bigType bigB6[UNRL];
-#endif
-#if (YTILE >= 8)
     bigType bigB7[UNRL];
-#endif
-#if (YTILE >= 9)
-    bigType bigB8[UNRL];
-#endif
-#if (YTILE >= 10)
-    bigType bigB9[UNRL];
-#endif
-#if (YTILE >= 11)
-    bigType bigB10[UNRL];
-#endif
     //----------------------------------------------------
     for (uint32_t k1 = 0; k1 < K; k1 += THRDS * A_CHUNK * UNRL) {
     if (PCML) {
@@ -2038,27 +2014,20 @@ wvSpltK_fsdMoe_hf_(
 	const half* B_ = &B[(n + 0) * K + k_ + off_experts*K*N];
         bigB0[k2].h8 = (loadnt((half8*)(&B_[0 * K])));
         //----------------------------------------------------
-#if (YTILE >= 2)
+if (YTILE >= 2)
         bigB1[k2].h8 = (loadnt((half8*)(&B_[1 * K])));
-#endif
-#if (YTILE >= 3)
+if (YTILE >= 3)
         bigB2[k2].h8 = (loadnt((half8*)(&B_[2 * K])));
-#endif
-#if (YTILE >= 4)
+if (YTILE >= 4)
         bigB3[k2].h8 = (loadnt((half8*)(&B_[3 * K])));
-#endif
-#if (YTILE >= 5)
+if (YTILE >= 5)
         bigB4[k2].h8 = (loadnt((half8*)(&B_[4 * K])));
-#endif
-#if (YTILE >= 6)
+if (YTILE >= 6)
         bigB5[k2].h8 = (loadnt((half8*)(&B_[5 * K])));
-#endif
-#if (YTILE >= 7)
+if (YTILE >= 7)
         bigB6[k2].h8 = (loadnt((half8*)(&B_[6 * K])));
-#endif
-#if (YTILE >= 8)
+if (YTILE >= 8)
         bigB7[k2].h8 = (loadnt((half8*)(&B_[7 * K])));
-#endif
       }
 
       // Fetch activation matrix from either just LDS or from both LDS / memory
@@ -2105,56 +2074,30 @@ wvSpltK_fsdMoe_hf_(
                 : "=v"(sum[m][0])
                 : "0"(sum[m][0]), "v"(bigA[m][k2].f[b]), "v"(bigB0[k2].f[b]));
 
-#if (YTILE >= 2)
+if (YTILE >= 2)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][1])
                 : "0"(sum[m][1]), "v"(bigA[m][k2].f[b]), "v"(bigB1[k2].f[b]));
-#endif
-#if (YTILE >= 3)
+if (YTILE >= 3)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][2])
                 : "0"(sum[m][2]), "v"(bigA[m][k2].f[b]), "v"(bigB2[k2].f[b]));
-#endif
-#if (YTILE >= 4)
+if (YTILE >= 4)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][3])
                 : "0"(sum[m][3]), "v"(bigA[m][k2].f[b]), "v"(bigB3[k2].f[b]));
-#endif
-#if (YTILE >= 5)
+if (YTILE >= 5)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][4])
                 : "0"(sum[m][4]), "v"(bigA[m][k2].f[b]), "v"(bigB4[k2].f[b]));
-#endif
-#if (YTILE >= 6)
+if (YTILE >= 6)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][5])
                 : "0"(sum[m][5]), "v"(bigA[m][k2].f[b]), "v"(bigB5[k2].f[b]));
-#endif
-#if (YTILE >= 7)
+if (YTILE >= 7)
             asm("v_dot2c_f32_f16 %0, %2, %3"
                 : "=v"(sum[m][6])
                 : "0"(sum[m][6]), "v"(bigA[m][k2].f[b]), "v"(bigB6[k2].f[b]));
-#endif
-#if (YTILE >= 8)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][7])
-                : "0"(sum[m][7]), "v"(bigA[m][k2].f[b]), "v"(bigB7[k2].f[b]));
-#endif
-#if (YTILE >= 9)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][8])
-                : "0"(sum[m][8]), "v"(bigA[m][k2].f[b]), "v"(bigB8[k2].f[b]));
-#endif
-#if (YTILE >= 10)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][9])
-                : "0"(sum[m][9]), "v"(bigA[m][k2].f[b]), "v"(bigB9[k2].f[b]));
-#endif
-#if (YTILE >= 11)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][10])
-                : "0"(sum[m][10]), "v"(bigA[m][k2].f[b]), "v"(bigB10[k2].f[b]));
-#endif
           }
         }
       }
@@ -2260,22 +2203,22 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
   auto* num_tokens_post_padded_ = reinterpret_cast<const int*>(num_tokens_post_padded); 
   switch (m_blck_sz) {
     case 1:
-      wvSpltK_fsdMoe_hf_<1><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<1,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
     case 2:
-      wvSpltK_fsdMoe_hf_<2><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<2,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
     case 3:
-      wvSpltK_fsdMoe_hf_<3><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<3,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
     case 4:
-      wvSpltK_fsdMoe_hf_<4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<4,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
     case 5:
-      wvSpltK_fsdMoe_hf_<5><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<5,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
     case 6:
-      wvSpltK_fsdMoe_hf_<6><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      wvSpltK_fsdMoe_hf_<6,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
   }
 }
