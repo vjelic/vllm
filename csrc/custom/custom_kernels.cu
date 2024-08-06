@@ -1972,14 +1972,7 @@ wvSpltK_fsdMoe_hf_(
 	      sum[m][i] = 0;
 
     bigType bigA[M_BLOCK][UNRL];
-    bigType bigB0[UNRL];
-    bigType bigB1[UNRL];
-    bigType bigB2[UNRL];
-    bigType bigB3[UNRL];
-    bigType bigB4[UNRL];
-    bigType bigB5[UNRL];
-    bigType bigB6[UNRL];
-    bigType bigB7[UNRL];
+    bigType bigB[YTILE][UNRL];
     //----------------------------------------------------
     for (uint32_t k1 = 0; k1 < K; k1 += THRDS * A_CHUNK * UNRL) {
     if (PCML) {
@@ -2012,22 +2005,8 @@ wvSpltK_fsdMoe_hf_(
 
         // load only 1 column of weights, despite the moe-gate, made possible by expert list.
 	const half* B_ = &B[(n + 0) * K + k_ + off_experts*K*N];
-        bigB0[k2].h8 = (loadnt((half8*)(&B_[0 * K])));
-        //----------------------------------------------------
-if (YTILE >= 2)
-        bigB1[k2].h8 = (loadnt((half8*)(&B_[1 * K])));
-if (YTILE >= 3)
-        bigB2[k2].h8 = (loadnt((half8*)(&B_[2 * K])));
-if (YTILE >= 4)
-        bigB3[k2].h8 = (loadnt((half8*)(&B_[3 * K])));
-if (YTILE >= 5)
-        bigB4[k2].h8 = (loadnt((half8*)(&B_[4 * K])));
-if (YTILE >= 6)
-        bigB5[k2].h8 = (loadnt((half8*)(&B_[5 * K])));
-if (YTILE >= 7)
-        bigB6[k2].h8 = (loadnt((half8*)(&B_[6 * K])));
-if (YTILE >= 8)
-        bigB7[k2].h8 = (loadnt((half8*)(&B_[7 * K])));
+        for (int y=0; y<YTILE; y++)
+	    bigB[y][k2].h8 = (loadnt((half8*)(&B_[y * K])));
       }
 
       // Fetch activation matrix from either just LDS or from both LDS / memory
@@ -2069,36 +2048,11 @@ if (YTILE >= 8)
           // Do the matrix multiplication of activation and weight matrix
           // - Remember the accumulation is happening for K-split of 64!
 #pragma unroll
-          for (uint32_t b = 0; b < A_CHUNK / 2; b++) {
+          for (uint32_t b = 0; b < A_CHUNK / 2; b++)
+           for (int y=0; y<YTILE; y++)
             asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][0])
-                : "0"(sum[m][0]), "v"(bigA[m][k2].f[b]), "v"(bigB0[k2].f[b]));
-
-if (YTILE >= 2)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][1])
-                : "0"(sum[m][1]), "v"(bigA[m][k2].f[b]), "v"(bigB1[k2].f[b]));
-if (YTILE >= 3)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][2])
-                : "0"(sum[m][2]), "v"(bigA[m][k2].f[b]), "v"(bigB2[k2].f[b]));
-if (YTILE >= 4)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][3])
-                : "0"(sum[m][3]), "v"(bigA[m][k2].f[b]), "v"(bigB3[k2].f[b]));
-if (YTILE >= 5)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][4])
-                : "0"(sum[m][4]), "v"(bigA[m][k2].f[b]), "v"(bigB4[k2].f[b]));
-if (YTILE >= 6)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][5])
-                : "0"(sum[m][5]), "v"(bigA[m][k2].f[b]), "v"(bigB5[k2].f[b]));
-if (YTILE >= 7)
-            asm("v_dot2c_f32_f16 %0, %2, %3"
-                : "=v"(sum[m][6])
-                : "0"(sum[m][6]), "v"(bigA[m][k2].f[b]), "v"(bigB6[k2].f[b]));
-          }
+                : "=v"(sum[m][y])
+                : "0"(sum[m][y]), "v"(bigA[m][k2].f[b]), "v"(bigB[y][k2].f[b]));
         }
       }
     }
@@ -2149,10 +2103,6 @@ if (YTILE >= 7)
     }
 
     n += CuCount * WvPrGrp * YTILE;
-
-    // if (threadIdx.x == 0)
-    // n = atomicAdd(((unsigned int*)(C)), YTILE);
-    // n = __shfl(n, 0, 64);
 
     // Check whether there will be fragmenation!
     // This will happen only for the last wave!
@@ -2220,6 +2170,10 @@ void wvSpltK_fsdMoe_(void* in_a, void* in_b, void* out_c,
     case 6:
       wvSpltK_fsdMoe_hf_<6,4><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
       break;
+    case 16:
+      wvSpltK_fsdMoe_hf_<16,5><<<grid, block, 0, stream>>>(a, b, c, topk_weights_, topk_ids_, sorted_token_ids_, expert_ids_, num_tokens_post_padded_, M_in, N_in, K_in, E, num_valid_tokens, stride_am, stride_ak, stride_be, stride_bk, stride_bn, stride_cm, stride_cn, mul_routed_weight, top_k, CuCount);
+      break;
+
   }
 }
 
