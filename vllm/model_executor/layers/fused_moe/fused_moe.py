@@ -465,8 +465,10 @@ def fused_experts(hidden_states: torch.Tensor,
     #print(intermediate_cache2.shape) 
     #print("M1:", hidden_states.shape[0], "M2:", intermediate_cache2.shape[0])
     #if hidden_states.shape[0] <= 256 and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= 256 and not use_fp8 :
-    WVSPLTK_M_THRSHLD = 16  
+    WVSPLTK_M_THRSHLD = 32 
     m_blck_sz = -(-(M*topk_ids.shape[1]*3)//E) # target 75%  of expert distribution for this M size
+    if (m_blck_sz >= 12):
+        m_blck_sz = 16
 
     if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
             and hidden_states.shape[1] % 8 == 0 \
@@ -474,13 +476,31 @@ def fused_experts(hidden_states: torch.Tensor,
             and intermediate_cache2.shape[1] % 8 == 0 \
             and not use_fp8 :
     #if 0:
-        #print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
+        print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
             topk_ids, m_blck_sz, E) # target 75% of expert distribution for this M size
             #topk_ids, config2['BLOCK_SIZE_M'],E)
         #print("\nsrtd_tkn:", sorted_token_ids)
+
+        if m_blck_sz >= 16 :
+            w1_ = torch.clone(w1)
+            w1_ = w1_.view(w1.shape[0], w1.shape[1]//16, 16, w1.shape[2]//128, 16, 8);
+            w1_ = w1_.permute(0, 1, 4, 3, 2, 5)
+            w1_ = w1_.contiguous()
+            w1_ = w1_.view(w1.shape[0],w1.shape[1],w1.shape[2]);
+            w2_ = torch.clone(w2)
+            w2_ = w2_.view(w2.shape[0], w2.shape[1]//16, 16, w2.shape[2]//128, 16, 8);
+            w2_ = w2_.permute(0, 1, 4, 3, 2, 5)
+            w2_ = w2_.contiguous()
+            w2_ = w2_.view(w2.shape[0],w2.shape[1],w2.shape[2]);
+        else :
+            w1_ = w1
+            w2_ = w2
+
+        #print(w1_)
+
         invoke_mega_fused_moe_kernel(hidden_states,
-                            w1,
+                            w1_,
                             intermediate_cache1,
                             topk_weights,
                             topk_ids,
@@ -498,7 +518,7 @@ def fused_experts(hidden_states: torch.Tensor,
         #print("-----------------------------")
            
         invoke_mega_fused_moe_kernel(intermediate_cache2,
-                            w2,
+                            w2_,
                             intermediate_cache3,
                             topk_weights,
                             topk_ids,
