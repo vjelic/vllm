@@ -2338,14 +2338,14 @@ bool PCML = true;//(K * M_in > 32*1024);
             bigA[m][k2] = *((const bigType*)(&(A[aidx])));
         }
         }
-      }
+      //}
 
       // Do the matrix multiplication in interleaved manner
-#pragma unroll
-      for (uint32_t k2 = 0; k2 < UNRL; k2++) {
-        uint32_t k = k1 + k2 * THRDS * A_CHUNK;
-        uint32_t k_ = k + threadIdx.x * A_CHUNK;
-        if (k_ >= K) break;
+//#pragma unroll
+      //for (uint32_t k2 = 0; k2 < UNRL; k2++) {
+      //  uint32_t k = k1 + k2 * THRDS * A_CHUNK;
+      //  uint32_t k_ = k + threadIdx.x * A_CHUNK;
+      //  if (k_ >= K) break;
 
 #ifdef USEMFMA
 	bigType stgB;
