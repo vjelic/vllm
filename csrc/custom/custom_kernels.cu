@@ -2118,7 +2118,7 @@ wvSpltK_fsdMoe_hf_(
 
 #define mfmaTILEn 16 
 #define mfmaTILEk 4 
-//#define USEMFMA
+#define USEMFMA
 
 template <int M_BLOCK, int YTILE>
 __global__ void 
@@ -2150,7 +2150,7 @@ using halfCxT = __attribute__((__vector_size__(mfmaTILEn * A_CHUNK / 2 * sizeof(
 using halfC   = __attribute__((__vector_size__(A_CHUNK / 2 * sizeof(float)))) float;
 using halfT   = __attribute__((__vector_size__(mfmaTILEk / 2 * sizeof(float)))) float;
 				     
-bool PCML = (K * M_in > 32*1024); 
+bool PCML = true;//(K * M_in > 32*1024); 
   union bigType {
     DTYPE h[A_CHUNK];
     float f[A_CHUNK / 2];
@@ -2320,7 +2320,10 @@ bool PCML = (K * M_in > 32*1024);
 
         for (int m = 0; m < M_BLOCK; m++) 
 	{
+#ifdef USEMFMA
+#else
 	  if (!token_mask[m]) continue;
+#endif
         if (PCML) {
           //bigA[m][k2] = *((const bigType*)(&(s[k_-kBase + kFit*m])));
 	  // skip A[] fetches for Ms that are disabled
