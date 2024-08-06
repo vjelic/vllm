@@ -2260,7 +2260,8 @@ bool PCML = true;//(K * M_in > 32*1024);
         if ((k1 == 0) || (k1 == kBase + kFit)) { // load next chunk of A[] to LDS
                 if (k1 != 0) kBase += kFit;
 		__syncthreads();
-                for (uint32_t m = 0; m < M_BLOCK; m++)
+                for (uint32_t m = 0; m < M_BLOCK; m++) {
+	        if (!token_mask[m]) continue;
                 for (uint32_t k = 0; k < kFit; k += TWC) {
 #ifdef USEMFMA
                     uint32_t kOff = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);    
@@ -2285,6 +2286,7 @@ bool PCML = true;//(K * M_in > 32*1024);
                     if (kOff >= kFit) break;
 		    *((bigType*)(&s[k_ot])) = *((bigType*)(&A[k_in]));
 #endif
+		}
 		}
                 __syncthreads();
 	}
