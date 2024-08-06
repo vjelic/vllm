@@ -690,7 +690,7 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
         expert_ids,
         num_tokens_post_padded,
         B.shape[1],
-        B.shape[2],
+        B.shape[2] - 128,
         sorted_token_ids.shape[0],
         topk_ids.numel(),
         A.stride(0),
