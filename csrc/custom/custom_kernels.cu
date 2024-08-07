@@ -2263,16 +2263,17 @@ bool PCML = true;//(K * M_in > 32*1024);
         if ((k1 == 0) || (k1 == kBase + kFit)) { // load next chunk of A[] to LDS
                 if (k1 != 0) kBase += kFit;
 		__syncthreads();
-                for (uint32_t m = 0; m < M_BLOCK; m++) {
-	        if (!token_mask[m]) continue;
-                for (uint32_t k = 0; k < kFit; k += TWC) {
-#ifdef USEMFMA
-                    uint32_t kOff = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);    
-                    uint32_t k_in = kBase + (offs_token[m]/top_k) * K + kOff;
-                    uint32_t k_ot =         m * K + kOff; // yes, K should be kFit here. but we'lltranspose this below anyway
+		// TODO: this requires TWC to be a multple of M_BLOCK?
+                for (uint32_t k = 0; k < kFit; k += TWC/M_BLOCK) {
+                    uint32_t kOff = k + (((threadIdx.y * THRDS + threadIdx.x) / M_BLOCK ) * A_CHUNK);    
                     if (kBase + kOff >= K) break;
                     if (kOff >= kFit) break;
-
+#ifdef USEMFMA
+                    int m = threadIdx.x % M_BLOCK;
+                    //for (uint32_t m = 0; m < M_BLOCK; m++) {
+ 	            if (!token_mask[m]) continue;
+                    uint32_t k_in = kBase + (offs_token[m]/top_k) * K + kOff;
+                    uint32_t k_ot =         m * K + kOff; // yes, K should be kFit here. but we'lltranspose this below anyway
                     // Transpose A for MFMAs
 	            uint32_t k_in_x = (k_ot / A_CHUNK) % (K / A_CHUNK);
 	            uint32_t k_in_y = (k_ot / A_CHUNK) / (K / A_CHUNK);
@@ -2281,15 +2282,16 @@ bool PCML = true;//(K * M_in > 32*1024);
 	            k_ot = (k_ot_y * (kFit / A_CHUNK) + k_ot_x) * A_CHUNK;
 
                     *((bigType*)(&s[k_ot])) = *((bigType*)(&A[k_in]));
+		    //}
 #else
-	            uint32_t kOff = k + ((threadIdx.y * THRDS + threadIdx.x) * A_CHUNK);    
+                    int m = threadIdx.x % M_BLOCK;
+                    //for (uint32_t m = 0; m < M_BLOCK; m++) {
+ 	            if (!token_mask[m]) continue;
                     uint32_t k_in = kBase + (offs_token[m]/top_k) * K    + kOff;
                     uint32_t k_ot =         m * kFit + kOff;
-                    if (kBase + kOff >= K) break;
-                    if (kOff >= kFit) break;
 		    *((bigType*)(&s[k_ot])) = *((bigType*)(&A[k_in]));
+		    //}
 #endif
-		}
 		}
                 __syncthreads();
 	}
