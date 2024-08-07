@@ -640,7 +640,7 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
                             num_tokens_post_padded: torch.Tensor,
                             mul_routed_weight: bool, top_k: int,
                             config: Dict[str, Any], compute_type: tl.dtype,
-                            use_fp8: bool) -> None:
+                            use_fp8: bool, pgm=None) -> None:
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
 
@@ -658,48 +658,109 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
                 triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])
             ), )
 
-    # print("==================================================================================")
-    # print(f"grid = NUM_SMS: {min(NUM_SMS, triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N']) )}")
-    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    # print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
-    # print(f"config in moe = {config}")
-    # print(f"A shape = {A.shape}")
-    # print(f"B shape = {B.shape}")
-    # print(f"num valid tokens = {topk_ids.numel()}")
-    # print(f"sorted_token_ids = {sorted_token_ids[0]}")
-    # print(f"expert_ids = {expert_ids}")
-    # print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
-    # print("Calling persistent kernel")
+    #print("==================================================================================")
+    #print(f"grid = NUM_SMS: {min(NUM_SMS, triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N']) )}")
+    #print(f"sorted token ids shape = {sorted_token_ids.shape}")
+    #print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
+    #print(f"config in moe = {config}")
+    #print(f"A shape = {A.shape}")
+    #print(f"B shape = {B.shape}")
+    #print(f"num valid tokens = {topk_ids.numel()}")
+    #print(f"sorted_token_ids = {sorted_token_ids[0]}")
+    #print(f"expert_ids = {expert_ids}")
+    #print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
+    #print("Calling persistent kernel")
+
+    #print("A", A)
+    #print("B", B)
+    #print("C", C)
+    #print("A_scale", A_scale)
+    #print("B_scale", B_scale)
+    #print("topk_weights", topk_weights)
+    #print("sorted_token_ids", sorted_token_ids)
+    #print("expert_ids", expert_ids)
+    #print("num_tokens_post_padded", num_tokens_post_padded)
+    #print("B.shape[1]", B.shape[1])
+    #print("B.shape[2] - 128", B.shape[2] - 128)
+    #print("sorted_token_ids.shape[0]", sorted_token_ids.shape[0])
+    #print("topk_ids.numel()", topk_ids.numel())
+    #print("A.stride(0)", A.stride(0))
+    #print("A.stride(1)", A.stride(1))
+    #print("B.stride(0)", B.stride(0))
+    #print("B.stride(2)", B.stride(2))
+    #print("B.stride(1)", B.stride(1))
+    #print("C.stride(1)", C.stride(1))
+    #print("C.stride(2)", C.stride(2))
+    #print("NUM_SMS=NUM_SMS", NUM_SMS)
+    #print("MUL_ROUTED_WEIGHT=mul_routed_weight", mul_routed_weight)
+    #print("top_k=top_k", top_k)
+    #print("compute_type=compute_type", compute_type)
+    #print("use_fp8=use_fp8", use_fp8)
 
 
-    fused_moe_persistent_kernelV2[grid](
-        A,
-        B,
-        C,
-        A_scale,
-        B_scale,
-        topk_weights,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        B.shape[1],
-        B.shape[2] - 128,
-        sorted_token_ids.shape[0],
-        topk_ids.numel(),
-        A.stride(0),
-        A.stride(1),
-        B.stride(0),
-        B.stride(2),
-        B.stride(1),
-        C.stride(1),
-        C.stride(2),
-        NUM_SMS=NUM_SMS,
-        MUL_ROUTED_WEIGHT=mul_routed_weight,
-        top_k=top_k,
-        compute_type=compute_type,
-        use_fp8=use_fp8,
-        **config,
-    )
+    #pgm = triton.compile("baseline_moe_kernel.ttgir")
+    if pgm:
+        #fused_moe_persistent_kernelV2[grid](
+        #print("using precompiled kernel")
+        actual_grid = (grid(config)[0], 1, 1)
+        pgm[actual_grid](
+            A,
+            B,
+            C,
+            #A_scale,
+            #B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            B.shape[1],
+            B.shape[2] - 128,
+            sorted_token_ids.shape[0],
+            topk_ids.numel(),
+            A.stride(0),
+            #A.stride(1),
+            B.stride(0),
+            #B.stride(2),
+            B.stride(1),
+            C.stride(1),
+            #C.stride(2),
+            #NUM_SMS=NUM_SMS,
+            #MUL_ROUTED_WEIGHT=mul_routed_weight,
+            #top_k=top_k,
+            #compute_type=compute_type,
+            #use_fp8=use_fp8,
+            #**config,
+        )
+    else:
+        fused_moe_persistent_kernelV2[grid](
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            B.shape[1],
+            B.shape[2] - 128,
+            sorted_token_ids.shape[0],
+            topk_ids.numel(),
+            A.stride(0),
+            A.stride(1),
+            B.stride(0),
+            B.stride(2),
+            B.stride(1),
+            C.stride(1),
+            C.stride(2),
+            NUM_SMS=NUM_SMS,
+            MUL_ROUTED_WEIGHT=mul_routed_weight,
+            top_k=top_k,
+            compute_type=compute_type,
+            use_fp8=use_fp8,
+            **config,
+        )
+    #print("Exiting kernel")
 
 
 def get_config_file_name(E: int, N: int, dtype: Optional[str]) -> str:

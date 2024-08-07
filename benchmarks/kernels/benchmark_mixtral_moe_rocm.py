@@ -170,8 +170,8 @@ def run_grid(bs, model, TP):
             #       f' {bs=} {tp_size=} {top_k=} {num_total_experts=} '
             #       f'{d_model=} {model_intermediate_size=} {num_layers=}')
 
-    # print("best_time_us", best_time_us)
-    # print("best_config", best_config)
+    print("best_time_us", best_time_us)
+    print("best_config", best_config)
 
     # holds Dict[str, Dict[str, int]]
     filename = get_config_file_name(num_total_experts,
@@ -288,6 +288,7 @@ def run_timing(
 
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
+    pgm = triton.compile("baseline_moe_kernel.ttgir")
 
     start_event.record()
     for i in range(num_calls):
@@ -308,6 +309,7 @@ def run_timing(
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
             use_fp8=False,
+            pgm=pgm
         )
 
         # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
