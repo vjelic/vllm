@@ -2175,7 +2175,10 @@ bool PCML = true;//(K * M_in > 32*1024);
     commitColumn[i] = 1;
   }
 
-  uint32_t n = (blockIdx.x * WvPrGrp + threadIdx.y) * YTILE;
+  int ETILE = (CuCount * WvPrGrp ) / (N/YTILE);
+  if (ETILE == 0) ETILE = 1;
+  
+  uint32_t n = (blockIdx.x/ETILE * WvPrGrp + threadIdx.y) * YTILE;
 
   if (n < N && (n + YTILE) >= N) {
     uint32_t startColumn = N - YTILE;
@@ -2227,7 +2230,7 @@ bool PCML = true;//(K * M_in > 32*1024);
   if (!PCML) Nrndp = N; //unless its not peicmeal
   while (n < Nrndp) {
     kBase = 0;
-    for (uint32_t e = 0; e < num_tokens_post_padded[0]; e+=M_BLOCK) { 
+    for (uint32_t e = (blockIdx.x % ETILE) * M_BLOCK; e < num_tokens_post_padded[0]; e+=M_BLOCK*ETILE) { 
     kBase = 0;
     
     for (int m=0; m<M_BLOCK; m++) {
