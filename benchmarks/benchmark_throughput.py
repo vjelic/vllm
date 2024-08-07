@@ -83,6 +83,7 @@ def run_vllm(
     enable_prefix_caching: bool,
     enable_chunked_prefill: bool,
     max_num_batched_tokens: int,
+    max_batch_size: Optional[int],
     distributed_executor_backend: Optional[str],
     gpu_memory_utilization: float = 0.9,
     num_scheduler_steps: int = 1,
@@ -92,6 +93,7 @@ def run_vllm(
     disable_async_output_proc: bool = False,
 ) -> float:
     from vllm import LLM, SamplingParams
+    max_num_seqs = { 'max_num_seqs' : max_batch_size } if max_batch_size is not None else {}
     llm = LLM(
         model=model,
         tokenizer=tokenizer,
@@ -115,6 +117,7 @@ def run_vllm(
         num_scheduler_steps=num_scheduler_steps,
         use_v2_block_manager=use_v2_block_manager,
         disable_async_output_proc=disable_async_output_proc,
+        **max_num_seqs,
     )
 
     # Add the requests to the engine.
@@ -326,9 +329,10 @@ def main(args: argparse.Namespace):
             args.enforce_eager, args.kv_cache_dtype,
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
-            args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.num_scheduler_steps,
-            args.use_v2_block_manager, args.download_dir, args.load_format,
+            args.max_num_batched_tokens, args.max_batch_size,
+            rgs.distributed_executor_backend, args.gpu_memory_utilization, 
+            args.num_scheduler_steps, args.use_v2_block_manager, 
+            args.download_dir, args.load_format,
             args.disable_async_output_proc
         ]
 
@@ -337,10 +341,11 @@ def main(args: argparse.Namespace):
             elapsed_time = uvloop.run(run_vllm_async(*run_args))
         else:
             elapsed_time = run_vllm(*run_args)
+    
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
-                              args.use_beam_search, args.hf_max_batch_size,
+                              args.use_beam_search, args.max_batch_size,
                               args.trust_remote_code)
     elif args.backend == "mii":
         elapsed_time = run_mii(requests, args.model, args.tensor_parallel_size,
@@ -401,10 +406,10 @@ if __name__ == "__main__":
                         default=1000,
                         help="Number of prompts to process.")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hf-max-batch-size",
+    parser.add_argument("--max-batch-size",
                         type=int,
                         default=None,
-                        help="Maximum batch size for HF backend.")
+                        help="Maximum batch size for vLLM or HF.")
     parser.add_argument('--trust-remote-code',
                         action='store_true',
                         help='trust remote code from huggingface')
@@ -537,11 +542,8 @@ if __name__ == "__main__":
     else:
         assert args.input_len is None
 
-    if args.backend == "vllm":
-        if args.hf_max_batch_size is not None:
-            raise ValueError("HF max batch size is only for HF backend.")
-    elif args.backend == "hf":
-        if args.hf_max_batch_size is None:
+    if args.backend == "hf":
+        if args.max_batch_size is None:
             raise ValueError("HF max batch size is required for HF backend.")
         if args.quantization is not None:
             raise ValueError("Quantization is only for vLLM backend.")
@@ -554,8 +556,8 @@ if __name__ == "__main__":
             raise ValueError("Beam search is not supported for MII backend.")
         if args.quantization is not None:
             raise ValueError("Quantization is only for vLLM backend.")
-        if args.hf_max_batch_size is not None:
-            raise ValueError("HF max batch size is only for HF backend.")
+        if args.max_batch_size is not None:
+            raise ValueError("Max batch size is only for HF or vLLM backends")
         if args.tokenizer != args.model:
             raise ValueError("Tokenizer must be the same as the model for MII "
                              "backend.")
