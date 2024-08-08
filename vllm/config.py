@@ -599,7 +599,7 @@ class ParallelConfig:
         if self.distributed_executor_backend is None and self.world_size > 1:
             if is_hip():
                 logger.info("Using torchrun for multi-GPU on "
-                            "ROCM platform. Use --worker-use-ray or "
+                            "ROCm platform. Use --worker-use-ray or "
                             "--distributed-executor-backend={ray, mp} to "
                             "override")
                 if not os.environ.get("RANK"):
@@ -1216,11 +1216,12 @@ def _get_and_verify_max_len(
             return max_model_len
 
         default_max_len = 2048
+        possible_keys_str = ", ".join(possible_keys)
         logger.warning(
             "The model's config.json does not contain any of the following "
             "keys to determine the original maximum length of the model: "
-            "%d. Assuming the model's maximum length is %d.", possible_keys,
-            default_max_len)
+            "%s. Assuming the model's maximum length is %d.",
+            possible_keys_str, default_max_len)
         derived_max_model_len = default_max_len
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
