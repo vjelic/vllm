@@ -596,7 +596,7 @@ def fused_experts(hidden_states: torch.Tensor,
         config = override_config
     else:
         # First try to load optimal config from the file
-        configs = get_moe_configs(E, w2.shape[2],
+        configs = get_moe_configs(E, w2.shape[2] - padding_size,
                                   "float8" if use_fp8 else None)
 
         if configs:
