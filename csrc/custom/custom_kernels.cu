@@ -2175,9 +2175,34 @@ bool PCML = true;//(K * M_in > 32*1024);
     commitColumn[i] = 1;
   }
 
-  int ETILE = (CuCount * WvPrGrp ) / (N/YTILE);
-  if (ETILE == 0) ETILE = 1;
+  int ETILE = (CuCount * WvPrGrp ) / (N/YTILE); // bump up etile to fill machine
+  if (ETILE < 2) ETILE = 2; //TODO: what is best default min ETILE? 
+  const int num_tblk = num_tokens_post_padded[0] / M_BLOCK;
   
+  // its worth spending time trying to load balance here...
+  if (CuCount/(ETILE+2) > 0) // TODO: make sure all overflow/inf conditions are avoided 
+  {
+    int nPrRnd0 = ((CuCount/(ETILE))*WvPrGrp); 
+    int nRnds0 = (N + nPrRnd0 - 1 ) / nPrRnd0; 
+    int tRnds0 = (num_tblk + (ETILE) - 1) / (ETILE);
+    int rnds0 = nRnds0 * tRnds0;
+
+    int nPrRnd1n = ((CuCount/(ETILE-1))*WvPrGrp); 
+    int nRnds1n = (N + nPrRnd1n - 1 ) / nPrRnd1n; 
+    int tRnds1n = (num_tblk + (ETILE-1) - 1) / (ETILE-1);
+    int rnds1n = nRnds1n * tRnds1n;
+
+    int nPrRnd1p = ((CuCount/(ETILE+1))*WvPrGrp); 
+    int nRnds1p = (N + nPrRnd1p - 1 ) / nPrRnd1p; 
+    int tRnds1p = (num_tblk + (ETILE+1) - 1) / (ETILE+1);
+    int rnds1p = nRnds1p * tRnds1p;
+    
+    int etl = ETILE;
+    if (rnds0 > rnds1n)  { etl = ETILE-1; rnds0 = rnds1n; }
+    if (rnds0 > rnds1p)  { etl = ETILE+1; rnds0 = rnds1p; }
+    ETILE = etl;
+  }
+
   uint32_t n = (blockIdx.x/ETILE * WvPrGrp + threadIdx.y) * YTILE;
 
   if (n < N && (n + YTILE) >= N) {
@@ -2445,7 +2470,7 @@ bool PCML = true;//(K * M_in > 32*1024);
 
     }
 
-    n += CuCount * WvPrGrp * YTILE;
+    n += (CuCount / ETILE) * WvPrGrp * YTILE;
 
     // Check whether there will be fragmenation!
     // This will happen only for the last wave!
