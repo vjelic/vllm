@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     VLLM_INSTALL_PUNICA_KERNELS: bool = False
     CMAKE_BUILD_TYPE: Optional[str] = None
     VERBOSE: bool = False
+    FUSED_MOE_PERSISTENT: bool = False
 
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
@@ -219,6 +220,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Both spawn and fork work
     "VLLM_WORKER_MULTIPROC_METHOD":
     lambda: os.getenv("VLLM_WORKER_MULTIPROC_METHOD", "spawn"),
+
+    # User persistent version of fused_moe Triton kernel
+    "FUSED_MOE_PERSISTENT":
+    lambda: bool(int(os.getenv("FUSED_MOE_PERSISTENT", "0"))),
 }
 
 # end-env-vars-definition
