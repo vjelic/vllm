@@ -9,8 +9,8 @@ import triton
 import triton.language as tl
 
 import vllm._moe_C as moe_kernels
-from vllm import _custom_ops as ops
 from vllm import envs
+from vllm import _custom_ops as ops
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -167,6 +167,9 @@ def fused_moe_kernel(
     tl.store(c_ptrs, accumulator, mask=c_mask)
 
 
+@triton.heuristics({
+    'EVEN_K': lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0,
+})
 @triton.jit
 def fused_moe_persistent_kernel(
     # Pointers to matrices
@@ -200,181 +203,7 @@ def fused_moe_persistent_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    NUM_SMS: tl.constexpr,
-    MUL_ROUTED_WEIGHT: tl.constexpr,
-    top_k: tl.constexpr,
-    compute_type: tl.constexpr,
-    use_fp8: tl.constexpr,
-):
-    """
-    Implements the fused computation for a Mixture of Experts (MOE) using
-    token and expert matrices.
-    This is the persistent version of the fused_moe kernel.
-
-    Key Parameters:
-    - A: The input tensor representing tokens with shape (*, K), where '*' can
-        be any shape representing batches and K is the feature dimension of
-        each token.
-    - B: The stacked MOE weight tensor with shape (E, N, K), where E is
-        the number of experts, K is the input feature dimension, and N is
-        the output feature dimension.
-    - C: The output cache tensor with shape (M, topk, N), where M is the
-        total number of tokens post padding, topk is the number of times
-        each token is repeated, and N is the output feature dimension.
-    - sorted_token_ids: A tensor containing the sorted indices of tokens,
-        repeated topk times and arranged by the expert index they are
-        assigned to.
-    - expert_ids: A tensor containing the indices of the expert for each
-        block. It determines which expert matrix from B should be used for
-        each block in A.
-    This kernel performs the multiplication of a token by its corresponding
-    expert matrix as determined by `expert_ids`. The sorting of
-    `sorted_token_ids` by expert index and padding ensures divisibility by
-    BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
-    multiplication across different blocks processed by the same expert.
-    """
-    # -----------------------------------------------------------
-    # Simply compute how many iterations each persistent block needs to do
-    start_pid = tl.program_id(axis=0)
-    num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
-    num_tiles = num_pid_m * num_pid_n
-
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
-
-    tile_id = start_pid - NUM_SMS
-    ki = -1
-
-    offs_k_for_mask = tl.arange(0, BLOCK_SIZE_K)
-
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-
-    pid_m = 0
-    pid_n = 0
-    offs_am = tl.arange(0, BLOCK_SIZE_M)
-    offs_bn = tl.arange(0, BLOCK_SIZE_N)
-
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-    offs_token = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int32)
-    token_mask = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int1)
-
-    # load runtime constant outside the loop
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
-    if use_fp8:
-        a_scale = tl.load(a_scale_ptr)
-        b_scale = tl.load(b_scale_ptr + off_experts)
-
-    # compute when it reaches the invalid region
-    pid_m = 0
-    tile_id2 = start_pid - NUM_SMS
-    tile_counter = -1
-    while pid_m * BLOCK_SIZE_M < num_tokens_post_padded:
-        tile_counter += 1
-        tile_id2 += NUM_SMS
-        group_id = tile_id2 // num_pid_in_group
-        first_pid_m = group_id * GROUP_SIZE_M
-        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-        pid_m = first_pid_m + ((tile_id2 % num_pid_in_group) % group_size_m)
-
-    # print("tile_counter: ", tile_counter)
-    for _ in range(0, k_tiles * tile_counter):
-        # Increment ki or loop back to the start of each tile
-        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
-        # Prologue of each tile
-        if ki == 0:
-            tile_id += NUM_SMS
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_SIZE_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-            pid_m = first_pid_m + ((tile_id % num_pid_in_group) % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
-            # compute the base pointer of A, B for each tile
-            offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-            offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
-            token_mask = offs_token < num_valid_tokens
-            offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-        # Loop through K dimension
-        # Compute A, B pointer
-        offs_k = ki * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
-        a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am +
-            offs_k[None, :] * stride_ak)
-        off_experts = tl.load(expert_ids_ptr + pid_m)
-        b_ptrs = (b_ptr + off_experts * stride_be +
-                (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn))
-        # Load A, B and dot product
-        a = tl.load(
-                a_ptrs,
-                mask=token_mask[:, None] &
-                    (offs_k_for_mask[None, :] < K - ki * BLOCK_SIZE_K),
-                other=0.0)
-        b = tl.load(
-                b_ptrs,
-                mask=offs_k_for_mask[:, None] < K - ki * BLOCK_SIZE_K,
-                other=0.0)
-        if use_fp8:
-            accumulator = tl.dot(a, b, acc=accumulator)
-        else:
-            accumulator += tl.dot(a, b)
-
-        # Epilogue of each tile
-        if ki == k_tiles - 1:
-            if MUL_ROUTED_WEIGHT:
-                moe_weight = tl.load(topk_weights_ptr + offs_token,
-                                    mask=token_mask,
-                                    other=0)
-                accumulator = accumulator * moe_weight[:, None]
-
-            if use_fp8:
-                accumulator = (accumulator * a_scale * b_scale).to(compute_type)
-            else:
-                accumulator = accumulator.to(compute_type)
-            # -----------------------------------------------------------
-            # Write back the block of the output
-            offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-            c_ptrs = (c_ptr + stride_cm * offs_token[:, None] +
-                    stride_cn * offs_cn[None, :])
-            c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-            tl.store(c_ptrs, accumulator, mask=c_mask)
-            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N),
-                                    dtype=tl.float32)
-
-
-@triton.jit
-def fused_moe_persistent_kernelV2(
-    # Pointers to matrices
-    a_ptr,
-    b_ptr,
-    c_ptr,
-    a_scale_ptr,
-    b_scale_ptr,
-    topk_weights_ptr,
-    sorted_token_ids_ptr,
-    expert_ids_ptr,
-    num_tokens_post_padded_ptr,
-    # Matrix dimensions
-    N,
-    K,
-    EM,
-    num_valid_tokens,
-    # The stride variables represent how much to increase the ptr by when
-    # moving by 1 element in a particular dimension. E.g. `stride_am` is
-    # how much to increase `a_ptr` by to get the element one row down
-    # (A has M rows).
-    stride_am,
-    stride_ak,
-    stride_be,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
-    # Meta-parameters
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    BLOCK_SIZE_K: tl.constexpr,
-    GROUP_SIZE_M: tl.constexpr,
+    EVEN_K: tl.constexpr,
     NUM_SMS: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
@@ -436,7 +265,6 @@ def fused_moe_persistent_kernelV2(
         group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
         pid_m = first_pid_m + ((tile_id2 % num_pid_in_group) % group_size_m)
 
-    # print("tile_counter: ", tile_counter)
     for _ in range(0, num_valid_tiles):
         if GROUP_SIZE_M == 1:
             pid_m = tile_id // num_pid_n
@@ -469,15 +297,21 @@ def fused_moe_persistent_kernelV2(
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
             # Load the next block of A and B, generate a mask by checking the
             # K dimension.
-            a = tl.load(
-                a_ptrs,
-                mask=token_mask[:, None] &
-                    (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-                other=0.0)
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                other=0.0)
+            if EVEN_K:
+                a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
+                b = tl.load(b_ptrs)
+            else:
+                a = tl.load(
+                    a_ptrs,
+                    mask=token_mask[:, None] &
+                        (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                    other=0.0
+                )
+                b = tl.load(
+                    b_ptrs,
+                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                    other=0.0
+                )
             # We accumulate along the K dimension.
             if use_fp8:
                 accumulator = tl.dot(a, b, acc=accumulator)
@@ -507,6 +341,7 @@ def fused_moe_persistent_kernelV2(
 
         # advance tile_id
         tile_id += NUM_SMS
+
 
 def moe_align_block_size(
         topk_ids: torch.Tensor, block_size: int,
@@ -591,120 +426,73 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         A, A_scale = ops.scaled_fp8_quant(A, A_scale)
         assert B_scale is not None
 
-    grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
-        "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
+    if not envs.FUSED_MOE_PERSISTENT:
+        grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
+            "BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]), )
 
-    # print("==================================================================================")
-    # print(f"grid = {triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N'])}")
-    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    # print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
-    # print(f"config in moe = {config}")
-    # print(f"A shape = {A.shape}")
-    # print(f"B shape = {B.shape}")
-    # print(f"num valid tokens = {topk_ids.numel()}")
-    # print(f"sorted_token_ids = {sorted_token_ids[0]}")
-    # print(f"expert_ids = {expert_ids}")
-    # print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
-
-
-    fused_moe_kernel[grid](
-        A,
-        B,
-        C,
-        A_scale,
-        B_scale,
-        topk_weights,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        B.shape[1],
-        B.shape[2] - padding_size,
-        sorted_token_ids.shape[0],
-        topk_ids.numel(),
-        A.stride(0),
-        A.stride(1),
-        B.stride(0),
-        B.stride(2),
-        B.stride(1),
-        C.stride(1),
-        C.stride(2),
-        MUL_ROUTED_WEIGHT=mul_routed_weight,
-        top_k=top_k,
-        compute_type=compute_type,
-        use_fp8=use_fp8,
-        **config,
-    )
-
-
-def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
-                            A_scale: Optional[torch.Tensor],
-                            B_scale: Optional[torch.Tensor],
-                            topk_weights: torch.Tensor, topk_ids: torch.Tensor,
-                            sorted_token_ids: torch.Tensor,
-                            expert_ids: torch.Tensor,
-                            num_tokens_post_padded: torch.Tensor,
-                            mul_routed_weight: bool, top_k: int,
-                            config: Dict[str, Any], compute_type: tl.dtype,
-                            use_fp8: bool) -> None:
-    assert topk_weights.stride(1) == 1
-    assert sorted_token_ids.stride(0) == 1
-
-    if not use_fp8:
-        assert A_scale is None
-        assert B_scale is None
+        fused_moe_kernel[grid](
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            B.shape[1],
+            B.shape[2] - padding_size,
+            sorted_token_ids.shape[0],
+            topk_ids.numel(),
+            A.stride(0),
+            A.stride(1),
+            B.stride(0),
+            B.stride(2),
+            B.stride(1),
+            C.stride(1),
+            C.stride(2),
+            MUL_ROUTED_WEIGHT=mul_routed_weight,
+            top_k=top_k,
+            compute_type=compute_type,
+            use_fp8=use_fp8,
+            **config,
+        )
     else:
-        A, A_scale = ops.scaled_fp8_quant(A, A_scale)
-        assert B_scale is not None
+        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+        grid = lambda META: (min(
+                NUM_SMS,
+                triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"]) *
+                    triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])
+                ), )
 
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
-    grid = lambda META: (min(
-            NUM_SMS,
-            triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"]) *
-                triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"])
-            ), )
-
-    # print("==================================================================================")
-    # print(f"grid = NUM_SMS: {min(NUM_SMS, triton.cdiv(sorted_token_ids.shape[0], config['BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], config['BLOCK_SIZE_N']) )}")
-    # print(f"sorted token ids shape = {sorted_token_ids.shape}")
-    # print(f"num_token_ids_post_padded = {num_tokens_post_padded}")
-    # print(f"config in moe = {config}")
-    # print(f"A shape = {A.shape}")
-    # print(f"B shape = {B.shape}")
-    # print(f"num valid tokens = {topk_ids.numel()}")
-    # print(f"sorted_token_ids = {sorted_token_ids[0]}")
-    # print(f"expert_ids = {expert_ids}")
-    # print(f"num_tokens_post_padded = {num_tokens_post_padded[0]}")
-    # print("Calling persistent kernel")
-
-
-    fused_moe_persistent_kernelV2[grid](
-        A,
-        B,
-        C,
-        A_scale,
-        B_scale,
-        topk_weights,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        B.shape[1],
-        B.shape[2] - padding_size,
-        sorted_token_ids.shape[0],
-        topk_ids.numel(),
-        A.stride(0),
-        A.stride(1),
-        B.stride(0),
-        B.stride(2),
-        B.stride(1),
-        C.stride(1),
-        C.stride(2),
-        NUM_SMS=NUM_SMS,
-        MUL_ROUTED_WEIGHT=mul_routed_weight,
-        top_k=top_k,
-        compute_type=compute_type,
-        use_fp8=use_fp8,
-        **config,
-    )
+        fused_moe_persistent_kernel[grid](
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            B.shape[1],
+            B.shape[2] - padding_size,
+            sorted_token_ids.shape[0],
+            topk_ids.numel(),
+            A.stride(0),
+            A.stride(1),
+            B.stride(0),
+            B.stride(2),
+            B.stride(1),
+            C.stride(1),
+            C.stride(2),
+            NUM_SMS=NUM_SMS,
+            MUL_ROUTED_WEIGHT=mul_routed_weight,
+            top_k=top_k,
+            compute_type=compute_type,
+            use_fp8=use_fp8,
+            **config,
+        )
 
 
 def get_config_file_name(E: int, N: int, dtype: Optional[str]) -> str:
@@ -792,8 +580,7 @@ def fused_experts(hidden_states: torch.Tensor,
                   a1_scale: Optional[torch.Tensor] = None,
                   a2_scale: Optional[torch.Tensor] = None):
     # Check constraints.
-    assert hidden_states.shape[
-        1] == w1.shape[2] - padding_size, "Hidden size mismatch"
+    assert hidden_states.shape[1] == w1.shape[2] - padding_size, "Hidden size mismatch"
     assert topk_weights.shape == topk_ids.shape, "topk shape mismatch"
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
     assert w1.is_contiguous(), "Expert weights1 must be contiguous"
@@ -809,7 +596,7 @@ def fused_experts(hidden_states: torch.Tensor,
         config = override_config
     else:
         # First try to load optimal config from the file
-        configs = get_moe_configs(E, w2.shape[2] - padding_size,
+        configs = get_moe_configs(E, w2.shape[2],
                                   "float8" if use_fp8 else None)
 
         if configs:
@@ -856,8 +643,7 @@ def fused_experts(hidden_states: torch.Tensor,
     compute_type = (tl.bfloat16
                     if hidden_states.dtype == torch.bfloat16 else tl.float16)
 
-    invoke_fused_moe_persistent_kernel(hidden_states,
-    # invoke_fused_moe_kernel(hidden_states,
+    invoke_fused_moe_kernel(hidden_states,
                             w1,
                             intermediate_cache1,
                             a1_scale,
@@ -875,8 +661,7 @@ def fused_experts(hidden_states: torch.Tensor,
 
     ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-    invoke_fused_moe_persistent_kernel(intermediate_cache2,
-    # invoke_fused_moe_kernel(intermediate_cache2,
+    invoke_fused_moe_kernel(intermediate_cache2,
                             w2,
                             intermediate_cache3,
                             a2_scale,
