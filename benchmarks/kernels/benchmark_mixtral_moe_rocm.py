@@ -23,24 +23,26 @@ def main(args):
     os.environ["OPTIMIZE_EPILOGUE"] = "1"
 
     for bs in [
-            1,
-            2,
-            4,
-            8,
-            16,
-            24,
-            32,
-            48,
-            64,
-            96,
-            128,
-            256,
-            512,
-            1024,
-            1536,
-            2048,
-            3072,
-            4096,
+            # 50,
+            100,
+            # 1,
+            # 2,
+            # 4,
+            # 8,
+            # 16,
+            # 24,
+            # 32,
+            # 48,
+            # 64,
+            # 96,
+            # 128,
+            # 256,
+            # 512,
+            # 1024,
+            # 1536,
+            # 2048,
+            # 3072,
+            # 4096,
     ]:
         run_grid(bs, model=args.model, TP=args.TP)
 
@@ -49,11 +51,15 @@ def main(args):
 def get_full_tuning_space():
     configs = []
 
+    # block_mn_range = [64]
+    # block_k_range = [64]
     block_mn_range = [16, 32, 64, 128, 256]
     block_k_range = [16, 32, 64, 128, 256]
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
+    # num_warps_range = [4]
+    # group_m_range = [4]
     num_warps_range = [1, 2, 4, 8]
-    group_m_range = [1, 4, 8, 16, 32]
+    group_m_range = [1, 4, 8, 16, 32]    
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
@@ -258,6 +264,7 @@ def run_grid(bs, model, TP):
 
     # print("best_time_us", best_time_us)
     # print("best_config", best_config)
+    best_config['time'] = best_time_us
 
     # holds Dict[str, Dict[str, int]]
     filename = get_config_file_name(num_total_experts,
@@ -284,6 +291,7 @@ def run_timing(
     model_intermediate_size: int,
     config,
 ) -> float:
+    
     shard_intermediate_size = model_intermediate_size // tp_size
 
     hidden_states = torch.rand(
