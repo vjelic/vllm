@@ -22,6 +22,7 @@ def run_phi3v():
         model=model_path,
         trust_remote_code=True,
         max_num_seqs=5,
+        distributed_executor_backend="ray"
     )
 
     image = Image.open("images/cherry_blossom.jpg")

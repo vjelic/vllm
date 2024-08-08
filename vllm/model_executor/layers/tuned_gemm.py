@@ -20,6 +20,7 @@ class TunedGemm:
         self.untune_path = os.environ.get('VLLM_UNTUNE_FILE',
                                           "/tmp/vllm_untuned.csv")
         self.tune_path = os.environ.get('VLLM_TUNE_FILE', "tuned.csv")
+        print(f"--------------DEBUG, self.tune_path = {self.tune_path}")
         self.bestsols = {}
         self.load_best_sols()
         self.create_ds()
@@ -34,6 +35,8 @@ class TunedGemm:
     def load_best_sols(self):
         if self.tune_path is not None and Path(self.tune_path).is_file():
             self.bestsols = pd.read_csv(self.tune_path)
+            print(f"-----------DEBUG, sol table:")
+            print(self.bestsols)
 
     def create_ds(self):
         df: pd.DataFrame = self.bestsols
@@ -89,7 +92,9 @@ class TunedGemm:
         n = inp_view.shape[0]
         k = inp_view.shape[1]
         soltype, solidx = self.query_sol(m=m, n=n, k=k)
+        #print(f"-----------DEBUG, (soltype, solidx, m, n, k) = ({soltype}, {solidx}, {m}, {n}, {k})")
         out = self.apply_skinny(m, n, k, inp_view, weights)
+        #out=None
         if out is not None:
             pass
         elif soltype == 1:

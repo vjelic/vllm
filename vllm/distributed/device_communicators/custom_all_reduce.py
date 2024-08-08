@@ -158,6 +158,7 @@ class CustomAllreduce:
         self.full_nvlink = full_nvlink
         self._ptr = ops.init_custom_ar(self.meta, self.rank_data, handles,
                                        offsets, rank, self.full_nvlink)
+        print(f"DEBUG-------------,python Finish init custom ar")
         self.register_buffer(self.buffer)
 
     @contextmanager

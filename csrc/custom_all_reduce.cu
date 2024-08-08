@@ -70,6 +70,7 @@ bool should_custom_ar(torch::Tensor& inp, int max_size, int world_size,
 void _all_reduce(fptr_t _fa, torch::Tensor& inp, torch::Tensor& out,
                  cudaStream_t stream) {
   auto fa = reinterpret_cast<vllm::CustomAllreduce*>(_fa);
+  printf("DEBUG-------------------, cuh vllm::CustomAllreduce call _all_reduce\n");
   TORCH_CHECK(_is_weak_contiguous(out));
   switch (out.scalar_type()) {
     case at::ScalarType::Float: {
