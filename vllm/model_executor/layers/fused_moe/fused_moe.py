@@ -470,11 +470,14 @@ def fused_moe_persistent_kernelV2(
             # Load the next block of A and B, generate a mask by checking the
             # K dimension.
             a = tl.load(
-                a_ptrs
-            )
+                a_ptrs,
+                mask=token_mask[:, None] &
+                    (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                other=0.0)
             b = tl.load(
-                b_ptrs
-            )
+                b_ptrs,
+                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                other=0.0)
             # We accumulate along the K dimension.
             if use_fp8:
                 accumulator = tl.dot(a, b, acc=accumulator)
@@ -685,7 +688,7 @@ def invoke_fused_moe_persistent_kernel(A: torch.Tensor, B: torch.Tensor, C: torc
         expert_ids,
         num_tokens_post_padded,
         B.shape[1],
-        B.shape[2] - 128,
+        B.shape[2] - padding_size,
         sorted_token_ids.shape[0],
         topk_ids.numel(),
         A.stride(0),
