@@ -607,7 +607,7 @@ def all_close_1d(x: torch.Tensor) -> bool:
     return all(torch.allclose(x[0], x[i]) for i in range(x.shape[0]))
 
 def permute_weight(x: torch.Tensor) -> torch.Tensor:
-    x_ = torch.clone(x)
+    x_ = x
     if envs.VLLM_MOE_SHUFFLE:
         x_ = x_.view(x.shape[0],
                          x.shape[1]//16, 16,
