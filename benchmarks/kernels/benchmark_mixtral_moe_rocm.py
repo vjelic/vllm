@@ -198,7 +198,7 @@ def run_timing(
     model_intermediate_size: int,
     config,
 ) -> float:
-    shard_intermediate_size = 14464-64 #model_intermediate_size // tp_size
+    shard_intermediate_size = model_intermediate_size // tp_size
 
     hidden_states = torch.rand(
         (bs, d_model),
@@ -207,7 +207,7 @@ def run_timing(
     )
 
     w1 = torch.rand(
-        (num_total_experts, 2 * shard_intermediate_size, d_model),
+        (num_total_experts, 2 * shard_intermediate_size, d_model+128),
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
@@ -232,7 +232,7 @@ def run_timing(
 
     assert (hidden_states.shape[0] == gating_output.shape[0]
             ), "Number of tokens mismatch"
-    assert hidden_states.shape[1] == w1.shape[2], "Hidden size mismatch"
+    assert hidden_states.shape[1] == w1.shape[2] - 128, "Hidden size mismatch"
     assert gating_output.shape[1] == w1.shape[0], "Number of experts mismatch"
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
     assert w1.is_contiguous(), "Expert weights1 must be contiguous"
