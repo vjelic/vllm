@@ -288,7 +288,7 @@ def run_timing(
 
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
-    pgm = triton.compile("nolds_moe_kernel.ttgir")
+    pgm = triton.compile("nolds_moe_kernel2.ttgir")
 
     start_event.record()
     for i in range(num_calls):
