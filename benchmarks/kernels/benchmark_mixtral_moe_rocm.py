@@ -13,7 +13,6 @@ import vllm._moe_C as moe_kernels
 from vllm._C import ops
 from vllm.model_executor.layers.fused_moe import (get_config_file_name,
                                                   invoke_fused_moe_kernel,
-                                                  invoke_fused_moe_persistent_kernel,
                                                   moe_align_block_size)
 
 
@@ -291,7 +290,7 @@ def run_timing(
 
     start_event.record()
     for i in range(num_calls):
-        invoke_fused_moe_persistent_kernel(
+        invoke_fused_moe_kernel(
             hidden_states,
             w1,
             intermediate_cache1,
@@ -307,7 +306,7 @@ def run_timing(
             config,
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
-            use_fp8=False,
+            use_fp8=False
         )
 
         # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
