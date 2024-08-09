@@ -2297,14 +2297,14 @@ bool PCML = true;//(K * M_in > 32*1024);
                 if (k1_ != 0) kBase += kFit;
 		shflk = (kBase + kFit <= K); //don't shfl k (for hotspot avoidance) if this block doesn't cover full range
 		__syncthreads();
-		// TODO: this requires TWC to be a multple of M_BLOCK?
-                for (uint32_t k = 0; k < kFit; k += TWC/M_BLOCK) {
-                    uint32_t kOff = k + (((threadIdx.y * THRDS + threadIdx.x) / M_BLOCK ) * A_CHUNK);    
+                for (uint32_t k = 0; k < kFit; k += TWC/(M_BLOCK/4)) {
+                    uint32_t kOff = k + (((threadIdx.y/(M_BLOCK/4) * THRDS + threadIdx.x) ) * A_CHUNK);    
                     if (kBase + kOff >= K) break;
                     if (kOff >= kFit) break;
 #ifdef USEMFMA
-                    int m = threadIdx.x % M_BLOCK;
-                    //for (uint32_t m = 0; m < M_BLOCK; m++) {
+                    int m4 = threadIdx.y % (M_BLOCK/4);
+                    for (uint32_t _m = 0; _m < M_BLOCK/4; _m++) {
+		    int m = (4 * _m) + m4;
  	            if (!token_mask[m]) continue;
                     uint32_t k_in = kBase + (offs_token[m]/top_k) * K + kOff;
                     uint32_t k_ot =         m * K + kOff; // yes, K should be kFit here. but we'lltranspose this below anyway
@@ -2316,7 +2316,7 @@ bool PCML = true;//(K * M_in > 32*1024);
 	            k_ot = (k_ot_y * (kFit / A_CHUNK) + k_ot_x) * A_CHUNK;
 
                     *((bigType*)(&s[k_ot])) = *((bigType*)(&A[k_in]));
-		    //}
+		    }
 #else
                     int m = threadIdx.x % M_BLOCK;
                     //for (uint32_t m = 0; m < M_BLOCK; m++) {
