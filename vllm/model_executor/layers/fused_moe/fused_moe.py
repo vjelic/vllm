@@ -402,7 +402,8 @@ def fused_experts(hidden_states: torch.Tensor,
                   w1_scale: Optional[torch.Tensor] = None,
                   w2_scale: Optional[torch.Tensor] = None,
                   a1_scale: Optional[torch.Tensor] = None,
-                  a2_scale: Optional[torch.Tensor] = None):
+                  a2_scale: Optional[torch.Tensor] = None,
+                  is_decode: Optional[bool] = False):
     # Check constraints.
     #print("hidenSize:", hidden_states.shape)
     #print("hidenSize:", w1.shape[2])
@@ -481,7 +482,7 @@ def fused_experts(hidden_states: torch.Tensor,
     #        and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
     #        and intermediate_cache2.shape[1] % 8 == 0 \
     #        and not use_fp8 :
-    if 1:
+    if not is_decode:
         #print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
             topk_ids, m_blck_sz, E) # target 75% of expert distribution for this M size
@@ -600,6 +601,7 @@ def fused_moe(
     w2_scale: Optional[torch.Tensor] = None,
     a1_scale: Optional[torch.Tensor] = None,
     a2_scale: Optional[torch.Tensor] = None,
+    is_decode: Optional[bool] = False,
 ) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
@@ -643,4 +645,5 @@ def fused_moe(
                          w1_scale=w1_scale,
                          w2_scale=w2_scale,
                          a1_scale=a1_scale,
-                         a2_scale=a2_scale)
+                         a2_scale=a2_scale,
+                         is_decode=is_decode)

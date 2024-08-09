@@ -110,6 +110,16 @@ class MixtralMoE(nn.Module):
                         self.hidden_size,
                         self.intermediate_size,
                         dtype=params_dtype))
+        self.w13_weight_1 = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        2 * self.intermediate_size,
+                        self.hidden_size,
+                        dtype=params_dtype))
+        self.w2_weight_1 = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        self.hidden_size,
+                        self.intermediate_size,
+                        dtype=params_dtype))
 
         set_weight_attrs(self.w13_weight, {
             "weight_loader": self.weight_loader,
@@ -242,15 +252,23 @@ class MixtralMoE(nn.Module):
                                           requires_grad=False)
             self.a2_scale = nn.Parameter(self.a2_scale.max(),
                                          requires_grad=False)
+        self.w13_weight_1 = nn.Parameter(self.w13_weight.data.clone(), requires_grad=False)
+        self.w2_weight_1 = nn.Parameter(self.w2_weight.data.clone(), requires_grad=False)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, is_decode: bool) -> torch.Tensor:
         num_tokens, hidden_size = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
+        if is_decode:
+            w13 = self.w13_weight
+            w2 = self.w2_weight
+        else:
+            w13 = self.w13_weight_1
+            w2 = self.w2_weight_1
         final_hidden_states = fused_moe(hidden_states,
-                                        self.w13_weight,
-                                        self.w2_weight,
+                                        w13,
+                                        w2,
                                         router_logits,
                                         self.top_k,
                                         renormalize=True,
@@ -259,7 +277,8 @@ class MixtralMoE(nn.Module):
                                         w1_scale=self.w13_scale,
                                         w2_scale=self.w2_scale,
                                         a1_scale=self.a13_scale,
-                                        a2_scale=self.a2_scale)
+                                        a2_scale=self.a2_scale,
+                                        is_decode=is_decode)
 
         if self.tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(
@@ -401,7 +420,7 @@ class MixtralDecoderLayer(nn.Module):
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
-        hidden_states = self.block_sparse_moe(hidden_states)
+        hidden_states = self.block_sparse_moe(hidden_states, attn_metadata.decode_metadata is not None)
         return hidden_states, residual
 
 
