@@ -39,6 +39,8 @@ if TYPE_CHECKING:
     CMAKE_BUILD_TYPE: Optional[str] = None
     VERBOSE: bool = False
 
+    VLLM_MOE_MFMASWIZZLE: bool = True
+
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
 
@@ -84,6 +86,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # If set, vllm will print verbose logs during installation
     "VERBOSE":
     lambda: bool(int(os.getenv('VERBOSE', '0'))),
+
+    # Swizzle the weights for mfma ops in moe kernel, or not
+    "VLLM_MOE_MFMASWIZZLE":
+        lambda: bool(int(os.getenv("VLLM_MOE_MFMASWIZZLE", "1"))),
 
     # Root directory for VLLM configuration files
     # Note that this not only affects how vllm finds its configuration files

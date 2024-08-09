@@ -24,10 +24,12 @@
 from typing import Iterable, List, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from transformers import MixtralConfig
 
 from vllm import _custom_ops as ops
+from vllm import envs
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import (get_tensor_model_parallel_rank,
@@ -179,9 +181,31 @@ class MixtralMoE(nn.Module):
             param_data[expert_id] = loaded_weight
 
     def process_weights_after_loading(self):
-        # Fp8 is the only case where we need to process after loading.
         if not self.use_fp8:
-            return
+            if envs.VLLM_MOE_MFMASWIZZLE: 
+                #print("SWIZZLING WEIGHTS:")
+                #print(self.w13_weight.shape)
+                #w1_ = torch.clone(w1)
+                b,n,k = self.w13_weight.shape
+                w1_ = self.w13_weight
+                w1_ = w1_.view(b, n//16, 16, k//128, 16, 8);
+                w1_ = w1_.transpose(2,4)
+                w1_ = w1_.contiguous()
+                w1_ = w1_.view(b,n,k)
+                w1_ = w1_.contiguous()
+                self.w13_weight = nn.Parameter(w1_, requires_grad=False)
+                #print(self.w13_weight.shape)
+                #w2_ = torch.clone(w2)
+                b,n,k = self.w2_weight.shape
+                w2_ = self.w2_weight
+                w2_ = w2_.view(b, n//16, 16, k//128, 16, 8);
+                w2_ = w2_.transpose(2,4)
+                #w2_ = w2_.permute(0, 1, 4, 3, 2, 5)
+                w2_ = w2_.contiguous()
+                w2_ = w2_.view(b,n,k)
+                w2_ = w2_.contiguous()
+                self.w2_weight = nn.Parameter(w2_, requires_grad=False)
+                return
 
         # If checkpoint is fp16, quantize here.
         if not self.quant_config.is_checkpoint_fp8_serialized:
