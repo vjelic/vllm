@@ -2295,7 +2295,7 @@ bool PCML = true;//(K * M_in > 32*1024);
     if (PCML) {
         if ((k1_ == 0) || (k1_ == kBase + kFit)) { // load next chunk of A[] to LDS
                 if (k1_ != 0) kBase += kFit;
-		shflk = (kBase + kFit < K); //don't shfl k (for hotspot avoidance) if this block doesn't cover full range
+		shflk = (kBase + kFit <= K); //don't shfl k (for hotspot avoidance) if this block doesn't cover full range
 		__syncthreads();
 		// TODO: this requires TWC to be a multple of M_BLOCK?
                 for (uint32_t k = 0; k < kFit; k += TWC/M_BLOCK) {
