@@ -2295,7 +2295,7 @@ bool PCML = true;//(K * M_in > 32*1024);
     if (PCML) {
         if ((k1_ == 0) || (k1_ == kBase + kFit)) { // load next chunk of A[] to LDS
                 if (k1_ != 0) kBase += kFit;
-		shflk = (kBase + kFit <= K); //don't shfl k (for hotspot avoidance) if this block doesn't cover full range
+		shflk = (kBase + kFit < K); //don't shfl k (for hotspot avoidance) if this block doesn't cover full range
 		__syncthreads();
 		// TODO: this requires TWC to be a multple of M_BLOCK?
                 for (uint32_t k = 0; k < kFit; k += TWC/M_BLOCK) {
@@ -3310,8 +3310,9 @@ bool PCML = true;//(K * M_in > 32*1024);
 
     //That's enough walking K. Let's write this puppy out...
 #ifdef USEMFMA
-    for (int m = 0; m < M_BLOCK; m++)
-        if (threadIdx.x % mfmaTILEn == m % mfmaTILEn)
+    //for (int m = 0; m < M_BLOCK; m++)
+    //    if (threadIdx.x % mfmaTILEn == m % mfmaTILEn)
+	    int m = threadIdx.x % mfmaTILEn;
             for (int y = 0; y < 4; y++) {
 
 	        if (!token_mask[m]) continue;
