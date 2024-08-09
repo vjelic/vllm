@@ -469,23 +469,20 @@ def fused_experts(hidden_states: torch.Tensor,
     #print("M1:", hidden_states.shape[0], "M2:", intermediate_cache2.shape[0])
     #if hidden_states.shape[0] <= 256 and hidden_states.shape[1] % 8 == 0 and intermediate_cache2.shape[0] <= 256 and not use_fp8 :
     
-    #print("inpt:", hidden_states.shape)
-    #print("wght:", w1.shape)
+    #WVSPLTK_M_THRSHLD = 64 
+    #m_blck_sz = -(-(M*topk_ids.shape[1]*3)//E) # target 75%  of expert distribution for this M size
+    #if (m_blck_sz >= 12):
+    #    m_blck_sz = 16
 
-    WVSPLTK_M_THRSHLD = 128 
-    m_blck_sz = -(-(M*topk_ids.shape[1]*3)//E) # target 75%  of expert distribution for this M size
-    if (m_blck_sz >= 12):
-        m_blck_sz = 16
+    m_blck_sz = 16  # all calls go to wvSplitK_mfma16x16
 
-    #m_blck_sz = 16  # all calls go to wvSplitK_mfma16x16
-
-    if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
-            and hidden_states.shape[1] % 8 == 0 \
-            and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
-            and intermediate_cache2.shape[1] % 8 == 0 \
-            and not use_fp8 :
-    #if 1:
-        print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
+    #if hidden_states.shape[0] <= WVSPLTK_M_THRSHLD \
+    #        and hidden_states.shape[1] % 8 == 0 \
+    #        and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
+    #        and intermediate_cache2.shape[1] % 8 == 0 \
+    #        and not use_fp8 :
+    if 1:
+        #print("M:", M, " M_BLOCK PICKED:", m_blck_sz)
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
             topk_ids, m_blck_sz, E) # target 75% of expert distribution for this M size
             #topk_ids, config2['BLOCK_SIZE_M'],E)
@@ -493,7 +490,8 @@ def fused_experts(hidden_states: torch.Tensor,
         #print("w1Shape:",w1.shape)
         
         #env VLLM_MOE_MFMASWIZZLE does this swizzle on init
-        if 0 and m_blck_sz >= 16 :
+        '''
+        if m_blck_sz >= 16 :
             w1_ = torch.clone(w1)
             w1_ = w1_.view(w1.shape[0], w1.shape[1]//16, 16, w1.shape[2]//128, 16, 8);
             w1_ = w1_.permute(0, 1, 4, 3, 2, 5)
@@ -507,10 +505,11 @@ def fused_experts(hidden_states: torch.Tensor,
         else :
             w1_ = w1
             w2_ = w2
+        '''
         #print(w1_)
 
         invoke_mega_fused_moe_kernel(hidden_states,
-                            w1_,
+                            w1,
                             intermediate_cache1,
                             topk_weights,
                             topk_ids,
@@ -528,7 +527,7 @@ def fused_experts(hidden_states: torch.Tensor,
         #print("-----------------------------")
            
         invoke_mega_fused_moe_kernel(intermediate_cache2,
-                            w2_,
+                            w2,
                             intermediate_cache3,
                             topk_weights,
                             topk_ids,
