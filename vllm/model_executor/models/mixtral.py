@@ -615,4 +615,4 @@ def permute_weight(x: torch.Tensor) -> torch.Tensor:
         x_ = x_.permute(0,1,3,4,2,5)
         x_ = x_.contiguous()
         x_ = x_.view(x.shape[0], x.shape[1], x.shape[2]);
-    return x
+    return x_
