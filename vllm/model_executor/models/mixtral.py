@@ -215,7 +215,7 @@ class MixtralMoE(nn.Module):
                 w2_ = w2_.view(b,n,k)
                 w2_ = w2_.contiguous()
                 self.w2_weight = nn.Parameter(w2_, requires_grad=False)
-                return
+            return
 
         # If checkpoint is fp16, quantize here.
         if not self.quant_config.is_checkpoint_fp8_serialized:
