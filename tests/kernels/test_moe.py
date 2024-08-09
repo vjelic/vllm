@@ -52,6 +52,56 @@ def test_fused_moe(
     torch_output = torch_moe(a, w1, w2, score, topk)
     assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0)
 
+@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
+@pytest.mark.parametrize("n", [14336])
+@pytest.mark.parametrize("k", [4096])
+@pytest.mark.parametrize("e", [8])
+@pytest.mark.parametrize("topk", [2])
+@pytest.mark.parametrize("dtype", [torch.float16])
+def test_amd_moe_1(
+    m: int,
+    n: int,
+    k: int,
+    e: int,
+    topk: int,
+    dtype: torch.dtype,
+):
+    if n == k:
+        pytest.skip()
+    a = torch.randn((m, k), device='cuda', dtype=dtype) / 10
+    w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
+    w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
+
+    score = torch.randn((m, e), device='cuda', dtype=dtype)
+    triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
+    torch_output = torch_moe(a, w1, w2, score, topk)
+    assert torch.allclose(triton_output, torch_output, atol=2e-2, rtol=0)
+
+
+@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
+@pytest.mark.parametrize("n", [4096])
+@pytest.mark.parametrize("k", [14336])
+@pytest.mark.parametrize("e", [8])
+@pytest.mark.parametrize("topk", [2])
+@pytest.mark.parametrize("dtype", [torch.float16])
+def test_amd_moe_2(
+    m: int,
+    n: int,
+    k: int,
+    e: int,
+    topk: int,
+    dtype: torch.dtype,
+):
+    if n == k:
+        pytest.skip()
+    a = torch.randn((m, k), device='cuda', dtype=dtype) / 10
+    w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
+    w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
+
+    score = torch.randn((m, e), device='cuda', dtype=dtype)
+    triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
+    torch_output = torch_moe(a, w1, w2, score, topk)
+    assert torch.allclose(triton_output, torch_output, atol=2e-1, rtol=0)
 
 @pytest.mark.parametrize("dtype",
                          [torch.float32, torch.float16, torch.bfloat16])
