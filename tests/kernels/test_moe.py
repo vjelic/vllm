@@ -62,8 +62,7 @@ def test_fused_moe(
     torch_output = torch_moe(a, w1, w2, score, topk)
     assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0)
 
-#@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
-@pytest.mark.parametrize("m", [1, 64, 96, 1000])
+@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
 @pytest.mark.parametrize("n", [14336])
 @pytest.mark.parametrize("k", [4096])
 @pytest.mark.parametrize("e", [8])
@@ -92,8 +91,7 @@ def test_amd_moe_1(
     assert torch.allclose(triton_output, torch_output, atol=2e-2, rtol=0)
 
 
-#@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
-@pytest.mark.parametrize("m", [1, 64, 96, 1000])
+@pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
 @pytest.mark.parametrize("n", [4096])
 @pytest.mark.parametrize("k", [14336])
 @pytest.mark.parametrize("e", [8])
