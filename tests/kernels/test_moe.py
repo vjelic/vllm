@@ -12,7 +12,6 @@ from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.fused_moe import fused_moe
 from vllm.model_executor.models.mixtral import MixtralMoE
-from vllm import envs
 
 
 def torch_moe(a, w1, w2, score, topk):
@@ -52,11 +51,6 @@ def test_fused_moe(
 
     score = torch.randn((m, e), device='cuda', dtype=dtype)
     torch_output = torch_moe(a, w1, w2, score, topk)
-    if envs.VLLM_MOE_PADDING:
-        w1 = F.pad(w1, (0, 128), "constant", 0)
-        torch.cuda.empty_cache()
-        w2 = F.pad(w2, (0, 128), "constant", 0)
-        torch.cuda.empty_cache()
     triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
     assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0)
 
@@ -93,15 +87,6 @@ def test_mixtral_moe(dtype: torch.dtype):
     # vLLM uses 1D query [num_tokens, hidden_dim]
     vllm_inputs = hf_inputs.flatten(0, 1)
 
-    if envs.VLLM_MOE_PADDING:
-        w13_weight = F.pad(vllm_moe.w13_weight, (0, 128), "constant", 0)
-        torch.cuda.empty_cache()
-        w2_weight = F.pad(vllm_moe.w2_weight, (0, 128), "constant", 0)
-        torch.cuda.empty_cache()
-        vllm_moe.w13_weight = Parameter(w13_weight, requires_grad=False)
-        torch.cuda.empty_cache()
-        vllm_moe.w2_weight = Parameter(w2_weight, requires_grad=False)
-        torch.cuda.empty_cache()
     # Run forward passes for both MoE blocks
     hf_states, _ = hf_moe.forward(hf_inputs)
     vllm_states = vllm_moe.forward(vllm_inputs)

@@ -186,9 +186,9 @@ class MixtralMoE(nn.Module):
             w13_ = permute_weight(self.w13_weight.data)
             w2_ = permute_weight(self.w2_weight.data)
             if envs.VLLM_MOE_PADDING:
-                w13_ = F.pad(w13_, (0, 128), "constant", 0)
+                w13_ = F.pad(w13_, (0, 128), "constant", 0)[:,:,:-128]
                 torch.cuda.empty_cache()
-                w2_ = F.pad(w2_, (0, 128), "constant", 0)
+                w2_ = F.pad(w2_, (0, 128), "constant", 0)[:,:,:-128]
                 torch.cuda.empty_cache()
 
             self.w13_weight = nn.Parameter(w13_, requires_grad=False)
