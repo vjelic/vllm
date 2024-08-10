@@ -42,7 +42,9 @@ if TYPE_CHECKING:
     VERBOSE: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
-    VLLM_MOE_PADDING: bool = True
+    VLLM_MOE_PADDING: bool = False
+
+    VLLM_MOE_MFMASWIZZLE: bool = True
 
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
@@ -89,6 +91,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # If set, vllm will print verbose logs during installation
     "VERBOSE":
     lambda: bool(int(os.getenv('VERBOSE', '0'))),
+
+    # Swizzle the weights for mfma ops in moe kernel, or not
+    "VLLM_MOE_MFMASWIZZLE":
+        lambda: bool(int(os.getenv("VLLM_MOE_MFMASWIZZLE", "1"))),
 
     # Root directory for VLLM configuration files
     # Note that this not only affects how vllm finds its configuration files
@@ -245,7 +251,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Pad the weight for moe kernel or not
     "VLLM_MOE_PADDING":
-    lambda: bool(int(os.getenv("VLLM_MOE_PADDING", "1"))),
+    lambda: bool(int(os.getenv("VLLM_MOE_PADDING", "0"))),
 }
 
 # end-env-vars-definition
