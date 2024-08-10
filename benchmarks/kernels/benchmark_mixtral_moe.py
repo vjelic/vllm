@@ -10,7 +10,8 @@ from tqdm import tqdm
 
 from vllm.model_executor.layers.fused_moe import (fused_moe,
                                                   get_config_file_name)
-
+from vllm import envs
+from torch import nn
 
 def main(model, tp_size, gpu, dtype: str):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu)
@@ -154,6 +155,15 @@ def run_timing(num_calls: int, bs: int, d_model: int, num_total_experts: int,
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
+    if envs.VLLM_MOE_PADDING:
+        w1 = nn.Parameter(F.pad(w1.data,
+                        (0, 128), "constant", 0),
+                        requires_grad=False)
+        torch.cuda.empty_cache()
+        w2 = nn.Parameter(F.pad(w2,
+                        (0, 128), "constant", 0),
+                        requires_grad=False)
+        torch.cuda.empty_cache()
 
     w1_scale = None
     w2_scale = None

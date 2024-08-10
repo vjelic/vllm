@@ -46,6 +46,8 @@ if TYPE_CHECKING:
     VLLM_MOE_SHUFFLE: bool = False
     FUSED_MOE_PERSISTENT: bool = False
 
+    VLLM_MOE_MFMASWIZZLE: bool = True
+    VLLM_MOE_MFMASWIZZLE_M_THRSHLD: int = 32
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
 
@@ -256,6 +258,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # User persistent version of fused_moe Triton kernel
     "FUSED_MOE_PERSISTENT":
     lambda: bool(int(os.getenv("FUSED_MOE_PERSISTENT", "0"))),
+
+    # hashem's swizzle
+    # Swizzle the weights for mfma ops in moe kernel, or not
+    "VLLM_MOE_MFMASWIZZLE":
+        lambda: bool(int(os.getenv("VLLM_MOE_MFMASWIZZLE", "1"))),
+    "VLLM_MOE_MFMASWIZZLE_M_THRSHLD":
+        lambda: int(os.getenv("VLLM_MOE_MFMASWIZZLE_M_THRSHLD", "32")),
 }
 
 # end-env-vars-definition
