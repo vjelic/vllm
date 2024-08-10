@@ -456,9 +456,10 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             compute_type=compute_type,
             use_fp8=use_fp8,
             **config,
+            enable_moe_lds_bypass=True
         )
     else:
-        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
         grid = lambda META: (min(
                 NUM_SMS,
                 triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"]) *
@@ -492,6 +493,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             compute_type=compute_type,
             use_fp8=use_fp8,
             **config,
+            enable_moe_lds_bypass=True
         )
 
 
