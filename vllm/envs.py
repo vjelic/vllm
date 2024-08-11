@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     VLLM_MOE_PADDING: bool = False
 
     VLLM_MOE_MFMASWIZZLE: bool = True
+    VLLM_MOE_MFMASWIZZLE_M_THRSHLD: int = 32
 
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
@@ -95,6 +96,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Swizzle the weights for mfma ops in moe kernel, or not
     "VLLM_MOE_MFMASWIZZLE":
         lambda: bool(int(os.getenv("VLLM_MOE_MFMASWIZZLE", "1"))),
+    # Swizzle the weights for mfma ops in moe kernel, or not
+    "VLLM_MOE_MFMASWIZZLE_M_THRSHLD":
+        lambda: int(os.getenv("VLLM_MOE_MFMASWIZZLE_M_THRSHLD", "32")),
 
     # Root directory for VLLM configuration files
     # Note that this not only affects how vllm finds its configuration files

@@ -476,7 +476,7 @@ def fused_experts(hidden_states: torch.Tensor,
     #        and intermediate_cache2.shape[0] <= WVSPLTK_M_THRSHLD \
     #        and intermediate_cache2.shape[1] % 8 == 0 \
     #        and not use_fp8 :
-    if envs.VLLM_MOE_MFMASWIZZLE: 
+    if envs.VLLM_MOE_MFMASWIZZLE and M<=envs.VLLM_MOE_MFMASWIZZLE_M_THRSHLD:
         assert(compute_type == tl.float16, "Only fp16 supported for wvSplitK_mfma16x16 for now")
         #m_blck_sz = -(-(M*topk_ids.shape[1]*3)//E) # target 75%  of expert distribution for this M size
         #if (m_blck_sz >= 12):
