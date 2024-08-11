@@ -607,12 +607,15 @@ def all_close_1d(x: torch.Tensor) -> bool:
     return all(torch.allclose(x[0], x[i]) for i in range(x.shape[0]))
 
 def permute_weight(x: torch.Tensor) -> torch.Tensor:
+    ## Hardcode BLOCK_K and BLOCK_N
+    BK = 128
+    BN = 128
     x_ = x
     if envs.VLLM_MOE_SHUFFLE:
         x_ = x_.view(x.shape[0],
-                         x.shape[1]//16, 16,
-                         x.shape[2]//32, 4, 8)
-        x_ = x_.permute(0,1,3,4,2,5)
+                     x.shape[1]//BN, BN//16, 16,
+                     x.shape[2]//BK, BK//32, 4, 8)
+        x_ = x_.permute(0,1,5,2,6,4,3,7)
         x_ = x_.contiguous()
         x_ = x_.view(x.shape[0], x.shape[1], x.shape[2]);
     return x_
