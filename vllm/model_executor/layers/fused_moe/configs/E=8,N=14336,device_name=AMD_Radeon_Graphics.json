@@ -23,10 +23,10 @@
     },
     "4": {
         "BLOCK_SIZE_M": 16,
-        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_N": 128,
         "BLOCK_SIZE_K": 128,
         "GROUP_SIZE_M": 1,
-        "num_warps": 1,
+        "num_warps": 2,
         "num_stages": 0,
         "waves_per_eu": 0,
         "matrix_instr_nonkdim": 16,
