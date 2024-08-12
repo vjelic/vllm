@@ -50,76 +50,87 @@ def main(args: argparse.Namespace):
         num_scheduler_steps=args.num_scheduler_steps,
     )
 
-    sampling_params = SamplingParams(
-        n=args.n,
-        temperature=0.0 if args.use_beam_search else 1.0,
-        top_p=1.0,
-        use_beam_search=args.use_beam_search,
-        ignore_eos=True,
-        max_tokens=args.output_len,
-    )
-    print(sampling_params)
-    dummy_prompt_token_ids = np.random.randint(10000,
-                                               size=(args.batch_size,
-                                                     args.input_len))
-    dummy_prompts: List[PromptType] = [{
-        "prompt_token_ids": batch
-    } for batch in dummy_prompt_token_ids.tolist()]
+    output_lens = [1] if args.output_len == 1 else [1,args.output_len]
+    results = {}
+    for output_len in output_lens:
+        sampling_params = SamplingParams(
+            n=args.n,
+            temperature=0.0 if args.use_beam_search else 1.0,
+            top_p=1.0,
+            use_beam_search=args.use_beam_search,
+            ignore_eos=True,
+            max_tokens=output_len,
+        )
+        print(sampling_params)
+        dummy_prompt_token_ids = np.random.randint(10000,
+                                                   size=(args.batch_size,
+                                                         args.input_len))
+        dummy_inputs: List[PromptStrictInputs] = [{
+            "prompt_token_ids": batch
+        } for batch in dummy_prompt_token_ids.tolist()]
 
-    def run_to_completion(profile_dir: Optional[str] = None):
-        if profile_dir:
-            with torch.profiler.profile(
-                    activities=[
-                        torch.profiler.ProfilerActivity.CPU,
-                        torch.profiler.ProfilerActivity.CUDA,
-                    ],
-                    on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                        str(profile_dir))) as p:
-                llm.generate(dummy_prompts,
+        def run_to_completion(profile_dir: Optional[str] = None):
+            if profile_dir:
+                with torch.profiler.profile(
+                        activities=[
+                            torch.profiler.ProfilerActivity.CPU,
+                            torch.profiler.ProfilerActivity.CUDA,
+                        ],
+                        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                            str(profile_dir))) as p:
+                    llm.generate(dummy_inputs,
+                                 sampling_params=sampling_params,
+                                 use_tqdm=False)
+                print(p.key_averages())
+            else:
+                start_time = time.perf_counter()
+                llm.generate(dummy_inputs,
                              sampling_params=sampling_params,
                              use_tqdm=False)
-            print(p.key_averages())
+                end_time = time.perf_counter()
+                latency = end_time - start_time
+                return latency
+
+        print("Warming up...")
+        for _ in tqdm(range(args.num_iters_warmup), desc="Warmup iterations"):
+            run_to_completion(profile_dir=None)
+
+        if args.profile:
+            profile_dir = args.profile_result_dir
+            if not profile_dir:
+                profile_dir = Path(
+                    "."
+                ) / "vllm_benchmark_result" / f"latency_result_{time.time()}"
+            print(f"Profiling (results will be saved to '{profile_dir}')...")
+            run_to_completion(profile_dir=profile_dir)
+            return
+
+        # Benchmark.
+        latencies = []
+        for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
+            latencies.append(run_to_completion(profile_dir=None))
+        latencies = np.array(latencies) 
+        percentages = [10, 25, 50, 75, 90]
+        percentiles = np.percentile(latencies, percentages)
+
+        # Record Prefill
+        if output_len == 1:
+            results["TTFT"] = np.mean(latencies)
         else:
-            start_time = time.perf_counter()
-            llm.generate(dummy_prompts,
-                         sampling_params=sampling_params,
-                         use_tqdm=False)
-            end_time = time.perf_counter()
-            latency = end_time - start_time
-            return latency
+            results["avg_latency"] = (np.mean(latencies))
+            results["avg_decode"] = (np.mean(latencies) - results["TTFT"]) / ( args.output_len - 1)
+        results["latencies"] = (latencies.tolist(),)
+        results["percentiles"] = (dict(zip(percentages, percentiles.tolist())),)
 
-    print("Warming up...")
-    for _ in tqdm(range(args.num_iters_warmup), desc="Warmup iterations"):
-        run_to_completion(profile_dir=None)
-
-    if args.profile:
-        profile_dir = args.profile_result_dir
-        if not profile_dir:
-            profile_dir = Path(
-                "."
-            ) / "vllm_benchmark_result" / f"latency_result_{time.time()}"
-        print(f"Profiling (results will be saved to '{profile_dir}')...")
-        run_to_completion(profile_dir=profile_dir)
-        return
-
-    # Benchmark.
-    latencies = []
-    for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
-        latencies.append(run_to_completion(profile_dir=None))
-    latencies = np.array(latencies)
-    percentages = [10, 25, 50, 75, 90, 99]
-    percentiles = np.percentile(latencies, percentages)
-    print(f'Avg latency: {np.mean(latencies)} seconds')
+    print(f'TTFT: {results["TTFT"]} seconds')
+    if "avg_decode" in results and "avg_latency" in results:
+        print(f'Avg decode: {results["avg_decode"]} seconds')
+        print(f'Avg latency: {results["avg_latency"]} seconds')
     for percentage, percentile in zip(percentages, percentiles):
         print(f'{percentage}% percentile latency: {percentile} seconds')
 
     # Output JSON results if specified
     if args.output_json:
-        results = {
-            "avg_latency": np.mean(latencies),
-            "latencies": latencies.tolist(),
-            "percentiles": dict(zip(percentages, percentiles.tolist())),
-        }
         with open(args.output_json, "w") as f:
             json.dump(results, f, indent=4)
 
