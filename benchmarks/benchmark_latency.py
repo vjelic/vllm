@@ -43,8 +43,8 @@ def main(args: argparse.Namespace):
         gpu_memory_utilization=args.gpu_memory_utilization,
         distributed_executor_backend=args.distributed_executor_backend,
     )
-    prefill_token = 1
-    output_lens = [prefill_token, args.output_len]
+
+    output_lens = [1] if args.output_len == 1 else [1,args.output_len]
     results = {}
     for output_len in output_lens:
         sampling_params = SamplingParams(
@@ -53,7 +53,7 @@ def main(args: argparse.Namespace):
             top_p=1.0,
             use_beam_search=args.use_beam_search,
             ignore_eos=True,
-            max_tokens=args.output_len,
+            max_tokens=output_len,
         )
         print(sampling_params)
         dummy_prompt_token_ids = np.random.randint(10000,
@@ -104,10 +104,8 @@ def main(args: argparse.Namespace):
         for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
             latencies.append(run_to_completion(profile_dir=None))
         latencies = np.array(latencies)
-
-        if output_len == prefill_token:
-            results["TTFT"] = np.mean(latencies)
-        else:
+        
+        if output_len > 1:
             percentages = [10, 25, 50, 75, 90]
             percentiles = np.percentile(latencies, percentages)
             results["avg_latency"] = (np.mean(latencies),)
@@ -119,6 +117,15 @@ def main(args: argparse.Namespace):
             print(f"Avg latency: {np.mean(latencies)} seconds")
             for percentage, percentile in zip(percentages, percentiles):
                 print(f"{percentage}% percentile latency: {percentile} seconds")
+        else:
+            results["TTFT"] = np.mean(latencies)
+            if len(output_lens) == 1:
+                print(f'TTFT: {results["TTFT"]} seconds')
+                percentages = [10, 25, 50, 75, 90]
+                percentiles = np.percentile(latencies, percentages)
+                for percentage, percentile in zip(percentages, percentiles):
+                    print(f"{percentage}% percentile latency: {percentile} seconds")
+
         # Output JSON results if specified
         if args.output_json:
             with open(args.output_json, "w") as f:
