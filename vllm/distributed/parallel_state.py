@@ -880,9 +880,11 @@ def initialize_model_parallel(
             range(i * tensor_model_parallel_size,
                   (i + 1) * tensor_model_parallel_size))
         group_ranks.append(ranks)
+    
+    print(f"-----------DEBUG, _ENABLE_CUSTOM_ALL_REDUCE={_ENABLE_CUSTOM_ALL_REDUCE}")
     _TP = init_model_parallel_group(group_ranks,
                                     get_world_group().local_rank, backend)
-
+    print(f"------------DEBUG, _TP.use_custom_allreduce={_TP.use_custom_allreduce}")
     # Build the pipeline model-parallel groups.
     num_pipeline_model_parallel_groups: int = (world_size //
                                                pipeline_model_parallel_size)

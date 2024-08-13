@@ -9,7 +9,7 @@ from vllm.distributed import tensor_model_parallel_gather
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-
+#from vllm.model_executor.layers.tuned_gemm import tgemm
 
 class LogitsProcessor(nn.Module):
     """Process logits and apply logits processors from sampling metadata.
@@ -76,6 +76,10 @@ class LogitsProcessor(nn.Module):
         logits = lm_head.linear_method.apply(lm_head,
                                              hidden_states,
                                              bias=embedding_bias)
+#        logits = tgemm.mm(hidden_states, lm_head.weight)
+#        if embedding_bias is not None:
+#           logits += embedding_bias
+
         logits = tensor_model_parallel_gather(logits)
         # Remove paddings in vocab (if any).
         if logits is not None:

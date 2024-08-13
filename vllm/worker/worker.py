@@ -48,6 +48,7 @@ class Worker(LocalOrDistributedWorkerBase):
         is_driver_worker: bool = False,
         model_runner_cls: Optional[Type[GPUModelRunnerBase]] = None,
     ) -> None:
+        print(f"---------DEBUG, Worker.init parallel_config.disable_custom_all_reduce ={parallel_config.disable_custom_all_reduce}")
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.parallel_config.rank = rank
@@ -319,6 +320,7 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    print(f"---------------DEBUG, parallel_config.disable_custom_all_reduce={parallel_config.disable_custom_all_reduce}")
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
     init_distributed_environment(parallel_config.world_size, rank,

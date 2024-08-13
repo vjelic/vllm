@@ -73,7 +73,6 @@ def _configure_vllm_root_logger() -> None:
                              type(custom_config).__name__)
         logging_config = custom_config
     
-    print(f"VLLM_LOGGING_CONFIG_PATH={VLLM_LOGGING_CONFIG_PATH}")
     if logging_config:
         dictConfig(logging_config)
 

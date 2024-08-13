@@ -122,6 +122,10 @@ class PagedAttention:
                       and kv_cache_dtype == "auto"
                       and (gqa_ratio >= 1 and gqa_ratio <= 16)
                       and max_seq_len <= 32768)
+#        print(f"DEBUG-----------------custom_attn_available={custom_attn_available}, (query.dtype == torch.half)={query.dtype == torch.half}, "
+#              f"query.dtype={query.dtype}, head_size={head_size}, block_size={block_size}, kv_cache_dtype={kv_cache_dtype}, gqa_ratio={gqa_ratio} "
+#              f"max_seq_len={max_seq_len}, (num_seqs, num_heads, head_size)=({num_seqs}, {num_heads}, {head_size}), num_kv_heads={num_kv_heads},  use_custom={use_custom}")
+
         if not use_custom:
             _PARTITION_SIZE = _PARTITION_SIZE_V1V2
         else:
