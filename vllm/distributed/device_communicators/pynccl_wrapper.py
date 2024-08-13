@@ -213,6 +213,8 @@ class NCCLLibrary:
                 _funcs[func.name] = f
             NCCLLibrary.path_to_dict_mapping[so_file] = _funcs
         self._funcs = NCCLLibrary.path_to_dict_mapping[so_file]
+        print(f"DEBUG---------------_funcs={_funcs}")
+
 
 
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
