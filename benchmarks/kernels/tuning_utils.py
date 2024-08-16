@@ -1,5 +1,3 @@
-
-
 ## Utilize method from rocm/Triton tuning script
 def get_full_tuning_space():
     configs = []
