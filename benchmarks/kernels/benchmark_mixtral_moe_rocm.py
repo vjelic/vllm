@@ -17,11 +17,33 @@ from vllm.model_executor.layers.fused_moe import (get_config_file_name,
 
 
 def main(args):
+    os.environ["HIP_VISIBLE_DEVICES"] = args.GPUID
     os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
     os.environ["DEBUG_CLR_GRAPH_PACKET_CAPTURE"] = "1"
 
     for bs in [
+            1,
+            2,
+            4,
+            8,
+            16,
+            24,
+            32,
+            48,
             64,
+            96,
+            128,
+            256,
+            512,
+            1024,
+            1536,
+            2048,
+            3072,
+            4096,
+            8192,
+            16384,
+            18432,
+            20480,
     ]:
         run_grid(bs, model=args.model, TP=args.TP)
 
@@ -30,7 +52,7 @@ def main(args):
 def get_full_tuning_space():
     configs = []
 
-    block_m_range = [32]
+    block_m_range = [16, 32, 64, 128, 256]
     block_n_range = [128]
     block_k_range = [128]
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
@@ -73,7 +95,6 @@ def get_full_tuning_space():
 
 ## Utilize method from rocm/Triton tuning script
 def prune_configs(M, N, K, configs):
-
     return configs
 
 
@@ -108,7 +129,7 @@ def run_grid(bs, model, TP):
     num_calls = 100
 
     num_warmup_trials = 1
-    num_trials = 10
+    num_trials = 1
 
     full_configs = get_full_tuning_space()
     M1 = bs * 2
@@ -309,26 +330,26 @@ def run_timing(
             use_fp8=False
         )
 
-        # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
+        ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-        # invoke_fused_moe_kernel(
-        #     intermediate_cache2,
-        #     w2,
-        #     intermediate_cache3,
-        #     None,  # a2_scale
-        #     None,  # w2_scale
-        #     topk_weights,
-        #     topk_ids,
-        #     sorted_token_ids,
-        #     expert_ids,
-        #     num_tokens_post_padded,
-        #     True,
-        #     1,
-        #     config,
-        #     compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
-        #                   else tl.float16),
-        #     use_fp8=False,
-        # )
+        invoke_fused_moe_kernel(
+            intermediate_cache2,
+            w2,
+            intermediate_cache3,
+            None,  # a2_scale
+            None,  # w2_scale
+            topk_weights,
+            topk_ids,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            True,
+            1,
+            config,
+            compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
+                          else tl.float16),
+            use_fp8=False,
+        )
 
     end_event.record()
     end_event.synchronize()
@@ -352,7 +373,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--TP",
         type=int,
-        choices=[8, 4, 2, 1],
+        choices=[16, 8, 4, 2, 1],
         help="Specify the TP value that the actual model will run on",
         required=True,
     )
