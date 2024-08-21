@@ -8,7 +8,7 @@ def awq_dequantize_kernel(
         qweight_ptr,  # quantized matrix
         scales_ptr,  # scales, per group
         zeros_ptr,  # zeros, per group
-        group_size,  # currently is always 128 when model quantized
+        group_size,  # Should always be 128
         result_ptr,  # Output matrix
         num_cols,  # input num cols in qweight
         num_rows,  # input num rows in qweight
@@ -203,26 +203,11 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         tl.atomic_add(c_ptrs, c, mask=c_mask)
 
 
-# Example input:
-#   qweight.size=torch.Size([3584, 576]),
-#   qweight.dtype = torch.int32,
-#   scales.size=torch.Size([28, 4608]),
-#   scales.dtype=torch.float16,
-#   zeros.size=torch.Size([28, 576]),
-#   zeros.dtype=torch.int32
-#   split_k_iters=0
-#   thx=0
-#   thy=0
-
-
 # qweights - [K     , M // 8], int32
 # scales   - [K // G, M     ], float16
 # zeros    - [K // G, M // 8], int32
-def awq_dequantize_triton(
-    qweight: torch.Tensor,
-    scales: torch.Tensor,
-    zeros: torch.Tensor,
-) -> torch.Tensor:
+def awq_dequantize_triton(qweight: torch.Tensor, scales: torch.Tensor,
+                          zeros: torch.Tensor) -> torch.Tensor:
     K = qweight.shape[0]
     M = scales.shape[1]
     awq_group_size = 128
