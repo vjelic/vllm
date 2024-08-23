@@ -229,7 +229,7 @@ def initialize_ray_cluster(
     if is_hip() or is_xpu():
         ray.init(address=ray_address,
                  ignore_reinit_error=True,
-                 num_gpus=parallel_config.world_size)
+                 num_gpus=parallel_config.world_size, log_to_driver=False)
     else:
         ray.init(address=ray_address, ignore_reinit_error=True)
 

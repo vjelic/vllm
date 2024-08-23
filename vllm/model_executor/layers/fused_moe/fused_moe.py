@@ -14,6 +14,8 @@ from vllm import _custom_ops as ops
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
+from vllm.distributed import get_tensor_model_parallel_rank
+
 logger = init_logger(__name__)
 padding_size = 256 if envs.VLLM_MOE_PADDING else 0
 
