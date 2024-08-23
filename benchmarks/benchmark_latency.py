@@ -14,6 +14,8 @@ from vllm.engine.arg_utils import EngineArgs
 from vllm.inputs import PromptInputs
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import FlexibleArgumentParser
+from vllm.distributed import (get_tensor_model_parallel_rank,
+                              get_tensor_model_parallel_world_size)
 
 from rpd_handler import *
 
@@ -105,7 +107,8 @@ def main(args: argparse.Namespace):
     # Benchmark.
     latencies = []
     if args.enable_prof:
-        profiler = HipTx()
+        rank = get_tensor_model_parallel_rank()
+        profiler = HipTx(rank)
         profiler.start_profiling()
 
     for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
@@ -163,7 +166,7 @@ if __name__ == '__main__':
                         help='Number of iterations to run for warmup.')
     parser.add_argument('--num-iters',
                         type=int,
-                        default=5,
+                        default=1,
                         help='Number of iterations to run.')
     parser.add_argument('--trust-remote-code',
                         action='store_true',

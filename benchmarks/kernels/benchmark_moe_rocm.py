@@ -65,8 +65,8 @@ def run_grid(bs, model, method, gpu, tp_size, dtype: str):
     num_warmup_calls = 10
     num_calls = 30
 
-    num_warmup_trials = 1
-    num_trials = 1
+    num_warmup_trials = 100
+    num_trials = 100
 
     configs = []
 
@@ -267,6 +267,7 @@ def run_timing(num_calls: int, bs: int, d_model: int, num_total_experts: int,
             inplace=True,
             override_config=config,
             use_fp8=dtype == "float8",
+            impl_options=1,
         )
     end_event.record()
     end_event.synchronize()
