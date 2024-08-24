@@ -241,8 +241,11 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         osf: Optional[torch.Tensor] = layer.output_scaling_factor \
             if out_dtype == torch.float8_e4m3fnuz else None
 
-        x_quant = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
-        ops.convert_fp8(x_quant, x, asf)
+        if x.dtype != torch.float8_e4m3fnuz:
+            x_quant = torch.empty_like(x, dtype=torch.float8_e4m3fnuz)
+            ops.convert_fp8(x_quant, x, asf)
+        else:
+            x_quant = x
         m = weight.shape[0]
         n = x.shape[0]
         k = x.shape[1]

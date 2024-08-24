@@ -33,7 +33,7 @@ from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
-from vllm.model_executor.layers.activation import ScaledSiluAndMul
+from vllm.model_executor.layers.activation import ScaledSiluAndMul, SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
@@ -41,6 +41,8 @@ from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
+from vllm.model_executor.layers.quantization.fp8_rocm import (
+    Fp8RocmConfig)
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -75,7 +77,8 @@ class LlamaMLP(nn.Module):
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
-        self.act_fn = ScaledSiluAndMul()
+        self.use_fp8 = isinstance(quant_config, Fp8RocmConfig)
+        self.act_fn = ScaledSiluAndMul() if self.use_fp8 else SiluAndMul()
 
     def forward(self, x):
         if x.shape[0] == 1 and x.shape[1] == 1:
@@ -88,7 +91,7 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
-            x = self.act_fn(gate_up, self.down_proj.activation_scaling_factor)
+            x = self.act_fn(gate_up, self.down_proj.activation_scaling_factor) if self.use_fp8 else self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
 
