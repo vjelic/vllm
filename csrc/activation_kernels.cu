@@ -29,8 +29,6 @@ __global__ void act_and_mul_kernel(
   }
 }
 
-#define FP8_E4M3_MAX std::numeric_limits<c10::Float8_e4m3fnuz>::max()
-
 // Scaled activation and gating kernel template.
 template <typename scalar_t, scalar_t (*ACT_FN)(const scalar_t&)>
 __global__ void scaled_act_and_mul_kernel(
