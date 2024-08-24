@@ -7,6 +7,12 @@
 #include "cuda_compat.h"
 #include "dispatch_utils.h"
 
+#ifdef USE_ROCM
+  #include "quantization/fp8/amd/quant_utils.cuh"
+#else
+  #include "quantization/fp8/nvidia/quant_utils.cuh"
+#endif
+
 namespace vllm {
 
 // Activation and gating kernel template.
@@ -28,7 +34,7 @@ __global__ void act_and_mul_kernel(
 // Scaled activation and gating kernel template.
 template <typename scalar_t, scalar_t (*ACT_FN)(const scalar_t&)>
 __global__ void scaled_act_and_mul_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,          // [..., d]
+    hip_fp8* __restrict__ out,          // [..., d]
     const scalar_t* __restrict__ input,  // [..., 2, d]
     const int d, const float* scale) {
   const int64_t token_idx = blockIdx.x;
@@ -36,8 +42,7 @@ __global__ void scaled_act_and_mul_kernel(
     const scalar_t x = VLLM_LDG(&input[token_idx * 2 * d + idx]);
     const scalar_t y = VLLM_LDG(&input[token_idx * 2 * d + d + idx]);
     float z = static_cast<float>(ACT_FN(x) * y) / *scale;
-    float r = fmax(-FP8_E4M3_MAX, fmin(z, FP8_E4M3_MAX));
-    out[token_idx * d + idx] = static_cast<c10::Float8_e4m3fnuz>(r);
+    out[token_idx * d + idx] = hip_fp8(z);
   }
 }
 
@@ -98,7 +103,7 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   VLLM_DISPATCH_FLOATING_TYPES(                                          \
       input.scalar_type(), "act_and_mul_kernel", [&] {                   \
         vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>             \
-            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fnuz>(),       \
+            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8 *>(out.data_ptr()),       \
                                          input.data_ptr<scalar_t>(), d, scale.data_ptr<float>()); \
       });
 

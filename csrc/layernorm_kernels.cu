@@ -53,7 +53,7 @@ __global__ void rms_norm_kernel(
 
 template <typename scalar_t>
 __global__ void scaled_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,           // [..., hidden_size]
+    hip_fp8* __restrict__ out,           // [..., hidden_size]
     const scalar_t* __restrict__ input,   // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float* scale,
@@ -75,7 +75,7 @@ __global__ void scaled_rms_norm_kernel(
     float x = (float)input[blockIdx.x * hidden_size + idx];
     x = (x * s_variance) * (float)weight[idx] / (*scale);
 
-    out[blockIdx.x * hidden_size + idx] = c10::Float8_e4m3fnuz(x);
+    out[blockIdx.x * hidden_size + idx] = hip_fp8(x);
   }
 }
 
@@ -290,7 +290,7 @@ fused_add_rms_norm_kernel(
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists>
 scaled_fused_add_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,
+    hip_fp8* __restrict__ out,
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
@@ -388,7 +388,7 @@ fused_add_rms_norm_kernel(
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width == 0) || !_typeConvert<scalar_t>::exists>
 scaled_fused_add_rms_norm_kernel(
-    c10::Float8_e4m3fnuz* __restrict__ out,
+    hip_fp8* __restrict__ out,
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
@@ -418,7 +418,7 @@ scaled_fused_add_rms_norm_kernel(
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     float x = (float)residual[blockIdx.x * hidden_size + idx];
     x = (x * s_variance) * (float)weight[idx] / (*scale);
-    out[blockIdx.x * hidden_size + idx] = c10::Float8_e4m3fnuz(x);
+    out[blockIdx.x * hidden_size + idx] = hip_fp8(x);
   }
 }
 
