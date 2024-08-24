@@ -103,7 +103,7 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   VLLM_DISPATCH_FLOATING_TYPES(                                          \
       input.scalar_type(), "act_and_mul_kernel", [&] {                   \
         vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>             \
-            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8 *>(out.data_ptr()),       \
+            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8*>(out.data_ptr()),       \
                                          input.data_ptr<scalar_t>(), d, scale.data_ptr<float>()); \
       });
 

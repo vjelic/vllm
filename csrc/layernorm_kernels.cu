@@ -456,7 +456,7 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   VLLM_DISPATCH_FLOATING_TYPES(input.scalar_type(), "rms_norm_kernel", [&] {
     vllm::scaled_rms_norm_kernel<scalar_t><<<grid, block, 0, stream>>>(
-        out.data_ptr<c10::Float8_e4m3fnuz>(), input.data_ptr<scalar_t>(),
+        reinterpret_cast<hip_fp8*>(out.data_ptr()), input.data_ptr<scalar_t>(),
         weight.data_ptr<scalar_t>(), scale.data_ptr<float>(),
         epsilon, num_tokens, hidden_size);
   });
@@ -476,7 +476,7 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   VLLM_DISPATCH_FLOATING_TYPES(                                                \
       input.scalar_type(), "fused_add_rms_norm_kernel", [&] {                  \
         vllm::scaled_fused_add_rms_norm_kernel<scalar_t, width>                \
-            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fnuz>(), \
+            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8*>(out.data_ptr()), \
                                          input.data_ptr<scalar_t>(),           \
                                          residual.data_ptr<scalar_t>(),        \
                                          weight.data_ptr<scalar_t>(),          \
