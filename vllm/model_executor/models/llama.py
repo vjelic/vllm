@@ -41,8 +41,7 @@ from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
-from vllm.model_executor.layers.quantization.fp8_rocm import (
-    Fp8RocmConfig)
+from vllm.model_executor.layers.quantization.fp8_rocm import Fp8RocmConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -91,7 +90,8 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
-            x = self.act_fn(gate_up, self.down_proj.activation_scaling_factor) if self.use_fp8 else self.act_fn(gate_up)
+            x = self.act_fn(gate_up, self.down_proj.activation_scaling_factor
+                            ) if self.use_fp8 else self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
 
@@ -221,9 +221,9 @@ class LlamaDecoderLayer(nn.Module):
         self.use_fp8 = isinstance(quant_config, Fp8RocmConfig)
         layernorm_module = ScaledRMSNorm if self.use_fp8 else RMSNorm
         self.input_layernorm = layernorm_module(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = layernorm_module(config.hidden_size,
                                                 eps=config.rms_norm_eps)
+        self.post_attention_layernorm = layernorm_module(
+            config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -236,11 +236,16 @@ class LlamaDecoderLayer(nn.Module):
         # Self Attention
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states, 
-                                                 self.self_attn.qkv_proj.activation_scaling_factor) if self.use_fp8 else self.input_layernorm(hidden_states)
+            hidden_states = self.input_layernorm(
+                hidden_states,
+                self.self_attn.qkv_proj.activation_scaling_factor
+            ) if self.use_fp8 else self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, self.self_attn.qkv_proj.activation_scaling_factor, residual) if self.use_fp8 else self.input_layernorm(hidden_states, residual)
+                hidden_states,
+                self.self_attn.qkv_proj.activation_scaling_factor,
+                residual) if self.use_fp8 else self.input_layernorm(
+                    hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -250,7 +255,9 @@ class LlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor, residual) if self.use_fp8 else self.post_attention_layernorm(hidden_states, residual)
+            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor,
+            residual) if self.use_fp8 else self.post_attention_layernorm(
+                hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
