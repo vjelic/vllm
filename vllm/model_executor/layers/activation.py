@@ -35,7 +35,7 @@ class SiluAndMul(nn.Module):
         out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
         ops.silu_and_mul(out, x)
         return out
-    
+
 class ScaledSiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
@@ -45,13 +45,13 @@ class ScaledSiluAndMul(nn.Module):
         x: (num_tokens, 2 * d) or (batch_size, seq_len, 2 * d)
         return: (num_tokens, d) or (batch_size, seq_len, d)
     """
-    
-    act_padding = True if os.getenv("VLLM_FP8_ACT_PADDING", "0") == "1" else False
 
     def forward(self, x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         d = x.shape[-1] // 2
-        output_shape = (x.shape[:-1] + (d + (256 if ScaledSiluAndMul.act_padding else 0), ))
-        out = torch.empty(output_shape, dtype=torch.float8_e4m3fnuz, device=x.device)
+        output_shape = (x.shape[:-1] + (d, ))
+        out = torch.empty(output_shape,
+                          dtype=torch.float8_e4m3fnuz,
+                          device=x.device)
         ops.scaled_silu_and_mul(out, x, scale)
         return out
 

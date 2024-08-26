@@ -32,7 +32,7 @@ __global__ void act_and_mul_kernel(
 // Scaled activation and gating kernel template.
 template <typename scalar_t, scalar_t (*ACT_FN)(const scalar_t&)>
 __global__ void scaled_act_and_mul_kernel(
-    hip_fp8* __restrict__ out,          // [..., d]
+    hip_fp8* __restrict__ out,           // [..., d]
     const scalar_t* __restrict__ input,  // [..., 2, d]
     const int d, const float* scale) {
   const int64_t token_idx = blockIdx.x;
@@ -91,7 +91,7 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
       });
 
 // Launch activation and gating kernel.
-#define LAUNCH_SCALED_ACTIVATION_GATE_KERNEL(KERNEL)                            \
+#define LAUNCH_SCALED_ACTIVATION_GATE_KERNEL(KERNEL)                     \
   int d = input.size(-1) / 2;                                            \
   int64_t num_tokens = input.numel() / input.size(-1);                   \
   dim3 grid(num_tokens);                                                 \
@@ -100,9 +100,10 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();          \
   VLLM_DISPATCH_FLOATING_TYPES(                                          \
       input.scalar_type(), "act_and_mul_kernel", [&] {                   \
-        vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>             \
-            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8*>(out.data_ptr()),       \
-                                         input.data_ptr<scalar_t>(), d, scale.data_ptr<float>()); \
+        vllm::scaled_act_and_mul_kernel<scalar_t, KERNEL<scalar_t>>      \
+            <<<grid, block, 0, stream>>>(                                \
+                reinterpret_cast<hip_fp8*>(out.data_ptr()),              \
+                input.data_ptr<scalar_t>(), d, scale.data_ptr<float>()); \
       });
 
 void silu_and_mul(torch::Tensor& out,    // [..., d]
@@ -112,9 +113,8 @@ void silu_and_mul(torch::Tensor& out,    // [..., d]
 }
 
 void scaled_silu_and_mul(torch::Tensor& out,    // [..., d]
-                  torch::Tensor& input,  // [..., 2 * d]
-                  torch::Tensor& scale) 
-{
+                         torch::Tensor& input,  // [..., 2 * d]
+                         torch::Tensor& scale) {
   LAUNCH_SCALED_ACTIVATION_GATE_KERNEL(vllm::silu_kernel);
 }
 

@@ -16,8 +16,11 @@ except ImportError as e:
 def silu_and_mul(out: torch.Tensor, x: torch.Tensor) -> None:
     vllm_ops.silu_and_mul(out, x)
 
-def scaled_silu_and_mul(out: torch.Tensor, x: torch.Tensor, scale: torch.Tensor) -> None:
+
+def scaled_silu_and_mul(out: torch.Tensor, x: torch.Tensor,
+                        scale: torch.Tensor) -> None:
     vllm_ops.scaled_silu_and_mul(out, x, scale)
+
 
 def gelu_and_mul(out: torch.Tensor, x: torch.Tensor) -> None:
     vllm_ops.gelu_and_mul(out, x)
@@ -122,8 +125,10 @@ def rms_norm(out: torch.Tensor, input: torch.Tensor, weight: torch.Tensor,
              epsilon: float) -> None:
     vllm_ops.rms_norm(out, input, weight, epsilon)
 
-def scaled_rms_norm(out: torch.Tensor, input: torch.Tensor, weight: torch.Tensor,
-             scale: torch.Tensor, epsilon: float) -> None:
+
+def scaled_rms_norm(out: torch.Tensor, input: torch.Tensor,
+                    weight: torch.Tensor, scale: torch.Tensor,
+                    epsilon: float) -> None:
     vllm_ops.scaled_rms_norm(out, input, weight, scale, epsilon)
 
 
@@ -131,9 +136,13 @@ def fused_add_rms_norm(input: torch.Tensor, residual: torch.Tensor,
                        weight: torch.Tensor, epsilon: float) -> None:
     vllm_ops.fused_add_rms_norm(input, residual, weight, epsilon)
 
-def scaled_fused_add_rms_norm(out: torch.Tensor, input: torch.Tensor, residual: torch.Tensor,
-                       weight: torch.Tensor, scale: torch.Tensor, epsilon: float) -> None:
-    vllm_ops.scaled_fused_add_rms_norm(out, input, residual, weight, scale, epsilon)
+
+def scaled_fused_add_rms_norm(out: torch.Tensor, input: torch.Tensor,
+                              residual: torch.Tensor, weight: torch.Tensor,
+                              scale: torch.Tensor, epsilon: float) -> None:
+    vllm_ops.scaled_fused_add_rms_norm(out, input, residual, weight, scale,
+                                       epsilon)
+
 
 # quantization ops
 # awq

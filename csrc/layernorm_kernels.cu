@@ -21,7 +21,6 @@ using __nv_bfloat162 = __hip_bfloat162;
   #include "quantization/fp8/nvidia/quant_utils.cuh"
 #endif
 
-
 namespace vllm {
 
 // TODO(woosuk): Further optimize this kernel.
@@ -53,11 +52,11 @@ __global__ void rms_norm_kernel(
 
 template <typename scalar_t>
 __global__ void scaled_rms_norm_kernel(
-    hip_fp8* __restrict__ out,           // [..., hidden_size]
+    hip_fp8* __restrict__ out,            // [..., hidden_size]
     const scalar_t* __restrict__ input,   // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float* scale,
-    const float epsilon, const int num_tokens, const int hidden_size) {
+    const float* scale, const float epsilon, const int num_tokens,
+    const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
@@ -294,8 +293,8 @@ scaled_fused_add_rms_norm_kernel(
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float* scale,
-    const float epsilon, const int num_tokens, const int hidden_size) {
+    const float* scale, const float epsilon, const int num_tokens,
+    const int hidden_size) {
   // Sanity checks on our vector struct and type-punned pointer arithmetic
   static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
@@ -339,7 +338,8 @@ scaled_fused_add_rms_norm_kernel(
     _f16Vec<scalar_t, width> temp = residual_v[id];
     temp *= s_variance;
     temp *= weight_v[idx];
-    out_v_t temp_quant = fp8::scaled_vec_conversion<out_v_t, in_v_t>(*reinterpret_cast<in_v_t*>(&temp), *scale);
+    out_v_t temp_quant = fp8::scaled_vec_conversion<out_v_t, in_v_t>(
+        *reinterpret_cast<in_v_t*>(&temp), *scale);
     out_v[id] = temp_quant;
   }
 }
@@ -392,8 +392,8 @@ scaled_fused_add_rms_norm_kernel(
     scalar_t* __restrict__ input,         // [..., hidden_size]
     scalar_t* __restrict__ residual,      // [..., hidden_size]
     const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float* scale,
-    const float epsilon, const int num_tokens, const int hidden_size) {
+    const float* scale, const float epsilon, const int num_tokens,
+    const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
@@ -443,10 +443,9 @@ void rms_norm(torch::Tensor& out,     // [..., hidden_size]
 }
 
 void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
-              torch::Tensor& input,   // [..., hidden_size]
-              torch::Tensor& weight,  // [hidden_size]
-              torch::Tensor& scale,
-              float epsilon) {
+                     torch::Tensor& input,   // [..., hidden_size]
+                     torch::Tensor& weight,  // [hidden_size]
+                     torch::Tensor& scale, float epsilon) {
   int hidden_size = input.size(-1);
   int num_tokens = input.numel() / hidden_size;
 
@@ -457,8 +456,8 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   VLLM_DISPATCH_FLOATING_TYPES(input.scalar_type(), "rms_norm_kernel", [&] {
     vllm::scaled_rms_norm_kernel<scalar_t><<<grid, block, 0, stream>>>(
         reinterpret_cast<hip_fp8*>(out.data_ptr()), input.data_ptr<scalar_t>(),
-        weight.data_ptr<scalar_t>(), scale.data_ptr<float>(),
-        epsilon, num_tokens, hidden_size);
+        weight.data_ptr<scalar_t>(), scale.data_ptr<float>(), epsilon,
+        num_tokens, hidden_size);
   });
 }
 
@@ -476,12 +475,11 @@ void scaled_rms_norm(torch::Tensor& out,     // [..., hidden_size]
   VLLM_DISPATCH_FLOATING_TYPES(                                                \
       input.scalar_type(), "fused_add_rms_norm_kernel", [&] {                  \
         vllm::scaled_fused_add_rms_norm_kernel<scalar_t, width>                \
-            <<<grid, block, 0, stream>>>(reinterpret_cast<hip_fp8*>(out.data_ptr()), \
-                                         input.data_ptr<scalar_t>(),           \
-                                         residual.data_ptr<scalar_t>(),        \
-                                         weight.data_ptr<scalar_t>(),          \
-                                         scale.data_ptr<float>(),              \
-                                         epsilon, num_tokens, hidden_size);    \
+            <<<grid, block, 0, stream>>>(                                      \
+                reinterpret_cast<hip_fp8*>(out.data_ptr()),                    \
+                input.data_ptr<scalar_t>(), residual.data_ptr<scalar_t>(),     \
+                weight.data_ptr<scalar_t>(), scale.data_ptr<float>(), epsilon, \
+                num_tokens, hidden_size);                                      \
       });
 
 void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
@@ -520,11 +518,10 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
 }
 
 void scaled_fused_add_rms_norm(torch::Tensor& out,
-                        torch::Tensor& input,     // [..., hidden_size]
-                        torch::Tensor& residual,  // [..., hidden_size]
-                        torch::Tensor& weight,    // [hidden_size]
-                        torch::Tensor& scale,
-                        float epsilon) {
+                               torch::Tensor& input,     // [..., hidden_size]
+                               torch::Tensor& residual,  // [..., hidden_size]
+                               torch::Tensor& weight,    // [hidden_size]
+                               torch::Tensor& scale, float epsilon) {
   int hidden_size = input.size(-1);
   int num_tokens = input.numel() / hidden_size;
 
@@ -555,4 +552,3 @@ void scaled_fused_add_rms_norm(torch::Tensor& out,
     LAUNCH_SCALED_FUSED_ADD_RMS_NORM(0);
   }
 }
-

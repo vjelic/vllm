@@ -71,13 +71,13 @@ class RMSNorm(nn.Module):
         s += f", eps={self.variance_epsilon}"
         return s
 
+
 class ScaledRMSNorm(nn.Module):
     """Root mean square normalization.
 
     Computes x -> w * x / sqrt(E[x^2] + eps) where w is the learned weight.
     Refer to https://arxiv.org/abs/1910.07467
     """
-    act_padding = True if os.getenv("VLLM_FP8_ACT_PADDING", "0") == "1" else False
 
     def __init__(
         self,
