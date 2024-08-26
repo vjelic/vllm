@@ -35,6 +35,7 @@ class SiluAndMul(nn.Module):
         ops.silu_and_mul(out, x)
         return out
 
+
 class ScaledSiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
