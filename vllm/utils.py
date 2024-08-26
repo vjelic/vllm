@@ -20,7 +20,8 @@ from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
 import numpy as np
 import psutil
 import torch
-
+import sqlite3
+from rpdTracerControl import rpdTracerControl
 import vllm.envs as envs
 from vllm.logger import enable_trace_function_call, init_logger
 
@@ -36,11 +37,47 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8_e5m2": torch.uint8,
 }
 
+class rpd_trace():
+
+    def __init__(self,filename=None, name="", nvtx=False, args=None, skip=False):
+        self.skip = skip
+        if not self.skip:
+            from rpdTracerControl import rpdTracerControl
+            self.rpd = rpdTracerControl(filename, nvtx=nvtx)
+            self.name = name
+            self.args = args if args else ""
+    
+    def _recreate_cm(self):
+        return self
+
+    def __call__(self, func):
+        if not self.skip:
+            if self.name:
+                self.name += f":{func.__name__}"
+            else:
+                self.name = f"{func.__qualname__}"
+            @wraps(func)
+            def inner(*args, **kwds):
+                with self._recreate_cm():
+                    return func(*args, **kwds)
+            return inner
+        return func
+
+    def __enter__(self):
+        if not self.skip:
+            self.rpd.__enter__()
+            self.rpd.rangePush("python", f"{self.name}", f"{self.args}")
+        return self
+
+    def __exit__(self, *exc):
+        if not self.skip:
+           self.rpd.rangePop()
+           self.rpd.__exit__(None,None,None)
+        return False
 
 class Device(enum.Enum):
     GPU = enum.auto()
     CPU = enum.auto()
-
 
 class Counter:
 
