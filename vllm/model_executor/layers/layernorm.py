@@ -1,6 +1,5 @@
 """Custom normalization layers."""
 from typing import Optional, Tuple, Union
-import os
 
 import torch
 import torch.nn as nn

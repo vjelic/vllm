@@ -1,6 +1,5 @@
 """Custom activation functions."""
 import math
-import os
 from typing import Optional
 
 import torch
