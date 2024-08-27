@@ -39,7 +39,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
 
 class rpd_trace():
 
-    def __init__(self,filename=None, name="", nvtx=False, args=None, skip=False):
+    def __init__(self, filename=None, name=None, nvtx=False, args=None, skip=False):
         self.skip = skip
         if not self.skip:
             from rpdTracerControl import rpdTracerControl
@@ -53,7 +53,7 @@ class rpd_trace():
     def __call__(self, func):
         if not self.skip:
             if self.name:
-                self.name += f":{func.__name__}"
+                self.name += f"{func.__name__}"
             else:
                 self.name = f"{func.__qualname__}"
             @wraps(func)
@@ -72,8 +72,24 @@ class rpd_trace():
     def __exit__(self, *exc):
         if not self.skip:
            self.rpd.rangePop()
-           self.rpd.__exit__(None,None,None)
+           self.rpd.__exit__(None, None, None)
         return False
+
+class rpd_mark():
+
+    def __init__(self, name=None):
+            self.name = name
+
+    def __call__(self, func):
+        from hipScopedMarker import hipScopedMarker
+        import functools
+        @wraps(func)
+        def inner(*args, **kwds):
+            marker_name = self.name if self.name else f"{func.__name__}"
+            hipScopedMarker.emitMarker(f"{marker_name}")
+            with hipScopedMarker(f"{marker_name}"):
+                return func(*args, **kwds)
+        return inner
 
 class Device(enum.Enum):
     GPU = enum.auto()
