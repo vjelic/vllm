@@ -29,6 +29,9 @@ import yaml
 from packaging.version import Version
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
+import sqlite3
+from contextlib import contextmanager, nullcontext
+from rpdTracerControl import rpdTracerControl
 import vllm.envs as envs
 from vllm.logger import enable_trace_function_call, init_logger
 
@@ -148,11 +151,64 @@ class _Sentinel:
 
 ALL_PINNED_SENTINEL = _Sentinel()
 
+class rpd_trace():
+
+    def __init__(self, filename=None, name=None, nvtx=False, args=None, skip=False):
+        self.skip = skip
+        if not self.skip:
+            from rpdTracerControl import rpdTracerControl
+            if 'RANK' in os.environ or int(os.getenv('WORLD_SIZE', 1)) > 1:
+                filename = f"{filename}_pid{os.getpid()}"
+            self.rpd = rpdTracerControl(filename, nvtx=nvtx)
+            self.name = name
+            self.args = args if args else ""
+    
+    def _recreate_cm(self):
+        return self
+
+    def __call__(self, func):
+        if not self.skip:
+            if self.name:
+                self.name += f"{func.__name__}"
+            else:
+                self.name = f"{func.__qualname__}"
+            @wraps(func)
+            def inner(*args, **kwds):
+                with self._recreate_cm():
+                    return func(*args, **kwds)
+            return inner
+        return func
+
+    def __enter__(self):
+        if not self.skip:
+            self.rpd.__enter__()
+            self.rpd.rangePush("python", f"{self.name}", f"{self.args}")
+        return self
+
+    def __exit__(self, *exc):
+        if not self.skip:
+           self.rpd.rangePop()
+           self.rpd.__exit__(None, None, None)
+        return False
+
+class rpd_mark():
+
+    def __init__(self, name=None):
+            self.name = name
+
+    def __call__(self, func):
+        from hipScopedMarker import hipScopedMarker
+        import functools
+        @wraps(func)
+        def inner(*args, **kwds):
+            marker_name = self.name if self.name else f"{func.__name__}"
+            with hipScopedMarker(f"{marker_name}"):
+                return func(*args, **kwds)
+        return inner
 
 class Device(enum.Enum):
     GPU = enum.auto()
     CPU = enum.auto()
-
 
 class Counter:
 

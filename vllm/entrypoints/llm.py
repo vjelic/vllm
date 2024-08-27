@@ -23,10 +23,9 @@ from vllm.transformers_utils.tokenizer import (AnyTokenizer,
                                                get_cached_tokenizer)
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import Counter, deprecate_kwargs, is_list_of
+from vllm.utils import Counter, deprecate_kwargs, is_list_of, rpd_mark
 
 logger = init_logger(__name__)
-
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -265,7 +264,7 @@ class LLM:
         lora_request: Optional[Union[List[LoRARequest], LoRARequest]] = None,
     ) -> List[RequestOutput]:
         ...
-
+    @rpd_mark()
     @deprecate_kwargs(
         "prompts",
         "prompt_token_ids",
@@ -490,6 +489,7 @@ class LLM:
     ) -> List[EmbeddingRequestOutput]:
         ...
 
+    @rpd_mark()
     @deprecate_kwargs(
         "prompts",
         "prompt_token_ids",
@@ -685,6 +685,7 @@ class LLM:
                 params.logits_processors.append(guided_logits_processor)
         return params
 
+    @rpd_mark()
     def _run_engine(
             self, *, use_tqdm: bool
     ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
