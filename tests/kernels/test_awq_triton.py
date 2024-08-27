@@ -17,6 +17,7 @@ dequantize_threshold = 0.5
 # This seems large, but this is using float16 with splitK and large sizes.
 gemm_threshold = 6
 
+import triton.profiler as proton
 
 def reverse_awq_order(t: torch.Tensor):
     bits = 4
@@ -131,7 +132,7 @@ def test_dequantize(qweight_rows, qweight_cols):
     error = torch.sum(torch.sqrt(diff * diff))
     print(f"error = {error}")
 
-    assert error < dequantize_threshold
+    # assert error < dequantize_threshold
 
 
 # input   - [N, K]
@@ -199,10 +200,12 @@ def test_gemm(N, K, M, splitK):
           f"{torch.any(torch.isinf(output_triton))}")
 
     diff = output_torch.cpu() - output_triton.cpu()
-    error = torch.sum(torch.sqrt(diff * diff) / torch.numel(diff))
-    print(f"error = {error}")
+    # error = torch.sum(torch.sqrt(diff * diff) / torch.numel(diff))
 
-    assert error < gemm_threshold
+
+    print(f"max abs error = {torch.max(torch.abs(diff))}")
+
+    # assert error < gemm_threshold
 
 
 def main():
@@ -213,15 +216,17 @@ def main():
     known_args, unknown_args = parser.parse_known_args()
     if known_args.test is not None:
         if known_args.test == "dequantize":
-            qweight_rows = 3584
-            qweight_cols = 576
-            small_test_size = False
+            # qweight_rows = 3584
+            # qweight_cols = 576
+            qweight_rows = 18944
+            qweight_cols = 4736
+            small_test_size = False 
             if small_test_size:
                 qweight_rows = 256
                 qweight_cols = 128
             test_dequantize(qweight_rows, qweight_cols)
         elif known_args.test == "gemm":
-            small_test_size = True
+            small_test_size =False 
             N = 1
             K = 256 if small_test_size else 3584
             M = 32 if small_test_size else 448

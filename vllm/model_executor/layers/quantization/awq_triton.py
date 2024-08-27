@@ -2,7 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-
 @triton.jit
 def awq_dequantize_kernel(
         qweight_ptr,  # quantized matrix
@@ -20,7 +19,8 @@ def awq_dequantize_kernel(
 
     # Compute offsets and masks for qweight_ptr.
     offsets_y = pid_y * BLOCK_SIZE_Y + tl.arange(0, BLOCK_SIZE_Y)
-    offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X * 8) // 8
+    # offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X * 8) // 8
+    offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X)
     offsets = num_cols * offsets_y[:, None] + offsets_x[None, :]
 
     masks_y = offsets_y < num_rows
@@ -41,6 +41,9 @@ def awq_dequantize_kernel(
 
     # Load the weights.
     iweights = tl.load(qweight_ptr + offsets, masks)
+    iweights = tl.interleave(iweights, iweights)
+    iweights = tl.interleave(iweights, iweights)
+    iweights = tl.interleave(iweights, iweights)
 
     # Create reverse AWQ order as tensor: [0, 4, 1, 5, 2, 6, 3, 7]
     # that will map given indices to the correct order.
@@ -57,9 +60,11 @@ def awq_dequantize_kernel(
     iweights = (iweights >> shifts) & 0xF
 
     # Compute zero offsets and masks.
-    zero_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
-                      tl.arange(0, BLOCK_SIZE_Y) // group_size)
-    zero_offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X * 8) // 8
+    # zero_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
+                      # tl.arange(0, BLOCK_SIZE_Y) // group_size)
+    zero_offsets_y = pid_y * BLOCK_SIZE_Y // group_size + tl.arange(0, 1)
+    # zero_offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X * 8) // 8
+    zero_offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X)
     zero_offsets = num_cols * zero_offsets_y[:, None] + zero_offsets_x[None, :]
 
     zero_masks_y = zero_offsets_y < num_rows // group_size
@@ -68,13 +73,18 @@ def awq_dequantize_kernel(
 
     # Load the zeros.
     zeros = tl.load(zeros_ptr + zero_offsets, zero_masks)
+    zeros = tl.interleave(zeros, zeros)
+    zeros = tl.interleave(zeros, zeros)
+    zeros = tl.interleave(zeros, zeros)
+    zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_Y, BLOCK_SIZE_X * 8))
 
     # Unpack and reorder: shift out the correct 4-bit value and mask.
     zeros = (zeros >> shifts) & 0xF
 
     # Compute scale offsets and masks.
-    scale_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
-                       tl.arange(0, BLOCK_SIZE_Y) // group_size)
+    # scale_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
+                       # tl.arange(0, BLOCK_SIZE_Y) // group_size)
+    scale_offsets_y = pid_y * BLOCK_SIZE_Y // group_size + tl.arange(0, 1) 
     scale_offsets_x = (pid_x * BLOCK_SIZE_X * 8 +
                        tl.arange(0, BLOCK_SIZE_X * 8))
     scale_offsets = (num_cols * 8 * scale_offsets_y[:, None] +
@@ -85,6 +95,7 @@ def awq_dequantize_kernel(
 
     # Load the scales.
     scales = tl.load(scales_ptr + scale_offsets, scale_masks)
+    scales = tl.broadcast_to(scales, (BLOCK_SIZE_Y, BLOCK_SIZE_X * 8))
 
     # Dequantize.
     iweights = (iweights - zeros) * scales
@@ -93,8 +104,19 @@ def awq_dequantize_kernel(
     # Finally, store.
     tl.store(result_ptr + result_offsets, iweights, result_masks)
 
+def _matmul_launch_metadata(grid, kernel, args):
+    ret = {}
+    M, N, K = args["M"], args["N"], args["K"]
+    ret["name"] = f"{kernel.name} [M={M}, N={N}, K={K}]"
+    ret["flops8"] = 2. * M * N * K
+    if "c_ptr" in args:
+        bytes_per_elem = args["c_ptr"].element_size()
+    else:
+        bytes_per_elem = 1 if args["FP8_OUTPUT"] else 2
+    ret["bytes"] = bytes_per_elem * (M * K + N * K)
+    return ret
 
-@triton.jit
+@triton.jit(launch_metadata=_matmul_launch_metadata)
 def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
                     awq_group_size, BLOCK_SIZE_M: tl.constexpr,
                     BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
@@ -135,12 +157,10 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
     offsets_am = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     masks_am = offsets_am < M
 
-    offsets_bn = (pid_n * (BLOCK_SIZE_N // 8) +
-                  tl.arange(0, BLOCK_SIZE_N) // 8)
+    offsets_bn = pid_n * (BLOCK_SIZE_N // 8) + tl.arange(0, BLOCK_SIZE_N // 8)
     masks_bn = offsets_bn < N // 8
 
-    offsets_zn = (pid_n * (BLOCK_SIZE_N // 8) +
-                  tl.arange(0, BLOCK_SIZE_N) // 8)
+    offsets_zn = pid_n * (BLOCK_SIZE_N // 8) + tl.arange(0, BLOCK_SIZE_N // 8) 
     masks_zn = offsets_zn < N // 8
 
     offsets_sn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -163,22 +183,29 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
 
         masks_b = masks_k[:, None] & masks_bn[None, :]
         b = tl.load(b_ptrs, mask=masks_b)
+        b = tl.interleave(b, b)
+        b = tl.interleave(b, b)
+        b = tl.interleave(b, b)
 
         # Dequantize b.
         offsets_szk = ((BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) //
-                       awq_group_size +
-                       tl.arange(0, BLOCK_SIZE_K) // awq_group_size)
+                       awq_group_size + tl.arange(0, 1))
         offsets_z = (N // 8) * offsets_szk[:, None] + offsets_zn[None, :]
         masks_zk = offsets_szk < K // awq_group_size
         masks_z = masks_zk[:, None] & masks_zn[None, :]
         zeros_ptrs = zeros_ptr + offsets_z
         zeros = tl.load(zeros_ptrs, mask=masks_z)
+        zeros = tl.interleave(zeros, zeros)
+        zeros = tl.interleave(zeros, zeros)
+        zeros = tl.interleave(zeros, zeros)
+        zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_K, BLOCK_SIZE_N))
 
         offsets_s = N * offsets_szk[:, None] + offsets_sn[None, :]
         masks_sk = offsets_szk < K // awq_group_size
         masks_s = masks_sk[:, None] & masks_sn[None, :]
         scales_ptrs = scales_ptr + offsets_s
         scales = tl.load(scales_ptrs, mask=masks_s)
+        scales = tl.broadcast_to(scales, (BLOCK_SIZE_K, BLOCK_SIZE_N))
 
         b = (b >> shifts) & 0xF
         zeros = (zeros >> shifts) & 0xF
