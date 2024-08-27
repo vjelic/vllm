@@ -9,12 +9,11 @@ from typing import List, Optional
 import numpy as np
 import torch
 from tqdm import tqdm
-from contextlib import contextmanager, nullcontext
 
 from vllm import LLM, SamplingParams
 from vllm.inputs import PromptStrictInputs
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
-from vllm.utils import rpd_trace
+from vllm.utils import rpd_profiler_context, torch_profiler_context 
 
 def main(args: argparse.Namespace):
     print(args)
@@ -59,30 +58,6 @@ def main(args: argparse.Namespace):
         "prompt_token_ids": batch
     } for batch in dummy_prompt_token_ids.tolist()]
     
-    @contextmanager
-    def rpd_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
-        trace_file_path = os.path.join(profile_dir, f"{trace_file_name}.rpd")
-        with rpd_trace(filename = f"{trace_file_path}", name = "run_to_completion", nvtx = True) as p:
-            yield p
-        p.rpd.top_totals()
-
-    @contextmanager
-    def torch_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
-        p = torch.profiler.profile(
-                    activities=[
-                        torch.profiler.ProfilerActivity.CPU,
-                        torch.profiler.ProfilerActivity.CUDA,
-                    ],
-                    on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                        str(profile_dir)))
-        p.start()
-        try:
-            with torch.no_grad():
-                yield p
-        finally:
-            p.stop()
-            print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
-
     def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
          if args.profile_torch:
              return torch_profiler_context(profile_dir, trace_file_name)
@@ -90,7 +65,7 @@ def main(args: argparse.Namespace):
              return rpd_profiler_context(profile_dir, trace_file_name)
          else:
              return nullcontext()
-
+    
     def run_to_completion(profile_dir: Optional[str] = None, profiling_mode = None):
         if profile_dir:
             name = os.path.basename(os.path.normpath(args.model))
@@ -115,7 +90,7 @@ def main(args: argparse.Namespace):
     if args.profile_torch or args.profile_rpd:
         profile_dir = args.profile_dir
         if not profile_dir:
-            profile_dir = Path(".") / "vllm_benchmark_result"
+            profile_dir = Path(".") / "vllm_benchmark_latency_result"
             os.makedirs(profile_dir, exist_ok=True)
         print(f"Profiling (results will be saved to '{profile_dir}')...")
         run_to_completion(profile_dir=profile_dir)    

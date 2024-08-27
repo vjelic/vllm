@@ -4,14 +4,23 @@ import json
 import random
 import time
 from typing import List, Optional, Tuple
-
+import os
+from pathlib import Path
 import torch
 from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
+from vllm.utils import rpd_profiler_context, torch_profiler_context
 
+def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
+         if args.profile_torch:
+             return torch_profiler_context(profile_dir, trace_file_name)
+         elif args.profile_rpd:
+             return rpd_profiler_context(profile_dir, trace_file_name)
+         else:
+             return nullcontext()
 
 def sample_requests(
     dataset_path: str,
@@ -121,11 +130,22 @@ def run_vllm(
                 max_tokens=output_len,
             ))
 
-    start = time.perf_counter()
-    llm.generate(prompts, sampling_params, use_tqdm=True)
-    end = time.perf_counter()
-    return end - start
-
+    if args.profile_torch or args.profile_rpd:
+        profile_dir = args.profile_dir
+        if not profile_dir:
+            profile_dir = Path(".") / "vllm_benchmark_throughput_result"
+            os.makedirs(profile_dir, exist_ok=True)
+        print(f"Profiling (results will be saved to '{profile_dir}')...")
+        name = os.path.basename(os.path.normpath(args.model))
+        model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}"
+        with get_profiling_context(profile_dir, model_trace_name):
+            llm.generate(prompts, sampling_params, use_tqdm=True)
+        return
+    else:
+        start = time.perf_counter()
+        llm.generate(prompts, sampling_params, use_tqdm=True)
+        end = time.perf_counter()
+        return end - start
 
 def run_hf(
     requests: List[Tuple[str, int, int]],
@@ -243,20 +263,25 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(prompt_len + output_len
                            for _, prompt_len, output_len in requests)
-    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+    
+    if args.profile_torch or args.profile_rpd:
+        # Profiling complete
+        pass
+    else:
+        print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
+              f"{total_num_tokens / elapsed_time:.2f} tokens/s")
 
-    # Output JSON results if specified
-    if args.output_json:
-        results = {
-            "elapsed_time": elapsed_time,
-            "num_requests": len(requests),
-            "total_num_tokens": total_num_tokens,
-            "requests_per_second": len(requests) / elapsed_time,
-            "tokens_per_second": total_num_tokens / elapsed_time,
-        }
-        with open(args.output_json, "w") as f:
-            json.dump(results, f, indent=4)
+        # Output JSON results if specified
+        if args.output_json:
+            results = {
+                "elapsed_time": elapsed_time,
+                "num_requests": len(requests),
+                "total_num_tokens": total_num_tokens,
+                "requests_per_second": len(requests) / elapsed_time,
+                "tokens_per_second": total_num_tokens / elapsed_time,
+            }
+            with open(args.output_json, "w") as f:
+                json.dump(results, f, indent=4)
 
 
 if __name__ == "__main__":
@@ -384,6 +409,20 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help='Path to save the throughput results in JSON format.')
+    parser.add_argument(
+        '--profile_torch',
+        action='store_true',
+        help='profile the generation process of a single batch')
+    parser.add_argument(
+        '--profile_rpd',
+        action='store_true',
+        help='profile the generation process of a single batch')
+    parser.add_argument(
+        '--profile_dir',
+        type=str,
+        default=None,
+        help=('path to save the profiler output. Can be visualized '
+              'with ui.perfetto.dev or Tensorboard.'))
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
