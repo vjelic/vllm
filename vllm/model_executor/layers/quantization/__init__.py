@@ -17,7 +17,6 @@ from vllm.model_executor.layers.quantization.gptq_marlin_24 import (
     GPTQMarlin24Config)
 from vllm.model_executor.layers.quantization.marlin import MarlinConfig
 from vllm.model_executor.layers.quantization.squeezellm import SqueezeLLMConfig
-from vllm.utils import is_hip
 
 QUANTIZATION_METHODS: Dict[str, Type[QuantizationConfig]] = {
     "aqlm": AQLMConfig,
