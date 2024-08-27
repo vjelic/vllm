@@ -210,7 +210,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.weight = Parameter(weight, requires_grad=False)
                 layer.weight_scale = Parameter(weight_scale, requires_grad=False)
                 if input_scale is not None:
-                    layer.act_scale = Parameter(input_scale,
+                    layer.input_scale = Parameter(input_scale,
                                                       requires_grad=False)
             
             max_w_scale = layer.weight_scale.max()
@@ -234,13 +234,13 @@ class Fp8LinearMethod(LinearMethodBase):
             #   Dynamic: set to None (required input to ops.scaled_fp8_quant).
             #   Static:  set to max of the act_scales (since they are equal).
             if self.quant_config.activation_scheme == "dynamic":
-                layer.act_scale = None
+                layer.input_scale = None
             elif self.quant_config.activation_scheme == "static":
-                if not all_close_1d(layer.act_scale):
+                if not all_close_1d(layer.input_scale):
                     raise ValueError(
                         "All the act_scales for the logical weights of a layer "
-                        f"must be equal. But got {layer.act_scale}")
-                layer.act_scale = Parameter(layer.act_scale.max(),
+                        f"must be equal. But got {layer.input_scale}")
+                layer.input_scale = Parameter(layer.input_scale.max(),
                                             requires_grad=False)
             else:
                 raise ValueError(
@@ -254,7 +254,7 @@ class Fp8LinearMethod(LinearMethodBase):
         #   If dynamic, layer.act_scale is None and x_scale computed from x.
         #   If static,  layer.act_scale is scalar and x_scale set to act_scale.
         qinput, x_scale = ops.scaled_fp8_quant(x,
-                                               layer.act_scale,
+                                               layer.input_scale,
                                                batch_dim_padding=17)
 
         # Fused GEMM_DQ -- note we padded the input above because

@@ -2,6 +2,8 @@ from typing import Optional, Tuple, Type
 
 import torch
 
+from vllm.utils import is_hip
+
 try:
     from vllm._C import cache_ops as vllm_cache_ops
     from vllm._C import ops as vllm_ops
