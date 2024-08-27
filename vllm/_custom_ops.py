@@ -284,9 +284,7 @@ def scaled_fp8_quant(
     out_dtype = torch.float8_e4m3fnuz if is_hip() else torch.float8_e4m3fn
     if batch_dim_padding:
         shape = (max(batch_dim_padding, input.shape[0]), *input.shape[1:])
-        output = torch.empty(shape,
-                             device=input.device,
-                             dtype=out_dtype)
+        output = torch.empty(shape, device=input.device, dtype=out_dtype)
     else:
         output = torch.empty_like(input, dtype=out_dtype)
     if scale is None:

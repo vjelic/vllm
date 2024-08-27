@@ -10,10 +10,10 @@
 #ifdef USE_ROCM
   #include "amd/quant_utils.cuh"
   #include "amd/hip_float8.h"
-  using FP8_TYPE = c10::Float8_e4m3fnuz;
+using FP8_TYPE = c10::Float8_e4m3fnuz;
 #else
   #include "nvidia/quant_utils.cuh"
-  using FP8_TYPE = c10::Float8_e4m3fn;
+using FP8_TYPE = c10::Float8_e4m3fn;
 #endif
 
 namespace vllm {
@@ -62,15 +62,15 @@ __device__ __forceinline__ float atomicMaxFloat(float* addr, float value) {
 #define FP8_E4M3_MAX std::numeric_limits<FP8_TYPE>::max()
 
 template <typename scalar_t>
-__device__ __forceinline__ FP8_TYPE scaled_fp8_conversion(
-    const scalar_t val, const float scale) {
+__device__ __forceinline__ FP8_TYPE scaled_fp8_conversion(const scalar_t val,
+                                                          const float scale) {
   float x = static_cast<float>(val) / scale;
   float r = fmax(-FP8_E4M3_MAX, fmin(x, FP8_E4M3_MAX));
-  #ifdef USE_ROCM
+#ifdef USE_ROCM
   return static_cast<FP8_TYPE>(r);
-  #else
+#else
   return FP8_TYPE(hip_fp8(r).data, FP8_TYPE::from_bits());
-  #endif
+#endif
 }
 
 // Compute the absolute maximum m of the input tensor and store
@@ -110,8 +110,7 @@ __global__ void segmented_max_reduction(float* __restrict__ scale,
   // Finally, since cache[0] contains the maximum for this thread block,
   // atomically write the max to the target location
   if (threadIdx.x == 0) {
-    atomicMaxFloat(scale,
-                   cache[0] / std::numeric_limits<FP8_TYPE>::max());
+    atomicMaxFloat(scale, cache[0] / std::numeric_limits<FP8_TYPE>::max());
   }
 }
 
