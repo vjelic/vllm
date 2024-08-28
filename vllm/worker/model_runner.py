@@ -22,7 +22,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (MultiModalData, SamplerOutput, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (CudaMemoryProfiler, get_kv_cache_torch_dtype, is_hip,
-                        is_pin_memory_available, make_tensor_with_pad)
+                        is_pin_memory_available, make_tensor_with_pad, rpd_mark)
 
 logger = init_logger(__name__)
 
@@ -696,6 +696,7 @@ class ModelRunner:
                 sampling_metadata, lora_requests, lora_mapping,
                 multi_modal_input)
 
+    @rpd_mark()
     @torch.inference_mode()
     def execute_model(
         self,

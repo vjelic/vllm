@@ -87,7 +87,6 @@ class rpd_mark():
         @wraps(func)
         def inner(*args, **kwds):
             marker_name = self.name if self.name else f"{func.__name__}"
-            hipScopedMarker.emitMarker(f"{marker_name}")
             with hipScopedMarker(f"{marker_name}"):
                 return func(*args, **kwds)
         return inner

@@ -16,10 +16,9 @@ from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import MultiModalData
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import Counter, deprecate_kwargs
+from vllm.utils import Counter, deprecate_kwargs, rpd_mark
 
 logger = init_logger(__name__)
-
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -233,7 +232,8 @@ class LLM:
         lora_request: Optional[LoRARequest] = None,
     ) -> List[RequestOutput]:
         ...
-
+    
+    @rpd_mark()
     @deprecate_kwargs("prompts",
                       "prompt_token_ids",
                       "multi_modal_data",
@@ -378,7 +378,8 @@ class LLM:
         lora_request: Optional[LoRARequest] = None,
     ) -> List[EmbeddingRequestOutput]:
         ...
-
+    
+    @rpd_mark()
     @deprecate_kwargs("prompts",
                       "prompt_token_ids",
                       "multi_modal_data",
@@ -533,6 +534,7 @@ class LLM:
                                     params,
                                     lora_request=lora_request)
 
+    @rpd_mark()
     def _run_engine(
             self, *, use_tqdm: bool
     ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:

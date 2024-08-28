@@ -13,6 +13,7 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import (CompletionSequenceGroupOutput, Logprob,
                            PromptLogprobs, SampleLogprobs, SamplerOutput,
                            SequenceOutput)
+from vllm.utils import rpd_mark 
 
 # (num_token_ids, num_parent_ids) per sequence group.
 SampleResultType = List[Tuple[List[int], List[int]]]
@@ -47,6 +48,7 @@ class Sampler(nn.Module):
         # speculative decoding.
         self.include_gpu_probs_tensor = False
 
+    @rpd_mark(name="Sampler Foward")
     def forward(
         self,
         logits: torch.Tensor,
@@ -634,7 +636,7 @@ def _sample_with_triton_kernel(
     ]
     return sample_results
 
-
+@rpd_mark()
 def _sample(
     probs: torch.Tensor, logprobs: torch.Tensor,
     sampling_metadata: SamplingMetadata, sampling_tensors: SamplingTensors,
