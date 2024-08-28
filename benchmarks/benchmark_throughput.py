@@ -12,7 +12,42 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
-from vllm.utils import rpd_profiler_context, torch_profiler_context
+from vllm.utils import rpd_trace
+from contextlib import contextmanager, nullcontext
+
+@contextmanager
+def rpd_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
+    trace_file_path = os.path.join(profile_dir, f"{trace_file_name}.rpd")
+    with rpd_trace(filename = f"{trace_file_path}", name = "run_to_completion", nvtx = True) as p:
+        yield p
+    p.rpd.top_totals()
+
+@contextmanager
+def torch_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
+    p = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    str(profile_dir)))
+    p.start()
+    try:
+        with torch.no_grad():
+            yield p
+    finally:
+        p.stop()
+        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
+     if args.profile_torch:
+         print(f"trace_file_name: {trace_file_name}")
+         return torch_profiler_context(profile_dir, trace_file_name)
+     elif args.profile_rpd:
+         print(f"trace_file_name: {trace_file_name}")
+         return rpd_profiler_context(profile_dir, trace_file_name)
+     else:
+         return nullcontext()
 
 def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
          if args.profile_torch:
