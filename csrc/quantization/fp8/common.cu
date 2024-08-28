@@ -142,7 +142,7 @@ __global__ void scaled_fp8_quant_kernel(FP8_TYPE* __restrict__ out,
                                         const scalar_t* __restrict__ input,
                                         const float* __restrict__ scale,
                                         int64_t num_elems) {
-  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  int64_t i = blockDim.x * blockIdx.x + threadIdx.x;
   while (i < num_elems) {
     out[i] = scaled_fp8_conversion(input[i], *scale);
     i += blockDim.x * gridDim.x;
