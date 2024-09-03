@@ -44,6 +44,8 @@ class rpd_trace():
         self.skip = skip
         if not self.skip:
             from rpdTracerControl import rpdTracerControl
+            if 'RANK' in os.environ or int(os.getenv('WORLD_SIZE', 1)) > 1:
+                filename = f"{filename}_pid{os.getpid()}"
             self.rpd = rpdTracerControl(filename, nvtx=nvtx)
             self.name = name
             self.args = args if args else ""
