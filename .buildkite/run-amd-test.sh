@@ -66,4 +66,3 @@ docker run \
         --name ${container_name} \
         ${image_name} \
         /bin/bash -c "${@}"
-
