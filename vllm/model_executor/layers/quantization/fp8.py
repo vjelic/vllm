@@ -10,14 +10,11 @@ from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.utils import print_warning_once, is_hip
+from vllm.utils import is_hip, print_warning_once
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
 logger = init_logger(__name__)
-
-
-
 
 class Fp8Config(QuantizationConfig):
     """Config class for FP8."""
@@ -94,7 +91,8 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
-        self.TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).to(torch.float) if is_hip() else None
+        self.TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).to(
+            torch.float) if is_hip() else None
 
     def _create_scale_param(
         self,
@@ -208,11 +206,12 @@ class Fp8LinearMethod(LinearMethodBase):
                             weight_scale=layer.weight_scale,
                             input_scale=layer.input_scale)
                 layer.weight = Parameter(weight, requires_grad=False)
-                layer.weight_scale = Parameter(weight_scale, requires_grad=False)
+                layer.weight_scale = Parameter(weight_scale,
+                                               requires_grad=False)
                 if input_scale is not None:
                     layer.input_scale = Parameter(input_scale,
-                                                      requires_grad=False)
-            
+                                                  requires_grad=False)
+
             max_w_scale = layer.weight_scale.max()
             start = 0
             for idx, logical_width in enumerate(layer.logical_widths):
@@ -241,7 +240,7 @@ class Fp8LinearMethod(LinearMethodBase):
                         "All the act_scales for the logical weights of a layer "
                         f"must be equal. But got {layer.input_scale}")
                 layer.input_scale = Parameter(layer.input_scale.max(),
-                                            requires_grad=False)
+                                              requires_grad=False)
             else:
                 raise ValueError(
                     f"Unknown scheme {self.quant_config.activation_scheme}")
