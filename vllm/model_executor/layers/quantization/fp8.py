@@ -17,7 +17,6 @@ ACTIVATION_SCHEMES = ["static", "dynamic"]
 logger = init_logger(__name__)
 
 
-TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).cuda() if is_hip() else None
 
 
 class Fp8Config(QuantizationConfig):
@@ -95,6 +94,7 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
+        self.TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).to(torch.float) if is_hip() else None
 
     def _create_scale_param(
         self,
@@ -267,7 +267,7 @@ class Fp8LinearMethod(LinearMethodBase):
             out_dtype=x.dtype,
             scale_a=x_scale,
             scale_b=layer.weight_scale,
-            scale_result=TORCH_SCALED_MM_SCALE_RESULT,
+            scale_result=self.TORCH_SCALED_MM_SCALE_RESULT,
             bias=bias,
         )
 
