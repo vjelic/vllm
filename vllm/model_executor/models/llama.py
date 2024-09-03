@@ -54,6 +54,7 @@ from vllm.utils import is_hip, print_warning_once
 reduce_conversion_kernel: bool = True if os.getenv("VLLM_FP8_REDUCE_CONV",
                                                    '0') == "1" else False
 
+
 class LlamaMLP(nn.Module):
 
     def __init__(
@@ -91,8 +92,11 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
+            act_scale = self.down_proj.input_scale if hasattr(
+                self.down_proj,
+                "input_scale") else self.down_proj.activation_scaling_factor
             x = self.act_fn(
-                gate_up, self.down_proj.activation_scaling_factor
+                gate_up, act_scale
             ) if reduce_conversion_kernel else self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
@@ -238,17 +242,18 @@ class LlamaDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
+        act_scale = self.self_attn.qkv_proj.input_scale if hasattr(
+            self.self_attn.qkv_proj, "input_scale"
+        ) else self.self_attn.qkv_proj.activation_scaling_factor
         if residual is None:
             residual = hidden_states
             hidden_states = self.input_layernorm(
-                hidden_states,
-                self.self_attn.qkv_proj.activation_scaling_factor
+                hidden_states, act_scale
             ) if reduce_conversion_kernel else self.input_layernorm(
                 hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states,
-                self.self_attn.qkv_proj.activation_scaling_factor, residual
+                hidden_states, act_scale, residual
             ) if reduce_conversion_kernel else self.input_layernorm(
                 hidden_states, residual)
         hidden_states = self.self_attn(
@@ -259,9 +264,11 @@ class LlamaDecoderLayer(nn.Module):
         )
 
         # Fully Connected
+        act_scale = self.mlp.gate_up_proj.input_scale if hasattr(
+            self.mlp.gate_up_proj,
+            "input_scale") else self.mlp.gate_up_proj.activation_scaling_factor
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, self.mlp.gate_up_proj.activation_scaling_factor,
-            residual
+            hidden_states, act_scale, residual
         ) if reduce_conversion_kernel else self.post_attention_layernorm(
             hidden_states, residual)
         hidden_states = self.mlp(hidden_states)

@@ -93,6 +93,7 @@ class Fp8LinearMethod(LinearMethodBase):
         self.quant_config = quant_config
         self.TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).to(
             torch.float) if is_hip() else None
+        self.out_dtype = torch.get_default_dtype()
 
     def _create_scale_param(
         self,
@@ -252,9 +253,12 @@ class Fp8LinearMethod(LinearMethodBase):
         # ops.scaled_fp8_quant supports both dynamic and static quant.
         #   If dynamic, layer.act_scale is None and x_scale computed from x.
         #   If static,  layer.act_scale is scalar and x_scale set to act_scale.
-        qinput, x_scale = ops.scaled_fp8_quant(x,
-                                               layer.input_scale,
-                                               batch_dim_padding=17)
+        if x.dtype != torch.float8_e4m3fnuz:
+            qinput, x_scale = ops.scaled_fp8_quant(x,
+                                                   layer.input_scale,
+                                                   batch_dim_padding=17)
+        else:
+            qinput, x_scale = x, layer.input_scale
 
         # Fused GEMM_DQ -- note we padded the input above because
         # torch._scaled_mm is more performant for matrices with
@@ -263,7 +267,7 @@ class Fp8LinearMethod(LinearMethodBase):
         output = torch._scaled_mm(
             qinput,
             layer.weight,
-            out_dtype=x.dtype,
+            out_dtype=self.out_dtype,
             scale_a=x_scale,
             scale_b=layer.weight_scale,
             scale_result=self.TORCH_SCALED_MM_SCALE_RESULT,
