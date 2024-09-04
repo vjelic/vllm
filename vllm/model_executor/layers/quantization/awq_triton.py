@@ -106,19 +106,8 @@ def awq_dequantize_kernel(
     # Finally, store.
     tl.store(result_ptr + result_offsets, iweights, result_masks)
 
-def _matmul_launch_metadata(grid, kernel, args):
-    ret = {}
-    M, N, K = args["M"], args["N"], args["K"]
-    ret["name"] = f"{kernel.name} [M={M}, N={N}, K={K}]"
-    ret["flops8"] = 2. * M * N * K
-    if "c_ptr" in args:
-        bytes_per_elem = args["c_ptr"].element_size()
-    else:
-        bytes_per_elem = 1 if args["FP8_OUTPUT"] else 2
-    ret["bytes"] = bytes_per_elem * (M * K + N * K)
-    return ret
 
-@triton.jit(launch_metadata=_matmul_launch_metadata)
+@triton.jit
 def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
                     group_size, BLOCK_SIZE_M: tl.constexpr,
                     BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
