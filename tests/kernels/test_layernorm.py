@@ -64,12 +64,12 @@ import copy
     configs=[
         triton.Config(
             {
-                "T_BLOCK_SIZE": 2,
+                "T_BLOCK_SIZE": 1,
                 "H_BLOCK_SIZE": 32 * 64,
-                "waves_per_eu": 2
+                "waves_per_eu": 8
             },
             num_stages=0,
-            num_warps=2,
+            num_warps=8,
         )
     ],
     key=["num_tokens", "hidden_size"],
