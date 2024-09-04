@@ -62,11 +62,108 @@ import copy
 
 @triton.autotune(
     configs=[
+        # triton.Config(
+        #     {
+        #         "T_BLOCK_SIZE": tbs,
+        #         "H_BLOCK_SIZE": hbs,
+        #         "waves_per_eu": 4
+        #     },
+        #     num_stages=0,
+        #     num_warps=nw,
+        # ) 
+        # for tbs in [ i for i in [ 2, 4, 8, 16, 32, 64 ] ]
+        # for hbs in [ i for i in [ 32, 64, 128, 256, 512, 1024, 2048, 4096] ]
+        # for nw in [ i for i in [ 1, 2, 4, 8, 16 ] ]
+        triton.Config(
+            {
+                "T_BLOCK_SIZE": 2,
+                "H_BLOCK_SIZE": 8*1024,
+                "waves_per_eu": 2
+            },
+            num_stages=0,
+            num_warps=16,
+        ) 
+    ],
+    key=["num_tokens", "hidden_size"],
+)
+@triton.jit()
+def _triton_rms_add_norm_block(
+    input_ptr,
+    residual_ptr,
+    weight_ptr,
+    output_ptr,
+    eps,
+    num_tokens,
+    hidden_size,
+    T_BLOCK_SIZE: tl.constexpr,
+    H_BLOCK_SIZE: tl.constexpr
+):
+    row_start_idx = tl.program_id(0) * T_BLOCK_SIZE
+
+    row_start = row_start_idx + tl.arange(0, T_BLOCK_SIZE)
+    row_start = row_start[:, None] * hidden_size
+
+    acc = tl.zeros([T_BLOCK_SIZE], dtype=tl.float32)
+    for offsets in range(0, hidden_size, H_BLOCK_SIZE):
+        col_offsets = tl.arange(0, H_BLOCK_SIZE)
+        col_offsets += offsets
+
+        input_ptrs = input_ptr + row_start + col_offsets
+        residual_ptrs = residual_ptr + row_start + col_offsets
+
+        mask = (col_offsets < hidden_size)[None, :]
+        row = tl.load(input_ptrs, mask=mask, other=0.)
+        residual = tl.load(residual_ptrs, mask=mask, other=0.)
+
+        row += residual
+        tl.store(residual_ptrs, row, mask=mask)
+        tl.store(input_ptrs, row, mask=mask)
+
+        sq_row = row * row
+        acc += tl.sum(sq_row, axis=-1, keep_dims=False)
+
+    acc = acc / hidden_size
+    rstd = 1 / tl.sqrt(acc + eps)
+    rstd = rstd[:, None]
+
+    for offsets in range(0, hidden_size, H_BLOCK_SIZE):
+        col_offsets = tl.arange(0, H_BLOCK_SIZE)
+        col_offsets += offsets
+
+        mask = (col_offsets < hidden_size)[None, :]
+        weight = tl.load(weight_ptr + col_offsets,
+                        mask=col_offsets < hidden_size)
+        input = tl.load(input_ptr + row_start + col_offsets, 
+                        mask=mask, other=0.)
+        output = input * rstd * weight
+
+        # Write output
+        tl.store(output_ptr + row_start + col_offsets, output, mask=mask)
+
+
+class TritonRMSNormBlock(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, residual, weight, 
+                eps, num_tokens, hidden_size):
+        out = torch.zeros_like(input)
+
+        grid = lambda META: (  # noqa: E731
+            triton.cdiv(num_tokens, META["T_BLOCK_SIZE"]), 
+        )
+        _triton_rms_add_norm_block[grid](input, residual, weight,
+                                out, eps, num_tokens, hidden_size)
+        return out
+
+triton_rms_add_norm_block = TritonRMSNormBlock.apply
+
+
+@triton.autotune(
+    configs=[
         triton.Config(
             {
                 "T_BLOCK_SIZE": 1,
-                "H_BLOCK_SIZE": 32 * 64,
-                "waves_per_eu": 8
+                "H_BLOCK_SIZE": 128 * 64,
+                "waves_per_eu": 4
             },
             num_stages=0,
             num_warps=8,
@@ -75,7 +172,7 @@ import copy
     key=["num_tokens", "hidden_size"],
 )
 @triton.jit()
-def _triton_rms_add_norm(
+def _triton_rms_add_norm_iter(
     input_ptr,
     residual_ptr,
     weight_ptr,
@@ -129,7 +226,7 @@ def _triton_rms_add_norm(
             tl.store(output_ptr + row_start + col_offsets, output, mask=mask)
 
 
-class TritonRMSNorm(torch.autograd.Function):
+class TritonRMSNormIter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, residual, weight, 
                 eps, num_tokens, hidden_size):
@@ -138,11 +235,11 @@ class TritonRMSNorm(torch.autograd.Function):
         grid = lambda META: (  # noqa: E731
             triton.cdiv(num_tokens, META["T_BLOCK_SIZE"]), 
         )
-        _triton_rms_add_norm[grid](input, residual, weight,
+        _triton_rms_add_norm_iter[grid](input, residual, weight,
                                 out, eps, num_tokens, hidden_size)
         return out
 
-triton_rms_add_norm = TritonRMSNorm.apply
+triton_rms_add_norm_iter = TritonRMSNormIter.apply
 
 warmup = 5
 rep = 10
@@ -174,12 +271,12 @@ def test_benchmark_rms_norm(
     # need this to run autotunning as kernel is not idempotent
     input2 = copy.deepcopy(input1)
     residual2 = copy.deepcopy(residual1)
-    out = triton_rms_add_norm(input2, residual2, layer.weight.data,
+    out = triton_rms_add_norm_block(input2, residual2, layer.weight.data,
                 layer.variance_epsilon, num_tokens, hidden_size)
     
     input2 = copy.deepcopy(input1)
     residual2 = copy.deepcopy(residual1)
-    out = triton_rms_add_norm(input2, residual2, layer.weight.data,
+    out = triton_rms_add_norm_block(input2, residual2, layer.weight.data,
                 layer.variance_epsilon, num_tokens, hidden_size)
     ref_out, _ = layer(input1, residual1)
 
@@ -188,12 +285,19 @@ def test_benchmark_rms_norm(
                 for idx in range(0, num_tokens) ])
 
     res_trit = triton.testing.do_bench(
-        lambda: triton_rms_add_norm(input2, residual2, layer.weight,
+        lambda: triton_rms_add_norm_block(input2, residual2, layer.weight,
                 layer.variance_epsilon, num_tokens, hidden_size),
         warmup=warmup, rep=rep)
     
     print("")
-    print(f'Triton RES: {res_trit=}')
+    print(f'Triton Block RES: {res_trit=}')
+
+    res_trit = triton.testing.do_bench(
+        lambda: triton_rms_add_norm_iter(input2, residual2, layer.weight,
+                layer.variance_epsilon, num_tokens, hidden_size),
+        warmup=warmup, rep=rep)
+    
+    print(f'Triton Iter RES: {res_trit=}')
 
     res_c = triton.testing.do_bench(
         lambda: layer(input1, residual1),
