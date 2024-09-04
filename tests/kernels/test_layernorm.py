@@ -57,12 +57,14 @@ CUDA_DEVICES = [
 import triton
 import triton.language as tl
 import functools
+import copy
+
 
 @triton.autotune(
     configs=[
         triton.Config(
             {
-                "T_BLOCK_SIZE": 1,
+                "T_BLOCK_SIZE": 2,
                 "H_BLOCK_SIZE": 32 * 64,
                 "waves_per_eu": 2
             },
@@ -70,7 +72,7 @@ import functools
             num_warps=2,
         )
     ],
-    key=["T_BLOCK_SIZE", "H_BLOCK_SIZE"],
+    key=["num_tokens", "hidden_size"],
 )
 @triton.jit()
 def _triton_rms_add_norm(
@@ -84,42 +86,47 @@ def _triton_rms_add_norm(
     T_BLOCK_SIZE: tl.constexpr,
     H_BLOCK_SIZE: tl.constexpr
 ):
-    row_start_idx = tl.program_id(0)
+    pid = tl.program_id(0)
+    pn = tl.num_programs(0)
 
-    row_start = row_start_idx + tl.arange(0, T_BLOCK_SIZE)
-    row_start = row_start[:, None] * hidden_size
+    for row_start_idx in range(pid, num_tokens, pn):
+        row_start = row_start_idx * hidden_size
 
-    acc = tl.zeros([T_BLOCK_SIZE], dtype=tl.float32)
-    for offsets in range(0, hidden_size, H_BLOCK_SIZE):
-        col_offsets = tl.arange(0, H_BLOCK_SIZE)
-        col_offsets += offsets
-        input_ptrs = input_ptr + row_start + col_offsets
+        acc = 0.0
+        for offsets in range(0, hidden_size, H_BLOCK_SIZE):
+            col_offsets = tl.arange(0, H_BLOCK_SIZE)
+            col_offsets += offsets
+            input_ptrs = input_ptr + row_start + col_offsets
+            residual_ptrs = residual_ptr + row_start + col_offsets
 
-        mask = (col_offsets < hidden_size)[None, :]
-        row = tl.load(input_ptrs, mask=mask, other=0.)
-        sq_row = row * row
-        acc += tl.sum(sq_row, axis=-1, keep_dims=False)
+            mask = col_offsets < hidden_size
+            row = tl.load(input_ptrs, mask=mask, other=0.)
+            residual = tl.load(residual_ptrs, mask=mask, other=0.)
+            row += residual
 
-    acc = acc / hidden_size
-    rstd = 1 / tl.sqrt(acc + eps)
-    rstd = rstd[:, None]
+            tl.store(residual_ptrs, row, mask=mask)
+            tl.store(input_ptrs, row, mask=mask)
 
-    for offsets in range(0, hidden_size, H_BLOCK_SIZE):
-        col_offsets = tl.arange(0, H_BLOCK_SIZE)
-        col_offsets += offsets
+            sq_row = row * row
+            acc += tl.sum(sq_row, axis=-1, keep_dims=False)
 
-        mask = (col_offsets < hidden_size)[None, :]
-        weight = tl.load(weight_ptr + col_offsets,
-                        mask=col_offsets < hidden_size)
-        residual = tl.load(residual_ptr + row_start + col_offsets,
-                        mask=mask)
-        input = tl.load(input_ptr + row_start + col_offsets, 
-                        mask=mask, other=0.)
-        input_rstd = input * rstd
-        output = input_rstd * weight + residual
+        acc = acc / hidden_size
+        rstd = 1 / tl.sqrt(acc + eps)
 
-        # Write output
-        tl.store(output_ptr + row_start + col_offsets, output, mask=mask)
+        for offsets in range(0, hidden_size, H_BLOCK_SIZE):
+            col_offsets = tl.arange(0, H_BLOCK_SIZE)
+            col_offsets += offsets
+
+            mask = col_offsets < hidden_size
+            weight = tl.load(weight_ptr + col_offsets,
+                            mask=col_offsets < hidden_size)
+            input = tl.load(input_ptr + row_start + col_offsets, 
+                            mask=mask, other=0.)
+            input_rstd = input * rstd
+            output = input_rstd * weight
+
+            # Write output
+            tl.store(output_ptr + row_start + col_offsets, output, mask=mask)
 
 
 class TritonRMSNorm(torch.autograd.Function):
@@ -159,28 +166,29 @@ def test_benchmark_rms_norm(
 
     layer = RMSNorm(hidden_size).to(dtype=dtype)
     layer.weight.data.normal_(mean=1.0, std=0.1)
-    scale = 1 # / (2 * hidden_size)
-    input = torch.randn(num_tokens, hidden_size, dtype=dtype)
-    input = input.fill_(4)
-    input *= scale
-    # residual = torch.randn_like(input) * scale
-    residual = torch.zeros_like(input) * scale
+    scale = 1 / (2 * hidden_size)
+    input1 = torch.randn(num_tokens, hidden_size, dtype=dtype)
+    input1 *= scale
+    residual1 = torch.randn_like(input1) * scale
 
-    ref_out = layer._forward(input, residual)
-    out = triton_rms_add_norm(input, residual, layer.weight.data,
+    # need this to run autotunning as kernel is not idempotent
+    input2 = copy.deepcopy(input1)
+    residual2 = copy.deepcopy(residual1)
+    out = triton_rms_add_norm(input2, residual2, layer.weight.data,
                 layer.variance_epsilon, num_tokens, hidden_size)
     
-    print(f"{input[1]=}")
-    print(f"{out[1]=}")
-    print(f"{ref_out[0][1]=}")
+    input2 = copy.deepcopy(input1)
+    residual2 = copy.deepcopy(residual1)
+    out = triton_rms_add_norm(input2, residual2, layer.weight.data,
+                layer.variance_epsilon, num_tokens, hidden_size)
+    ref_out, _ = layer(input1, residual1)
 
     assert functools.reduce(lambda a, b: a and b,
-            [ torch.allclose(out[idx], ref_out[0][idx], atol=1e-2, rtol=1e-2) 
+            [ torch.allclose(out[idx], ref_out[idx], atol=1e-2, rtol=1e-2) 
                 for idx in range(0, num_tokens) ])
 
-
     res_trit = triton.testing.do_bench(
-        lambda: triton_rms_add_norm(input, residual, layer.weight,
+        lambda: triton_rms_add_norm(input2, residual2, layer.weight,
                 layer.variance_epsilon, num_tokens, hidden_size),
         warmup=warmup, rep=rep)
     
@@ -188,8 +196,8 @@ def test_benchmark_rms_norm(
     print(f'Triton RES: {res_trit=}')
 
     res_c = triton.testing.do_bench(
-        lambda: layer(input, residual),
+        lambda: layer(input1, residual1),
         warmup=warmup, rep=rep)
     print(f'C++ RES: {res_c=}')
 
-    assert res_trit > res_c
+    assert res_trit < res_c
