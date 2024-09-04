@@ -1,11 +1,11 @@
 """Custom normalization layers."""
-import os
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 from vllm import _custom_ops as ops
+from vllm import envs
 
 
 class RMSNorm(nn.Module):
@@ -77,7 +77,7 @@ class ScaledRMSNorm(nn.Module):
     Computes x -> w * x / sqrt(E[x^2] + eps) where w is the learned weight.
     Refer to https://arxiv.org/abs/1910.07467
     """
-    act_padding = True if os.getenv("VLLM_FP8_ACT_PADDING", "0") == "1" else False
+    act_padding = envs.VLLM_FP8_ACT_PADDING
 
     def __init__(
         self,
@@ -127,6 +127,8 @@ class ScaledRMSNorm(nn.Module):
                 scale,
                 self.variance_epsilon,
             )
+            if ScaledRMSNorm.act_padding:
+                return out[...,:-256], residual
             return out, residual
         ops.scaled_rms_norm(
             out,
@@ -135,6 +137,8 @@ class ScaledRMSNorm(nn.Module):
             scale,
             self.variance_epsilon,
         )
+        if ScaledRMSNorm.act_padding:
+            return out[...,:-256]
         return out
 
     def extra_repr(self) -> str:

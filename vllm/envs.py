@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     VERBOSE: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
+    VLLM_FP8_WEIGHT_PADDING: bool = False
+    VLLM_FP8_ACT_PADDING: bool = False
 
 # The begin-* and end* here are used by the documentation generator
 # to extract the used env vars.
@@ -229,6 +231,14 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Poll for new requests every this many steps
     "VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS":
     lambda: int(os.getenv("VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS", "1")),
+    
+    # Pad the weight for fp8
+    "VLLM_FP8_WEIGHT_PADDING":
+    lambda: bool(int(os.getenv("VLLM_FP8_WEIGHT_PADDING", "0"))),
+
+    # Pad the activation for fp8
+    "VLLM_FP8_ACT_PADDING":
+    lambda: bool(int(os.getenv("VLLM_FP8_ACT_PADDING", "0"))),
 }
 
 # end-env-vars-definition

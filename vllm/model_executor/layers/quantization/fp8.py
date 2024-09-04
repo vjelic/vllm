@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from torch.nn import Module
 from torch.nn.parameter import Parameter
+import torch.nn.functional as F
 
 from vllm import _custom_ops as ops
 from vllm.logger import init_logger
@@ -11,6 +12,7 @@ from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.utils import is_hip, print_warning_once
+from vllm import envs
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
@@ -228,6 +230,8 @@ class Fp8LinearMethod(LinearMethodBase):
             # WEIGHT
             #   Transpose weight for passing to torch._scaled_mm
             weight = layer.weight
+            if envs.VLLM_FP8_WEIGHT_PADDING:
+                weight = F.pad(weight, (0, 256), "constant", 0)[:,:-256]
             layer.weight = Parameter(weight.t(), requires_grad=False)
 
             # ACT_SCALE

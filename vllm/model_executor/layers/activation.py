@@ -1,6 +1,5 @@
 """Custom activation functions."""
 import math
-import os
 from typing import Optional
 
 import torch
@@ -12,6 +11,7 @@ from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.utils import set_weight_attrs
+from vllm import envs
 
 
 class SiluAndMul(nn.Module):
@@ -46,14 +46,14 @@ class ScaledSiluAndMul(nn.Module):
         return: (num_tokens, d) or (batch_size, seq_len, d)
     """
     
-    act_padding = True if os.getenv("VLLM_FP8_ACT_PADDING", "0") == "1" else False
+    act_padding = envs.VLLM_FP8_ACT_PADDING
 
     def forward(self, x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         d = x.shape[-1] // 2
         output_shape = (x.shape[:-1] + (d + (256 if ScaledSiluAndMul.act_padding else 0), ))
         out = torch.empty(output_shape, dtype=torch.float8_e4m3fnuz, device=x.device)
         ops.scaled_silu_and_mul(out, x, scale)
-        return out
+        return out[...,:-256] if ScaledSiluAndMul.act_padding else out
 
 
 class GeluAndMul(nn.Module):
