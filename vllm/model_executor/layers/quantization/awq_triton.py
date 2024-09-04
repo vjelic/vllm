@@ -62,10 +62,7 @@ def awq_dequantize_kernel(
     iweights = (iweights >> shifts) & 0xF
 
     # Compute zero offsets and masks.
-    # zero_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
-                      # tl.arange(0, BLOCK_SIZE_Y) // group_size)
     zero_offsets_y = pid_y * BLOCK_SIZE_Y // group_size + tl.arange(0, 1)
-    # zero_offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X * 8) // 8
     zero_offsets_x = pid_x * BLOCK_SIZE_X + tl.arange(0, BLOCK_SIZE_X)
     zero_offsets = num_cols * zero_offsets_y[:, None] + zero_offsets_x[None, :]
 
@@ -84,8 +81,6 @@ def awq_dequantize_kernel(
     zeros = (zeros >> shifts) & 0xF
 
     # Compute scale offsets and masks.
-    # scale_offsets_y = (pid_y * BLOCK_SIZE_Y // group_size +
-                       # tl.arange(0, BLOCK_SIZE_Y) // group_size)
     scale_offsets_y = pid_y * BLOCK_SIZE_Y // group_size + tl.arange(0, 1)
     scale_offsets_x = (pid_x * BLOCK_SIZE_X * 8 +
                        tl.arange(0, BLOCK_SIZE_X * 8))
@@ -179,8 +174,9 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         b = tl.interleave(b, b)
 
         # Dequantize b.
-        offsets_szk = ((BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) //
-                       group_size + tl.arange(0, 1))
+        offsets_szk = (
+            (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
+            tl.arange(0, 1))
         offsets_z = (N // 8) * offsets_szk[:, None] + offsets_zn[None, :]
         masks_zk = offsets_szk < K // group_size
         masks_z = masks_zk[:, None] & masks_zn[None, :]
