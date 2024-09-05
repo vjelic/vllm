@@ -37,6 +37,8 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
         seq_counter: Counter,
         stop_checker: StopChecker,
     ):
+        print("+"*100)
+        print("[DEBUG] ERNTER SINGLE STEPS")
         self.scheduler_config = scheduler_config
         self.detokenizer = detokenizer
         self.scheduler = scheduler

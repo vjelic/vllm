@@ -14,8 +14,6 @@ from vllm.lora.request import LoRARequest
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceStatus)
 
-from concurrent.futures import ThreadPoolExecutor
-
 logger = init_logger(__name__)
 
 # Test-only. If configured, decode is preempted with
@@ -287,7 +285,7 @@ class Scheduler:
 
         BlockSpaceManagerImpl = BlockSpaceManager.get_block_space_manager_class(
             version)
-        print("USING BLOCK MANAGER V", version)
+
         # Create the block space manager.
         self.block_manager = BlockSpaceManagerImpl(
             block_size=self.cache_config.block_size,
@@ -661,15 +659,10 @@ class Scheduler:
         #print("+"*100)
         #print("Loaded Q:", len(waiting_queue))
 
-        batched_sequences: Deque[SequenceGroup] = deque()
-        seq_batched_groups = []
-        seq_groups_max_batch_size = 16
-        cumulative_budget_token = 0
+
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
         #  and self._passed_delay(time.time()))
-        #while (VLLM_SCHED_PREFILL_COUNT <= len(waiting_queue) and waiting_queue):
-        while self._passed_delay(time.time()) and waiting_queue:
-        #while waiting_queue:
+        while (VLLM_SCHED_PREFILL_COUNT <= len(waiting_queue) and waiting_queue):
             #print("Waiting Q Len: ", len(waiting_queue))
             seq_group = waiting_queue[0]
 
@@ -725,10 +718,8 @@ class Scheduler:
                     continue
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
-            cumulative_budget_token += num_new_tokens
-            print("!!!!!!!!!!!!!!! Debug inside prefills: ", num_new_seqs, "num new token", cumulative_budget_token)
             if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=cumulative_budget_token,
+                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
 
@@ -736,43 +727,12 @@ class Scheduler:
             if curr_loras is not None and lora_int_id > 0:
                 curr_loras.add(lora_int_id)
             waiting_queue.popleft()
-            # debug here
-            batched_sequences.appendleft(seq_group)
-            if len(batched_sequences) >= seq_groups_max_batch_size:
-                seq_batched_groups.append(batched_sequences)
-                batched_sequences = deque()
-
-        seq_batched_groups.append(batched_sequences)
-
-        #allocation_tasks = [self._allocate_and_set_running(seq_group) for seq_group in batched_sequences]
-        #self._allocate_and_set_running(seq_group)
-        #seq_groups.append(
-        #    ScheduledSequenceGroup(seq_group=seq_group,
-        #                           token_chunk_size=num_new_tokens))
-        #budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-        #budget.add_num_seqs(seq_group.request_id, num_new_seqs)
-
-        # budget size 4096
-        #print("----------------------------------- Debugging batching things ---------------------------------------")
-        #print(seq_batched_groups)
-        for batched_seq in seq_batched_groups:
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                futures = [
-                    executor.submit(self.batched_prefill, seq_group, num_new_tokens, num_new_seqs, seq_groups, budget)
-                    for seq_group in batched_seq
-                ]
-
-            for future in futures:
-                future.result()
-           
-            for seq_group in batched_seq:
-                seq_groups.append(
-                     ScheduledSequenceGroup(seq_group=seq_group,
-                                            token_chunk_size=num_new_tokens))
-                budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-                budget.add_num_seqs(seq_group.request_id, num_new_seqs)
-                # print("budget size")
-                # print(budget.num_batched_tokens)
+            self._allocate_and_set_running(seq_group)
+            seq_groups.append(
+                ScheduledSequenceGroup(seq_group=seq_group,
+                                       token_chunk_size=num_new_tokens))
+            budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
+            budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)
@@ -784,17 +744,6 @@ class Scheduler:
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True))
 
-    def batched_prefill(self, seq_group, num_new_tokens, num_new_seqs, seq_groups, budget):
-        self._allocate_and_set_running(seq_group)
-        # seq_groups.append(
-        #     ScheduledSequenceGroup(seq_group=seq_group,
-        #                            token_chunk_size=num_new_tokens))
-        # budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-        # budget.add_num_seqs(seq_group.request_id, num_new_seqs)
-
-
-
-
     def _schedule_default(self) -> SchedulerOutputs:
         """Schedule queued requests.
         
@@ -803,8 +752,6 @@ class Scheduler:
         decodes. If there's a pressure on GPU memory, decode requests can
         be swapped or preempted.
         """
-        # time.sleep(3)
-
         # Include running requests to the budget.
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
@@ -826,18 +773,19 @@ class Scheduler:
         remaining_swapped, swapped_in = (
             self.swapped, SchedulerSwappedInOutputs.create_empty())
 
-        # print("="*100)
-        # print("default waiting", len(self.waiting))
-        #for seq in self.waiting:
-        #    print(seq.request_id)
+        print("="*100)
+        print("default waiting", len(self.waiting))
+        for seq in self.waiting:
+            print(seq.request_id)
         # If any requests are swapped, prioritized swapped requests.
         if not self.swapped: #and len(remaining_waiting) == 1:
             remaining_waiting, prefills = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False)
         
-        # print("default remaining_waiting", len(remaining_waiting))
-        # for seq in remaining_waiting:
-        #     print(seq.request_id)
+        print("default remaining_waiting", len(remaining_waiting))
+        print(remaining_waiting)
+        for seq in remaining_waiting:
+            print(seq.request_id)
         #print("debug remaining waiting", len(remaining_waiting))
 
         fcfs_policy = PolicyFactory.get_policy(policy_name="fcfs")
@@ -859,9 +807,6 @@ class Scheduler:
                 remaining_swapped, swapped_in = self._schedule_swapped(
                     self.swapped, budget, curr_loras, fcfs_policy)
 
-        print("----------- Debug inside budget -----------")
-        print(budget.num_batched_tokens)
-        print(self.scheduler_config.max_num_batched_tokens)
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
@@ -869,9 +814,6 @@ class Scheduler:
         # Update waiting requests.
         self.waiting = remaining_waiting
         self.waiting.extendleft(running_scheduled.preempted)
-        print("AFTER running_scheduled.preempted", len(self.waiting))
-        #for seq in self.waiting:
-        #    print(seq.request_id)
         # Update new running requests.
         self.running = remaining_running
         self.running.extend([s.seq_group for s in prefills.seq_groups])

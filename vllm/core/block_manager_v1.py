@@ -300,6 +300,10 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = len(seq.logical_token_blocks)
 
+        print("."*100)
+        print("Inside allocate sequence")
+        print("ref count", ref_count)
+        print("num prompt blocks", num_prompt_blocks)
         block_table: BlockTable = []
         for logical_idx in range(num_prompt_blocks):
             if (self.block_sliding_window is not None
@@ -307,14 +311,17 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block = block_table[logical_idx % self.block_sliding_window]
                 # Set the reference counts of the token blocks.
                 block.ref_count = ref_count
+                #print("Branch 1 sliding window")
             elif not is_encoder_decoder and self.enable_caching:
                 block = self.gpu_allocator.allocate(
                     seq.hash_of_block(logical_idx),
                     seq.num_hashed_tokens_of_block(logical_idx))
+                #print("Branch 2")
             else:
                 block = self.gpu_allocator.allocate()
                 # Set the reference counts of the token blocks.
                 block.ref_count = ref_count
+                #print("Branch 3")
             block_table.append(block)
 
         return block_table
@@ -328,6 +335,15 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # NOTE: Here we assume that all sequences in the group have the same
         # decoder prompt.
         seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
+        print("_"*100)
+        print("Debug inside block manager v1")
+        print(seq_group)
+        print()
+        print(seq)
+        print()
+        print(seq_group.get_seqs(status=SequenceStatus.WAITING))
+        print()
+        print("Is encoder decoder??", is_encoder_decoder)
         block_table: BlockTable = \
             self._allocate_sequence(seq,
                                     seq_group.num_seqs(),

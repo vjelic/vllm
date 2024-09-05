@@ -152,6 +152,11 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         # NOTE: Here we assume that all sequences in the group have the same
         # prompt.
         seq = waiting_seqs[0]
+        print("_"*100)
+        print("Debug inside block manager")
+        print(seq_group)
+        print(waiting_seqs)
+        print(seq)
         block_table: BlockTable = self._allocate_sequence(seq)
         self.block_tables[seq.seq_id] = block_table
 

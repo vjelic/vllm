@@ -39,6 +39,8 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         get_tokenizer_for_seq: Callable[[Sequence], PreTrainedTokenizer],
         stop_checker: StopChecker,
     ):
+        print("?"*100)
+        print("[Debug] entering multi steps")
         self.detokenizer = detokenizer
         self.scheduler = scheduler
         self.seq_counter = seq_counter
