@@ -38,6 +38,8 @@ from vllm.model_executor.layers.layernorm import RMSNorm, ScaledRMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
+from vllm.model_executor.layers.quantization.fp8 import Fp8Config
+from vllm.model_executor.layers.quantization.fp8_rocm import Fp8RocmConfig
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -51,8 +53,8 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplerOutput
 from vllm.utils import is_hip, print_warning_once
 
-reduce_conversion_kernel: bool = True if os.getenv("VLLM_FP8_REDUCE_CONV",
-                                                   '0') == "1" else False
+reduce_conversion: bool = True if os.getenv("VLLM_FP8_REDUCE_CONV",
+                                            '0') == "1" else False
 
 
 class LlamaMLP(nn.Module):
@@ -71,6 +73,8 @@ class LlamaMLP(nn.Module):
             output_sizes=[intermediate_size] * 2,
             bias=bias,
             quant_config=quant_config)
+        self.use_fp8 = isinstance(quant_config, Fp8Config) or isinstance(
+            quant_config, Fp8RocmConfig)
         self.down_proj = RowParallelLinear(input_size=intermediate_size,
                                            output_size=hidden_size,
                                            bias=bias,
@@ -78,8 +82,8 @@ class LlamaMLP(nn.Module):
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
-        self.act_fn = ScaledSiluAndMul(
-        ) if reduce_conversion_kernel else SiluAndMul()
+        self.act_fn = ScaledSiluAndMul() if (
+            self.use_fp8 and reduce_conversion) else SiluAndMul()
 
     def forward(self, x):
         if x.shape[0] == 1 and x.shape[1] == 1:
@@ -92,12 +96,12 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
-            act_scale = self.down_proj.input_scale if hasattr(
-                self.down_proj,
-                "input_scale") else self.down_proj.activation_scaling_factor
-            x = self.act_fn(
-                gate_up, act_scale
-            ) if reduce_conversion_kernel else self.act_fn(gate_up)
+            if self.use_fp8:
+                act_scale = self.down_proj.input_scale if hasattr(
+                    self.down_proj, "input_scale"
+                ) else self.down_proj.activation_scaling_factor
+            x = self.act_fn(gate_up, act_scale) if (
+                self.use_fp8 and reduce_conversion) else self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
 
@@ -205,6 +209,8 @@ class LlamaDecoderLayer(nn.Module):
         # Support internlm/internlm-7b with bias
         attention_bias = getattr(config, "attention_bias", False) or getattr(
             config, "bias", False)
+        self.use_fp8 = isinstance(quant_config, Fp8Config) or isinstance(
+            quant_config, Fp8RocmConfig)
         self.self_attn = LlamaAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
@@ -225,13 +231,13 @@ class LlamaDecoderLayer(nn.Module):
             bias=getattr(config, "mlp_bias", False),
         )
         self.input_layernorm = ScaledRMSNorm(
-            config.hidden_size,
-            eps=config.rms_norm_eps) if reduce_conversion_kernel else RMSNorm(
-                config.hidden_size, eps=config.rms_norm_eps)
+            config.hidden_size, eps=config.rms_norm_eps) if (
+                self.use_fp8 and reduce_conversion) else RMSNorm(
+                    config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = ScaledRMSNorm(
-            config.hidden_size,
-            eps=config.rms_norm_eps) if reduce_conversion_kernel else RMSNorm(
-                config.hidden_size, eps=config.rms_norm_eps)
+            config.hidden_size, eps=config.rms_norm_eps) if (
+                self.use_fp8 and reduce_conversion) else RMSNorm(
+                    config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -242,20 +248,21 @@ class LlamaDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
-        act_scale = self.self_attn.qkv_proj.input_scale if hasattr(
-            self.self_attn.qkv_proj, "input_scale"
-        ) else self.self_attn.qkv_proj.activation_scaling_factor
+        if self.use_fp8:
+            act_scale = self.self_attn.qkv_proj.input_scale if hasattr(
+                self.self_attn.qkv_proj, "input_scale"
+            ) else self.self_attn.qkv_proj.activation_scaling_factor
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(
-                hidden_states, act_scale
-            ) if reduce_conversion_kernel else self.input_layernorm(
-                hidden_states)
+            hidden_states = self.input_layernorm(hidden_states, act_scale) if (
+                self.use_fp8
+                and reduce_conversion) else self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, act_scale, residual
-            ) if reduce_conversion_kernel else self.input_layernorm(
-                hidden_states, residual)
+                hidden_states, act_scale,
+                residual) if (self.use_fp8
+                              and reduce_conversion) else self.input_layernorm(
+                                  hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -264,13 +271,15 @@ class LlamaDecoderLayer(nn.Module):
         )
 
         # Fully Connected
-        act_scale = self.mlp.gate_up_proj.input_scale if hasattr(
-            self.mlp.gate_up_proj,
-            "input_scale") else self.mlp.gate_up_proj.activation_scaling_factor
+        if self.use_fp8:
+            act_scale = self.mlp.gate_up_proj.input_scale if hasattr(
+                self.mlp.gate_up_proj, "input_scale"
+            ) else self.mlp.gate_up_proj.activation_scaling_factor
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, act_scale, residual
-        ) if reduce_conversion_kernel else self.post_attention_layernorm(
-            hidden_states, residual)
+            hidden_states, act_scale, residual) if (
+                self.use_fp8
+                and reduce_conversion) else self.post_attention_layernorm(
+                    hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
