@@ -544,15 +544,15 @@ def get_default_config(M: int, E: int, N: int, K: int, topk: int,
                        is_marlin: bool) -> Dict[str, int]:
     config = {
         'BLOCK_SIZE_M': 64,
-        'BLOCK_SIZE_N': 64,
-        'BLOCK_SIZE_K': 32,
+        'BLOCK_SIZE_N': 128, # reqd. for MOE shuffle
+        'BLOCK_SIZE_K': 128, # reqd. for MOE shuffle
         'GROUP_SIZE_M': 8
     }
     if M <= E or (is_marlin and M <= 32):
         config = {
             'BLOCK_SIZE_M': 16,
-            'BLOCK_SIZE_N': 32,
-            'BLOCK_SIZE_K': 64,
+            'BLOCK_SIZE_N': 128, # reqd. for MOE shuffle
+            'BLOCK_SIZE_K': 128, # reqd. for MOE shuffle
             'GROUP_SIZE_M': 1
         }
     return config
@@ -810,7 +810,7 @@ def fused_experts(hidden_states: torch.Tensor,
     get_config_func = functools.partial(
         try_get_optimal_moe_config,
         w1.shape,
-        w2.shape,
+        (w2.shape[0], w2.shape[1], w2.shape[2] - padding_size),
         topk_ids.shape[1],
         config_dtype,
         override_config=override_config,
