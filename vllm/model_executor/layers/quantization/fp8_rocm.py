@@ -183,6 +183,7 @@ class Fp8RocmLinearMethod(LinearMethodBase):
         weight = layer.weight
         if self._config.weight_padding:
             weight = F.pad(weight, (0, 256), "constant", 0).contiguous()
+            torch.cuda.empty_cache()
         layer.weight = Parameter(weight, requires_grad=False)
 
         if layer.weight.dtype == torch.float8_e4m3fnuz:

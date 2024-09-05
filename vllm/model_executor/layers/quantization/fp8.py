@@ -232,6 +232,7 @@ class Fp8LinearMethod(LinearMethodBase):
             weight = layer.weight
             if envs.VLLM_FP8_WEIGHT_PADDING:
                 weight = F.pad(weight, (0, 256), "constant", 0)[:,:-256]
+                torch.cuda.empty_cache()
             layer.weight = Parameter(weight.t(), requires_grad=False)
 
             # ACT_SCALE
