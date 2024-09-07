@@ -43,9 +43,9 @@ def awq_dequantize_kernel(
 
     # Load the weights.
     iweights = tl.load(qweight_ptr + offsets, masks)
-    iweights = tl.broadcast_to(iweights[:, :, None],
-                               (BLOCK_SIZE_Y, BLOCK_SIZE_X, 8)).reshape(
-                                   BLOCK_SIZE_Y, BLOCK_SIZE_X * 8)
+    iweights = tl.interleave(iweights, iweights)
+    iweights = tl.interleave(iweights, iweights)
+    iweights = tl.interleave(iweights, iweights)
 
     # Create reverse AWQ order as tensor: [0, 4, 1, 5, 2, 6, 3, 7]
     # that will map given indices to the correct order.
@@ -72,8 +72,9 @@ def awq_dequantize_kernel(
 
     # Load the zeros.
     zeros = tl.load(zeros_ptr + zero_offsets, zero_masks)
-    zeros = tl.broadcast_to(zeros[:, :, None],
-                            (1, BLOCK_SIZE_X, 8)).reshape(1, BLOCK_SIZE_X * 8)
+    zeros = tl.interleave(zeros, zeros)
+    zeros = tl.interleave(zeros, zeros)
+    zeros = tl.interleave(zeros, zeros)
     zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_Y, BLOCK_SIZE_X * 8))
 
     # Unpack and reorder: shift out the correct 4-bit value and mask.
@@ -168,9 +169,9 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
 
         masks_b = masks_k[:, None] & masks_bn[None, :]
         b = tl.load(b_ptrs, mask=masks_b)
-        b = tl.broadcast_to(b[:, :, None],
-                            (BLOCK_SIZE_K, BLOCK_SIZE_N // 8, 8)).reshape(
-                                BLOCK_SIZE_K, BLOCK_SIZE_N)
+        b = tl.interleave(b, b)
+        b = tl.interleave(b, b)
+        b = tl.interleave(b, b)
 
         # Dequantize b.
         offsets_szk = (
@@ -181,9 +182,9 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         masks_z = masks_zk[:, None] & masks_zn[None, :]
         zeros_ptrs = zeros_ptr + offsets_z
         zeros = tl.load(zeros_ptrs, mask=masks_z)
-        zeros = tl.broadcast_to(zeros[:, :, None],
-                                (1, BLOCK_SIZE_N // 8, 8)).reshape(
-                                    1, BLOCK_SIZE_N)
+        zeros = tl.interleave(zeros, zeros)
+        zeros = tl.interleave(zeros, zeros)
+        zeros = tl.interleave(zeros, zeros)
         zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_K, BLOCK_SIZE_N))
 
         offsets_s = N * offsets_szk[:, None] + offsets_sn[None, :]
