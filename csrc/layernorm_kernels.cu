@@ -18,6 +18,12 @@ using __nv_bfloat16 = __hip_bfloat16;
 using __nv_bfloat162 = __hip_bfloat162;
 #endif
 
+#ifdef USE_ROCM
+  #include "quantization/fp8/amd/quant_utils.cuh"
+#else
+  #include "quantization/fp8/nvidia/quant_utils.cuh"
+#endif
+
 namespace vllm {
 
 // TODO(woosuk): Further optimize this kernel.
