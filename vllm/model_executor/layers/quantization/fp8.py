@@ -93,8 +93,6 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
-        self.TORCH_SCALED_MM_SCALE_RESULT = torch.ones(1).to(
-            torch.float) if is_hip() else None
         self.out_dtype = torch.get_default_dtype()
 
     def _create_scale_param(
@@ -275,7 +273,6 @@ class Fp8LinearMethod(LinearMethodBase):
             out_dtype=self.out_dtype,
             scale_a=x_scale,
             scale_b=layer.weight_scale,
-            scale_result=self.TORCH_SCALED_MM_SCALE_RESULT,
             bias=bias,
         )
 
