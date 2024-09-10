@@ -457,12 +457,14 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             B.stride(1),
             C.stride(1),
             C.stride(2),
+            B_scale.stride(0) if B_scale is not None and use_int8_w8a16 else 0,
+            B_scale.stride(1) if B_scale is not None and use_int8_w8a16 else 0,
             MUL_ROUTED_WEIGHT=mul_routed_weight,
             top_k=top_k,
             compute_type=compute_type,
-            use_fp8=use_fp8,
+            use_fp8_w8a8=use_fp8_w8a8,
+            use_int8_w8a16=use_int8_w8a16,
             **config,
-            enable_moe_lds_bypass=False
         )
     else:
         NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
@@ -542,19 +544,56 @@ def get_moe_configs(E: int, N: int,
 def get_default_config(M: int, E: int, N: int, K: int, topk: int,
                        dtype: Optional[str],
                        is_marlin: bool) -> Dict[str, int]:
-    config = {
-        'BLOCK_SIZE_M': 64,
-        'BLOCK_SIZE_N': 64,
-        'BLOCK_SIZE_K': 32,
-        'GROUP_SIZE_M': 8
-    }
-    if M <= E or (is_marlin and M <= 32):
+    if envs.VLLM_MOE_SHUFFLE:
         config = {
-            'BLOCK_SIZE_M': 16,
-            'BLOCK_SIZE_N': 32,
-            'BLOCK_SIZE_K': 64,
-            'GROUP_SIZE_M': 1
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 256,
+            "GROUP_SIZE_M": 8,
+            "num_warps": 8,
+            "num_stages": 0,
+            "waves_per_eu": 0,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 2
         }
+
+        if M <= E:
+            config = {
+                "BLOCK_SIZE_M": 16,
+                "BLOCK_SIZE_N": 128,
+                "BLOCK_SIZE_K": 256,
+                "GROUP_SIZE_M": 1,
+                "num_warps": 8,
+                "num_stages": 0,
+                "waves_per_eu": 0,
+                "matrix_instr_nonkdim": 16,
+                "kpack": 2
+            }
+    else:
+        config = {
+            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 256,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
+            "num_stages": 0,
+            "waves_per_eu": 1,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 1
+        }
+    #config = {
+    #    'BLOCK_SIZE_M': 64,
+    #    'BLOCK_SIZE_N': 64,
+    #    'BLOCK_SIZE_K': 32,
+    #    'GROUP_SIZE_M': 8
+    #}
+    #if M <= E or (is_marlin and M <= 32):
+    #    config = {
+    #        'BLOCK_SIZE_M': 16,
+    #        'BLOCK_SIZE_N': 32,
+    #        'BLOCK_SIZE_K': 64,
+    #        'GROUP_SIZE_M': 1
+    #    }
     return config
 
 
@@ -817,57 +856,7 @@ def fused_experts(hidden_states: torch.Tensor,
         override_config=override_config,
     )
 
-    if override_config:
-        config = override_config
-    else:
-        # First try to load optimal config from the file
-        configs = get_moe_configs(E, w2.shape[2] - padding_size,
-                                  "float8" if use_fp8 else None)
-
-        if configs:
-            # If an optimal configuration map has been found, look up the
-            # optimal config
-            config = configs[min(configs.keys(), key=lambda x: abs(x - M))]
-        else:
-            # Else use the default config
-            if envs.VLLM_MOE_SHUFFLE:
-                config = {
-                    "BLOCK_SIZE_M": 16,
-                    "BLOCK_SIZE_N": 128,
-                    "BLOCK_SIZE_K": 256,
-                    "GROUP_SIZE_M": 8,
-                    "num_warps": 8,
-                    "num_stages": 0,
-                    "waves_per_eu": 0,
-                    "matrix_instr_nonkdim": 16,
-                    "kpack": 2
-                }
-
-                if M <= E:
-                    config = {
-                        "BLOCK_SIZE_M": 16,
-                        "BLOCK_SIZE_N": 128,
-                        "BLOCK_SIZE_K": 256,
-                        "GROUP_SIZE_M": 1,
-                        "num_warps": 8,
-                        "num_stages": 0,
-                        "waves_per_eu": 0,
-                        "matrix_instr_nonkdim": 16,
-                        "kpack": 2
-                    }
-            else:
-                config = {
-                    "BLOCK_SIZE_M": 16,
-                    "BLOCK_SIZE_N": 64,
-                    "BLOCK_SIZE_K": 256,
-                    "GROUP_SIZE_M": 1,
-                    "num_warps": 4,
-                    "num_stages": 0,
-                    "waves_per_eu": 1,
-                    "matrix_instr_nonkdim": 16,
-                    "kpack": 1
-                }
-
+    config = get_config_func(M)
 
     intermediate_cache1 = torch.empty(
         (M, topk_ids.shape[1], N),
