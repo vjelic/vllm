@@ -489,14 +489,13 @@ class Grok1ForCausalLM(nn.Module, SupportsLoRA):
                     if "scale" in name:
                         name = name.replace("scale", "weight")
 
+                    if "lm_head" in name:
+                        if self.config.tie_word_embeddings:
+                            continue
+
                     if name is None:
                         continue
 
-                    # [WA] need to fix lm_head key not found issue
-                    if "lm_head" in name:
-                        #print(f"[kkkkk] ${params_dict}")
-                        continue
-                    
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)
