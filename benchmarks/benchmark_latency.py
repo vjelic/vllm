@@ -39,7 +39,10 @@ def main(args: argparse.Namespace):
               download_dir=args.download_dir,
               block_size=args.block_size,
               disable_custom_all_reduce=args.disable_custom_all_reduce,
-              gpu_memory_utilization=args.gpu_memory_utilization)
+              gpu_memory_utilization=args.gpu_memory_utilization,
+              distributed_executor_backend='mp')
+              #max_model_len=8192,
+              #max_num_batched_tokens=64*1024)
 
     sampling_params = SamplingParams(
         n=args.n,

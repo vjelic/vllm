@@ -33,6 +33,7 @@ class RequestFuncOutput:
         default_factory=list)  # List of inter-token latencies
     prompt_len: int = 0
     error: str = ""
+    st: float = 0.0
 
 
 async def async_request_tgi(
@@ -223,13 +224,14 @@ async def async_request_openai_completions(
 
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
         assert not request_func_input.use_beam_search
+        STREAM = False
         payload = {
             "model": request_func_input.model,
             "prompt": request_func_input.prompt,
             "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
-            "stream": True,
+            "stream": STREAM,
         }
         headers = {
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
@@ -242,6 +244,7 @@ async def async_request_openai_completions(
         ttft = 0.0
         st = time.perf_counter()
         most_recent_timestamp = st
+        output.st = time.time()
         try:
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
@@ -253,35 +256,48 @@ async def async_request_openai_completions(
 
                         chunk = remove_prefix(chunk_bytes.decode("utf-8"),
                                               "data: ")
-                        if chunk == "[DONE]":
-                            latency = time.perf_counter() - st
-                        else:
+                        if not STREAM:
                             data = json.loads(chunk)
+                            #if data["choices"][0]["text"]:
+                            if data["choices"][0]["finish_reason"]:
+                                latency = time.perf_counter() - st
+                                generated_text = data["choices"][0]["text"]
+                            else:
+                                print('>>> Chunk',chunk)
+                                latency = time.perf_counter() - st
+                        else:
+                            if chunk == "[DONE]":
+                                latency = time.perf_counter() - st
+                            else:
+                                data = json.loads(chunk)
 
-                            if data["choices"][0]["text"]:
-                                timestamp = time.perf_counter()
-                                # First token
-                                if ttft == 0.0:
-                                    ttft = time.perf_counter() - st
-                                    output.ttft = ttft
+                                if data["choices"][0]["text"]:
+                                    timestamp = time.perf_counter()
+                                    # First token
+                                    if ttft == 0.0:
+                                        ttft = time.perf_counter() - st
+                                        output.ttft = ttft
 
-                                # Decoding phase
-                                # NOTE: Some completion API might have a last
-                                # usage summary response without a token so we
-                                # do not want to include as inter-token-latency
-                                elif data.get("usage", None) is None:
-                                    output.itl.append(timestamp -
-                                                      most_recent_timestamp)
+                                    # Decoding phase
+                                    # NOTE: Some completion API might have a last
+                                    # usage summary response without a token so we
+                                    # do not want to include as inter-token-latency
+                                    elif data.get("usage", None) is None:
+                                        output.itl.append(timestamp -
+                                                          most_recent_timestamp)
 
-                                most_recent_timestamp = timestamp
-                                generated_text += data["choices"][0]["text"]
+                                    most_recent_timestamp = timestamp
+                                    generated_text += data["choices"][0]["text"]
 
                     output.generated_text = generated_text
                     output.success = True
                     output.latency = latency
+                    print('>>> Req latency', latency)
                 else:
                     output.error = response.reason or ""
                     output.success = False
+                    print('>>> Req Failed', response)
+
         except Exception:
             output.success = False
             exc_info = sys.exc_info()

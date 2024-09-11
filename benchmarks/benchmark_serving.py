@@ -40,6 +40,8 @@ from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
 
 from vllm.transformers_utils.tokenizer import get_tokenizer
+import gc
+gc.disable()
 
 
 @dataclass
@@ -173,6 +175,29 @@ def sample_sonnet_requests(
 
     return sampled_requests
 
+def sample_random_requests(
+        input_len: int, output_len: int, num_prompts: int, range_ratio: float,
+        tokenizer: PreTrainedTokenizerBase) -> List[Tuple[str, int, int]]:
+
+    input_lens = np.random.randint(
+        int(input_len * range_ratio),
+        input_len + 1,
+        size=num_prompts,
+    )
+    output_lens = np.random.randint(
+        int(output_len * range_ratio),
+        output_len + 1,
+        size=num_prompts,
+    )
+    offsets = np.random.randint(0+input_len+512, tokenizer.vocab_size-input_len-512, size=num_prompts)
+    input_requests = []
+    for i in range(num_prompts):
+        prompt = tokenizer.decode([(offsets[i] + i + j) % tokenizer.vocab_size
+                                   for j in range(input_lens[i])])
+        input_requests.append(
+            (prompt, int(input_lens[i]), int(output_lens[i])))
+
+    return input_requests
 
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
@@ -186,7 +211,8 @@ async def get_request(
             # If the request rate is infinity, then we don't need to wait.
             continue
         # Sample the request interval from the exponential distribution.
-        interval = np.random.exponential(1.0 / request_rate)
+        ## interval = np.random.exponential(1.0 / request_rate)
+        interval = 1.0 / request_rate
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
@@ -212,8 +238,11 @@ def calculate_metrics(
                     (outputs[i].latency - outputs[i].ttft) / (output_len - 1))
             ttfts.append(outputs[i].ttft)
             completed += 1
+            print('>>> Req',i,'Start',outputs[i].st,'Latency',outputs[i].latency,'TTFT',outputs[i].ttft,'ILen',input_requests[i][1],'Olen',output_len)
         else:
             actual_output_lens.append(0)
+            print('>>> Req',i,'Fail')
+            print(outputs[i])
 
     if completed == 0:
         warnings.warn(
@@ -290,6 +319,7 @@ async def benchmark(
             best_of=best_of,
             use_beam_search=use_beam_search,
         )
+        print('>>>Task',len(tasks),time.time())
         tasks.append(
             asyncio.create_task(
                 request_func(request_func_input=request_func_input,
@@ -426,7 +456,14 @@ def main(args: argparse.Namespace):
             input_requests = [(prompt_formatted, prompt_len, output_len)
                               for prompt, prompt_formatted, prompt_len,
                               output_len in input_requests]
-
+    elif args.dataset_name == "random":
+        input_requests = sample_random_requests(
+            input_len=args.random_input_len,
+            output_len=args.random_output_len,
+            num_prompts=args.num_prompts,
+            range_ratio=args.random_range_ratio,
+            tokenizer=tokenizer,
+        )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset_name}")
 
@@ -518,7 +555,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "sonnet"],
+        choices=["sharegpt", "sonnet", "random"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
@@ -617,6 +654,27 @@ if __name__ == "__main__":
         default=None,
         help="Specify directory to save benchmark json results."
         "If not specified, results are saved in the current directory.",
+    )
+    parser.add_argument(
+        "--random-input-len",
+        type=int,
+        default=1024,
+        help=
+        "Number of input tokens per request, used only for random sampling.",
+    )
+    parser.add_argument(
+        "--random-output-len",
+        type=int,
+        default=128,
+        help=
+        "Number of output tokens per request, used only for random sampling.",
+    )
+    parser.add_argument(
+        "--random-range-ratio",
+        type=float,
+        default=1.0,
+        help="Range of sampled ratio of input/output length, "
+        "used only for random sampling.",
     )
 
     args = parser.parse_args()
