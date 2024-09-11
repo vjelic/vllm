@@ -152,17 +152,28 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
     offsets_sn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     masks_sn = offsets_sn < N
 
-    offsets_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+    # offsets_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+    offsets_k = (pid_z * tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K) * BLOCK_SIZE_K 
+                + tl.arange(0, BLOCK_SIZE_K))
     offsets_a = K * offsets_am[:, None] + offsets_k[None, :]
     offsets_b = (N // 8) * offsets_k[:, None] + offsets_bn[None, :]
 
     a_ptrs = a_ptr + offsets_a
     b_ptrs = b_ptr + offsets_b
 
+    group =  -1
+
     # NOTE: Use this in TRITON_INTERPRET=1 mode instead of tl.cdiv
     # block_offset = BLOCK_SIZE_K * SPLIT_K
     # for k in range(0, (K + block_offset - 1) // (block_offset)):
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
+    # for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
+    num_total_blocks = tl.cdiv(K, BLOCK_SIZE_K)
+    num_blocks_per_pid = tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)
+    num_previous_blocks = num_blocks_per_pid * pid_z
+    num_blocks = min(num_blocks_per_pid, num_total_blocks - num_previous_blocks)
+    # print(f"offsets_k = {offsets_k}")
+    # print(f"pid = {pid}, num_blocks = {num_blocks}")
+    for k in range(0, num_blocks):
         masks_k = offsets_k < K
         masks_a = masks_am[:, None] & masks_k[None, :]
         a = tl.load(a_ptrs, mask=masks_a)
@@ -174,9 +185,12 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         b = tl.interleave(b, b)
 
         # Dequantize b.
-        offsets_szk = (
-            (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
-            tl.arange(0, 1))
+        # offsets_szk = (
+            # (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
+            # tl.arange(0, 1))
+        offsets_szk = (num_previous_blocks * BLOCK_SIZE_K // group_size +
+                      tl.arange(0, 1))
+        # print(f"offsets_szk = {offsets_szk}")
         offsets_z = (N // 8) * offsets_szk[:, None] + offsets_zn[None, :]
         masks_zk = offsets_szk < K // group_size
         masks_z = masks_zk[:, None] & masks_zn[None, :]
@@ -202,9 +216,14 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         # Accumulate results.
         accumulator = tl.dot(a, b, accumulator, out_dtype=accumulator_dtype)
 
-        offsets_k += BLOCK_SIZE_K * SPLIT_K
-        a_ptrs += BLOCK_SIZE_K * SPLIT_K
-        b_ptrs += BLOCK_SIZE_K * SPLIT_K * (N // 8)
+        # offsets_k += BLOCK_SIZE_K * SPLIT_K
+        # a_ptrs += BLOCK_SIZE_K * SPLIT_K
+        # b_ptrs += BLOCK_SIZE_K * SPLIT_K * (N // 8)
+        offsets_k += BLOCK_SIZE_K
+        # print(f"offsets_k = {offsets_k}")
+        a_ptrs += BLOCK_SIZE_K
+        b_ptrs += BLOCK_SIZE_K * (N // 8)
+        num_previous_blocks += 1
 
     c = accumulator.to(c_ptr.type.element_ty)
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -280,6 +299,8 @@ def awq_gemm_triton(input: torch.Tensor,
     N = qweight.shape[1] * 8
     group_size = qweight.shape[0] // qzeros.shape[0]
 
+    # print(f"group_size = {group_size}")
+    # print(f"scales.shape = {scales.shape}")
     assert N > 0 and K > 0 and M > 0
     assert qweight.shape[0] == K and qweight.shape[1] == N // 8
     assert qzeros.shape[0] == K // group_size and qzeros.shape[1] == N // 8
