@@ -161,7 +161,6 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
     a_ptrs = a_ptr + offsets_a
     b_ptrs = b_ptr + offsets_b
 
-    group =  -1
 
     # NOTE: Use this in TRITON_INTERPRET=1 mode instead of tl.cdiv
     # block_offset = BLOCK_SIZE_K * SPLIT_K
@@ -171,8 +170,14 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
     num_blocks_per_pid = tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)
     num_previous_blocks = num_blocks_per_pid * pid_z
     num_blocks = min(num_blocks_per_pid, num_total_blocks - num_previous_blocks)
+    # group =  (num_previous_blocks * BLOCK_SIZE_K + 1) // group_size
+    group = -1
     # print(f"offsets_k = {offsets_k}")
     # print(f"pid = {pid}, num_blocks = {num_blocks}")
+    zeros = tl.zeros((BLOCK_SIZE_K, BLOCK_SIZE_N),
+                     dtype=zeros_ptr.type.element_ty)
+    scales = tl.zeros((BLOCK_SIZE_K, BLOCK_SIZE_N),
+                     dtype=scales_ptr.type.element_ty)
     for k in range(0, num_blocks):
         masks_k = offsets_k < K
         masks_a = masks_am[:, None] & masks_k[None, :]
@@ -184,32 +189,35 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
         b = tl.interleave(b, b)
         b = tl.interleave(b, b)
 
-        # Dequantize b.
-        # offsets_szk = (
-            # (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
-            # tl.arange(0, 1))
-        offsets_szk = (num_previous_blocks * BLOCK_SIZE_K // group_size +
-                      tl.arange(0, 1))
-        # print(f"offsets_szk = {offsets_szk}")
-        offsets_z = (N // 8) * offsets_szk[:, None] + offsets_zn[None, :]
-        masks_zk = offsets_szk < K // group_size
-        masks_z = masks_zk[:, None] & masks_zn[None, :]
-        zeros_ptrs = zeros_ptr + offsets_z
-        zeros = tl.load(zeros_ptrs, mask=masks_z)
-        zeros = tl.interleave(zeros, zeros)
-        zeros = tl.interleave(zeros, zeros)
-        zeros = tl.interleave(zeros, zeros)
-        zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_K, BLOCK_SIZE_N))
+        current_group = ((num_previous_blocks + k) * BLOCK_SIZE_K + 1) // group_size
+        if current_group != group:
+            # Dequantize b.
+            # offsets_szk = (
+                # (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
+                # tl.arange(0, 1))
+            offsets_szk = (num_previous_blocks * BLOCK_SIZE_K // group_size +
+                          tl.arange(0, 1))
+            # print(f"offsets_szk = {offsets_szk}")
+            offsets_z = (N // 8) * offsets_szk[:, None] + offsets_zn[None, :]
+            masks_zk = offsets_szk < K // group_size
+            masks_z = masks_zk[:, None] & masks_zn[None, :]
+            zeros_ptrs = zeros_ptr + offsets_z
+            zeros = tl.load(zeros_ptrs, mask=masks_z)
+            zeros = tl.interleave(zeros, zeros)
+            zeros = tl.interleave(zeros, zeros)
+            zeros = tl.interleave(zeros, zeros)
+            zeros = tl.broadcast_to(zeros, (BLOCK_SIZE_K, BLOCK_SIZE_N))
 
-        offsets_s = N * offsets_szk[:, None] + offsets_sn[None, :]
-        masks_sk = offsets_szk < K // group_size
-        masks_s = masks_sk[:, None] & masks_sn[None, :]
-        scales_ptrs = scales_ptr + offsets_s
-        scales = tl.load(scales_ptrs, mask=masks_s)
-        scales = tl.broadcast_to(scales, (BLOCK_SIZE_K, BLOCK_SIZE_N))
+            offsets_s = N * offsets_szk[:, None] + offsets_sn[None, :]
+            masks_sk = offsets_szk < K // group_size
+            masks_s = masks_sk[:, None] & masks_sn[None, :]
+            scales_ptrs = scales_ptr + offsets_s
+            scales = tl.load(scales_ptrs, mask=masks_s)
+            scales = tl.broadcast_to(scales, (BLOCK_SIZE_K, BLOCK_SIZE_N))
+
+            zeros = (zeros >> shifts) & 0xF
 
         b = (b >> shifts) & 0xF
-        zeros = (zeros >> shifts) & 0xF
         b = (b - zeros) * scales
         b = b.to(c_ptr.type.element_ty)
 
