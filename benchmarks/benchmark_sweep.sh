@@ -6,7 +6,7 @@ dev_cnt_per_grp=${dev_cnt_per_grp:-4}
 n_dev_grp=$((device_cnt/dev_cnt_per_grp))
 
 num_warm_iters=${num_warm_iters:-3}
-num_iters=${num_warm_iters:-5}
+num_iters=${num_warm_iters:-3}
 
 enable_prof=${enable_prof:-0}
 enable_trace=${enable_trace:-0}
@@ -33,9 +33,11 @@ else
     # latency test
     #i_tokens_list=(512 1024 2048 3072 4096 6144 8192)
     #o_tokens_list=(1 32 128 256)
-    i_tokens_list=(1024)
-    o_tokens_list=(4096)
-    num_prompts=${num_prompts:-1}
+
+    i_tokens=`echo "8192/${num_prompts}" | bc`
+
+    i_tokens_list=(${i_tokens})
+    o_tokens_list=(256)
 fi
 
 
@@ -143,13 +145,10 @@ for i_token in "${i_tokens_list[@]}"; do
 	    if [[ ${enable_fp8} -eq 0 ]]; then
                 cmd="${cmd} python benchmark_${benchmark_item}.py --num-iters-warmup ${num_warm_iters} --num-iters ${num_iters} --model \"/dockerx/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code"
 	    else
-                cmd="${cmd} python benchmark_${benchmark_item}.py --num-iters-warmup ${num_warm_iters} --num-iters ${num_iters} --model \"/docker/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code --quantization=\"fp8\" --quantized-weights-path=\"quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/moe.safetensors\""
-                #cmd="${cmd} python benchmark_${benchmark_item}.py --model \"/docker/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code --quantization=\"fp8\" --quantized-weights-path=\"quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/moe.safetensors\" --kv-cache-dtype fp8 --quantization-param-path /docker/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/kvcache/kv_cache_scales.json"
-
-		# for torchrun
-                #cmd="${cmd} torchrun --standalone --nproc_per_node=${dev_cnt_per_grp}"
-                #cmd="${cmd} benchmark_${benchmark_item}.py --model \"/docker/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code --quantization=\"fp8\" --quantized-weights-path=\"quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/moe.safetensors\""
-                #cmd="${cmd} benchmark_${benchmark_item}.py --model \"/dockerx/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code --quantization=\"fp8\" --quantized-weights-path=\"quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/moe.safetensors\" --kv-cache-dtype fp8 --quantization-param-path /dockerx/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/quantized/quark/w_fp8_a_fp8_o_fp8/num_calib_128/kvcache/kv_cache_scales.json"
+		# [quark fp8]
+                cmd="${cmd} python benchmark_${benchmark_item}.py --num-iters-warmup ${num_warm_iters} --num-iters ${num_iters} --model \"/dockerx/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/Grok1-FP8-KV/json_safetensors\" --dtype float16 --trust-remote-code --quantization fp8 --kv-cache-dtype fp8"
+		# [dynamic fp8]
+                #cmd="${cmd} python benchmark_${benchmark_item}.py --num-iters-warmup ${num_warm_iters} --num-iters ${num_iters} --model \"/dockerx/data/huggingface/hub/models--hpcai-tech--grok-1/snapshots/babfc31aa6cffb15aa89202aaa01ac47bd1925a2/\" --dtype float16 --trust-remote-code --quantization=\"fp8\""
 	    fi
 
             if [[ ${enable_rpd} -eq 1 ]]; then

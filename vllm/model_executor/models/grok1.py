@@ -486,7 +486,7 @@ class Grok1ForCausalLM(nn.Module, SupportsLoRA):
                     # Remapping the name of FP8 kv-scale.
                     name = maybe_remap_kv_scale_name(name, params_dict)
 
-                    if "scale" in name:
+                    if "norm.scale" in name:
                         name = name.replace("scale", "weight")
 
                     if "lm_head" in name:

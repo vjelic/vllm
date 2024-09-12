@@ -140,7 +140,6 @@ def apply_fp8_linear(
                 out_dtype=input.dtype,
                 scale_a=x_scale,
                 scale_b=weight_scale,
-                scale_result=TORCH_SCALED_MM_SCALE_RESULT,
                 bias=bias)
             # A fix for discrepancy in scaled_mm which returns tuple
             # for torch < 2.5 and a single value in torch >= 2.5

@@ -19,7 +19,7 @@ export NCCL_MIN_NCHANNELS=112
 export VLLM_USE_TRITON_FLASH_ATTN=False
 
 #export FUSED_MOE_PERSISTENT=1 
-export VLLM_MOE_PADDING=0 
+export VLLM_MOE_PADDING=0
 #export VLLM_MOE_SHUFFLE=1 
 #export TRITON_HIP_USE_NEW_STREAM_PIPELINE=1
 
@@ -27,5 +27,6 @@ export VLLM_MOE_PADDING=0
 #
 for batch in $batches
 do
-    dev_cnt_per_grp=8 device_cnt=8 enable_fp8=0 enable_tuneop=0 benchmark_item=latency num_prompts=$batch ./benchmark_sweep.sh
+    dev_cnt_per_grp=8 device_cnt=8 enable_rpd=0 enable_fp8=1 enable_tuneop=0 benchmark_item=latency num_prompts=$batch ./benchmark_sweep.sh
+    #dev_cnt_per_grp=8 device_cnt=8 enable_rpd=0 enable_fp8=1 enable_tuneop=0 benchmark_item=latency_accuracy_check num_prompts=$batch ./benchmark_sweep.sh
 done
