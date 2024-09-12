@@ -191,6 +191,7 @@ def awq_gemm_kernel(a_ptr, b_ptr, c_ptr, zeros_ptr, scales_ptr, M, N, K,
 
         current_group = ((num_previous_blocks + k) * BLOCK_SIZE_K + 1) // group_size
         if current_group != group:
+            group = current_group
             # Dequantize b.
             # offsets_szk = (
                 # (BLOCK_SIZE_K * SPLIT_K * k + pid_z * BLOCK_SIZE_K) // group_size +
