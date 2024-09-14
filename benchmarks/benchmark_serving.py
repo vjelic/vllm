@@ -242,7 +242,8 @@ async def get_request(
             continue
 
         # Sample the request interval from the exponential distribution.
-        interval = np.random.exponential(1.0 / request_rate)
+        ## interval = np.random.exponential(1.0 / request_rate)
+        interval = 1.0 / request_rate
         # The next request will be sent after the interval.
         await asyncio.sleep(interval)
 
@@ -280,8 +281,11 @@ def calculate_metrics(
             ttfts.append(outputs[i].ttft)
             e2els.append(outputs[i].latency)
             completed += 1
+            print('>>> Req',i,'Latency',outputs[i].latency,'TTFT',outputs[i].ttft,'ILen',input_requests[i][1],'Olen',output_len)
         else:
             actual_output_lens.append(0)
+            print('>>> Req',i,'Fail')
+            print(outputs[i])
 
     if completed == 0:
         warnings.warn(
