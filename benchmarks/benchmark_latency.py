@@ -235,15 +235,15 @@ if __name__ == '__main__':
         'and scaling factors. This should generally be supplied, when '
         'quantization is FP8.')
     parser.add_argument(
-        '--profile_torch',
+        '--profile-torch',
         action='store_true',
         help='profile the generation process of a single batch')
     parser.add_argument(
-        '--profile_rpd',
+        '--profile-rpd',
         action='store_true',
         help='profile the generation process of a single batch')
     parser.add_argument(
-        '--profile_dir',
+        '--profile-dir',
         type=str,
         default=None,
         help=('path to save the profiler output. Can be visualized '
