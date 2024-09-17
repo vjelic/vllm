@@ -10,18 +10,13 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 from tqdm import tqdm
-from tuning_utils import (
-    get_full_tuning_space,
-    prune_configs,
-    union_of_list_of_dicts,
-)
+from tuning_utils import (get_full_tuning_space, prune_configs,
+                          union_of_list_of_dicts)
 
 from vllm import _custom_ops as ops
-from vllm.model_executor.layers.fused_moe import (
-    get_config_file_name,
-    invoke_fused_moe_kernel,
-    moe_align_block_size,
-)
+from vllm.model_executor.layers.fused_moe import (get_config_file_name,
+                                                  invoke_fused_moe_kernel,
+                                                  moe_align_block_size)
 
 
 def main(args):
