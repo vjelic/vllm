@@ -146,7 +146,7 @@ steps:
   - pytest -v -s tokenization
 
 - label: Examples Test # 12min
-  working_dir: "/vllm-workspace/examples"
+  #working_dir: "/vllm-workspace/examples"
   #mirror_hardwares: [amd]
   source_file_dependencies:
   - vllm/entrypoints
@@ -311,7 +311,7 @@ steps:
 #####  multi gpus test  #####
 
 - label: Distributed Comm Ops Test # 7min
-  working_dir: "/vllm-workspace/tests"
+  #working_dir: "/vllm-workspace/tests"
   num_gpus: 2
   source_file_dependencies:
   - vllm/distributed
