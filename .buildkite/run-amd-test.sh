@@ -5,7 +5,7 @@ set -o pipefail
 echo "--- Confirming Clean Initial State"
 while true; do
         sleep 3
-        if grep -q clean ${BUILDKITE_META_DATA_RESET_TARGET}; then
+        if grep -q clean ${BUILDKITE_AGENT_META_DATA_RESET_TARGET}; then
                 echo "GPUs state is \"clean\""
                 break
         fi
@@ -48,7 +48,7 @@ echo "reset" > ${BUILDKITE_META_DATA_RESET_TARGET}
 
 while true; do
         sleep 3
-	if grep -q clean ${BUILDKITE_META_DATA_RESET_TARGET}; then
+	if grep -q clean ${BUILDKITE_AGENT_META_DATA_RESET_TARGET}; then
                 echo "GPUs state is \"clean\""
                 break
         fi
