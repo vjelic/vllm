@@ -16,16 +16,12 @@ from tuning_utils import (
     union_of_list_of_dicts,
 )
 
-import vllm._moe_C as moe_kernels
-from vllm._C import ops
+from vllm import _custom_ops as ops
 from vllm.model_executor.layers.fused_moe import (
     get_config_file_name,
     invoke_fused_moe_kernel,
     moe_align_block_size,
 )
-
-os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
-os.environ["DEBUG_CLR_GRAPH_PACKET_CAPTURE"] = "1"
 
 
 def main(args):
@@ -201,7 +197,7 @@ def run_timing(
                                         topk_,
                                         dtype=torch.int32,
                                         device=hidden_states.device)
-    moe_kernels.topk_softmax(
+    ops.topk_softmax(
         topk_weights,
         topk_ids,
         token_expert_indicies,
@@ -253,8 +249,8 @@ def run_timing(
             config,
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
-            use_fp8=False,
-        )
+            use_fp8_w8a8=False,
+            use_int8_w8a16=False)
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
@@ -274,8 +270,8 @@ def run_timing(
             config,
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
-            use_fp8=False,
-        )
+            use_fp8_w8a8=False,
+            use_int8_w8a16=False)
 
     end_event.record()
     end_event.synchronize()
@@ -307,6 +303,12 @@ if __name__ == "__main__":
         required=True,
     )
     args = parser.parse_args()
+    if "LOCAL_RANK" not in os.environ:
+        print("Please use torchrun to launch this multi-gpu script. E.g:")
+        print("\ttorchrun benchmark_mixtral_moe_rocm.py",
+              "--model 8x7B --modelTP 4 --numGPU 2")
+        print("Exiting...")
+        exit()
 
     print(f"Running tuning for {args.model} model")
     print(f"Model TP is set to: {args.modelTP}")
