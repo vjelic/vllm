@@ -305,12 +305,12 @@ def test_benchmark_rms_norm(
     print("")
     print(f'Triton Block RES: {res_trit=}')
 
-    res_trit = triton.testing.do_bench(
-        lambda: triton_rms_add_norm_iter(input2, residual2, layer.weight,
-                layer.variance_epsilon, num_tokens, hidden_size),
-        warmup=warmup, rep=rep)
+    # res_trit = triton.testing.do_bench(
+    #     lambda: triton_rms_add_norm_iter(input2, residual2, layer.weight,
+    #             layer.variance_epsilon, num_tokens, hidden_size),
+    #     warmup=warmup, rep=rep)
     
-    print(f'Triton Iter RES: {res_trit=}')
+    # print(f'Triton Iter RES: {res_trit=}')
 
     res_c = triton.testing.do_bench(
         lambda: layer(input1, residual1),
