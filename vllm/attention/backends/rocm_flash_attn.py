@@ -18,8 +18,8 @@ if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
 
 logger = init_logger(__name__)
-#keep _PARTITION_SIZE in sync with csrc/rocm/attention.cu
-_PARTITION_SIZE = 512
+
+_PARTITION_SIZE_ROCM = 512
 ON_NAVI = "gfx1" in torch.cuda.get_device_properties("cuda").gcnArchName
 
 
@@ -517,10 +517,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
 
                 # common code for prefill
                 assert output[:num_prefill_tokens].shape == out.shape
-                if output.shape[0] > num_prefill_tokens:
-                    output[:num_prefill_tokens] = out
-                else:
-                    output = out
+                output[:num_prefill_tokens] = out
             else:
                 # prefix-enabled attention
                 output[:num_prefill_tokens] = PagedAttention.forward_prefix(
@@ -552,9 +549,10 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 decode_meta.max_decode_seq_len)
             if use_custom:
                 max_seq_len = decode_meta.max_decode_seq_len
-                max_num_partitions = ((max_seq_len + _PARTITION_SIZE - 1) //
-                                      _PARTITION_SIZE)
-                assert _PARTITION_SIZE % block_size == 0
+                max_num_partitions = (
+                    (max_seq_len + _PARTITION_SIZE_ROCM - 1) //
+                    _PARTITION_SIZE_ROCM)
+                assert _PARTITION_SIZE_ROCM % block_size == 0
                 tmp_output = torch.empty(
                     size=(num_seqs, num_heads, max_num_partitions, head_size),
                     dtype=output.dtype,
@@ -567,13 +565,11 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 )
                 max_logits = torch.empty_like(exp_sums)
                 ops.paged_attention_rocm(
-                    output, exp_sums, max_logits, tmp_output, decode_query,
-                    key_cache, value_cache, self.num_kv_heads, self.scale,
-                    decode_meta.block_tables, decode_meta.seq_lens_tensor,
-                    block_size, max_seq_len, self.alibi_slopes,
-                    self.kv_cache_dtype, k_scale, v_scale)
-                if num_prefill_tokens > 0:
-                    output = output[num_prefill_tokens:]
+                    output[num_prefill_tokens:], exp_sums, max_logits,
+                    tmp_output, decode_query, key_cache, value_cache,
+                    self.num_kv_heads, self.scale, decode_meta.block_tables,
+                    decode_meta.seq_lens_tensor, block_size, max_seq_len,
+                    self.alibi_slopes, self.kv_cache_dtype, k_scale, v_scale)
             else:
                 output[num_prefill_tokens:] = PagedAttention.forward_decode(
                     decode_query,
@@ -634,7 +630,6 @@ def use_rocm_custom_paged_attention(qtype: torch.dtype, head_size: int,
                                     max_seq_len: int) -> bool:
     # rocm custom page attention not support on navi (gfx1*)
     return (envs.VLLM_USE_ROCM_CUSTOM_PAGED_ATTN and not ON_NAVI
-            and (qtype == torch.half or qtype == torch.bfloat16)
-            and (head_size == 64 or head_size == 128)
-            and (block_size == 16 or block_size == 32)
+            and qtype in (torch.half, torch.bfloat16)
+            and head_size in (64, 128) and block_size in (16, 32)
             and (gqa_ratio >= 1 and gqa_ratio <= 16) and max_seq_len <= 32768)
