@@ -93,8 +93,11 @@ if [[ $commands == *" kernels "* ]]; then
   --ignore=kernels/test_sampler.py"
 fi
 
-PARALLEL_JOB_COUNT=8
-# check if the command contains shard flag, we will run all shards in parallel because the host have 8 GPUs. 
+PARALLEL_JOB_COUNT=1
+
+# check if the command contains shard flag, we will run all shards in parallel because the host has N GPUs. 
+# for the server-splitting agents this functionality is not yet available, thus, we default to a single GPU node model.
+
 if [[ $commands == *"--shard-id="* ]]; then
   for GPU in $(seq 0 $(($PARALLEL_JOB_COUNT-1))); do
     #replace shard arguments
@@ -102,7 +105,7 @@ if [[ $commands == *"--shard-id="* ]]; then
     commands=${commands//"--num-shards= "/"--num-shards=${PARALLEL_JOB_COUNT} "}
     echo "Shard ${GPU} commands:$commands"
     docker run \
-        --device /dev/kfd --device /dev/dri \
+        --device /dev/kfd --device $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES \
         --network host \
         --shm-size=16gb \
         --rm \
@@ -130,7 +133,7 @@ if [[ $commands == *"--shard-id="* ]]; then
 else
   echo "Render devices: $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES"
   docker run \
-          --device /dev/kfd $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES \
+          --device /dev/kfd --device $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES \
           --network host \
           --shm-size=16gb \
           --rm \
