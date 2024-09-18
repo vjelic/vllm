@@ -93,8 +93,6 @@ if [[ $commands == *" kernels "* ]]; then
   --ignore=kernels/test_sampler.py"
 fi
 
-
-
 # check if the command contains shard flag, we will run all shards in parallel because the host has N GPUs. 
 if [[ $commands == *"--shard-id="* ]]; then
   PARALLEL_JOB_COUNT=$(echo $BUILDKITE_AGENT_META_DATA_USED_GPUS | wc -w)
@@ -103,6 +101,7 @@ if [[ $commands == *"--shard-id="* ]]; then
     #replace shard arguments
     commands=${commands//"--shard-id= "/"--shard-id=${SHARD_ID} "}
     commands=${commands//"--num-shards= "/"--num-shards=${PARALLEL_JOB_COUNT} "}
+    SHARD_ID=$((SHARD_ID+1))
     echo "GPU ${GPU} commands:$commands"
     docker run \
         --device /dev/kfd $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES \
@@ -113,12 +112,11 @@ if [[ $commands == *"--shard-id="* ]]; then
         -e HF_TOKEN \
         -v ${HF_CACHE}:${HF_MOUNT} \
         -e HF_HOME=${HF_MOUNT} \
-        --name ${container_name}_${GPU}  \
+        --name ${container_name}_${SHARD_ID}  \
         ${image_name} \
         /bin/bash -c "${commands}" \
-        |& while read -r line; do echo ">>Shard $GPU: $line"; done &
+        |& while read -r line; do echo ">>Shard $SHARD_ID: $line"; done &
     PIDS+=($!)
-    SHARD_ID=$((SHARD_ID+1))
   done
   #wait for all processes to finish and collect exit codes
   for pid in ${PIDS[@]}; do
