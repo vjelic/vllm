@@ -22,7 +22,8 @@ class SamplingType(IntEnum):
     GREEDY = 0
     RANDOM = 1
     RANDOM_SEED = 2
-    FORCED = 3
+    BEAM = 3
+    FORCED = 4
 
 
 LogitsProcessor = Union[Callable[[List[int], torch.Tensor], torch.Tensor],

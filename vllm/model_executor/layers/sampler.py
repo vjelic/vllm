@@ -748,7 +748,9 @@ def get_pythonized_sample_results(
         if sampling_type not in sample_metadata:
             continue
         (seq_group_id, seq_groups) = sample_metadata[sampling_type]
-        if sampling_type == SamplingType.GREEDY:
+        if sampling_type == SamplingType.FORCED:
+            sample_results = _forced_sample(seq_groups, forced_samples)
+        elif sampling_type == SamplingType.GREEDY:
             sample_results = _greedy_sample(seq_groups, greedy_samples)
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             sample_results = _random_sample(seq_groups,
@@ -823,8 +825,19 @@ def _sample_with_torch(
         seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_id]
         sample_metadata[sampling_type] = (seq_group_id, seq_groups)
         long_sample_indices = sample_indices.long()
-
-        if sampling_type == SamplingType.GREEDY:
+        if sampling_type == SamplingType.FORCED:
+            if (seq_groups[0].sampling_params.future_context is not None):
+                forced_samples = torch.tensor([
+                    seq_groups[0].sampling_params.future_context[0][min(
+                        len(sampling_metadata.seq_groups[0].seq_data[
+                            sampling_params.cntr].output_token_ids),
+                        len(seq_groups[0].sampling_params.future_context[0]) -
+                        1)]
+                ])
+            else:
+                forced_samples = torch.argmax(logprobs[long_sample_indices],
+                                              dim=-1)
+        elif sampling_type == SamplingType.GREEDY:
             greedy_samples = torch.argmax(logprobs[long_sample_indices],
                                           dim=-1)
 

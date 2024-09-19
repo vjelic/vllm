@@ -60,7 +60,7 @@ from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers)
 
-
+import os
 class LlamaMLP(nn.Module):
 
     def __init__(
@@ -196,6 +196,7 @@ class LlamaAttention(nn.Module):
                             and not is_navi4x() \
                             and isinstance(quant_config, Fp8Config)
 
+
     def forward(
         self,
         positions: torch.Tensor,
@@ -206,6 +207,7 @@ class LlamaAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
+
         attn_output = self.attn(q,
                                 k,
                                 v,
@@ -453,25 +455,27 @@ class LlamaModel(nn.Module):
     def load_kv_cache_scales(self, quantization_param_path: str) -> None:
         tp_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
-        for layer_idx, scaling_factor in kv_cache_scales_loader(
+        for kv, scaling_factor in kv_cache_scales_loader(
                 quantization_param_path, tp_rank, tp_size,
                 self.config.num_hidden_layers,
                 self.config.__class__.model_type):
-            if not isinstance(self.layers[layer_idx], nn.Identity):
-                layer_self_attn = self.layers[layer_idx].self_attn
+            for layer_idx, scale in scaling_factor.items():
+                layer_idx = int(layer_idx)
+                if not isinstance(self.layers[layer_idx], nn.Identity):
+                    layer_self_attn = self.layers[layer_idx].self_attn
+                if kv == 'key':
+                    layer_self_attn.attn._k_scale = scale
+                else:
+                    layer_self_attn.attn._v_scale = scale
 
-            # Navi4x quantization should be treated as CUDA devices.
-            if is_hip() and not is_navi4x():
-                # The scaling factor convention we are assuming is
-                # quantized_value * scaling_factor ~= true_value
-                # which is consistent with the practice of setting
-                # scaling_factor = tensor_amax / FPtype_max
-                scaling_factor *= 2
-            if hasattr(layer_self_attn, "kv_scale"):
-                layer_self_attn.attn._kv_scale = scaling_factor
-            else:
-                raise RuntimeError("Self attention has no KV cache scaling "
-                                   "factor attribute!")
+                # # Navi4x quantization should be treated as CUDA devices.
+                # if is_hip() and not is_navi4x():
+                #     # The scaling factor convention we are assuming is
+                #     # quantized_value * scaling_factor ~= true_value
+                #     # which is consistent with the practice of setting
+                #     # scaling_factor = tensor_amax / FPtype_max
+                #     scaling_factor *= 2
+                
 
 
 class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):

@@ -490,9 +490,9 @@ def kv_cache_scales_loader(
                 "tp_size": tp_size,
             }
             schema_dct = json.load(f)
-            schema = QuantParamSchema.model_validate(schema_dct,
-                                                     context=context)
-            layer_scales_map = schema.kv_cache.scaling_factor[tp_rank]
+            # schema = QuantParamSchema.model_validate(schema_dct,
+            #                                          context=context)
+            layer_scales_map = schema_dct['kv_cache']['scaling_factor'][str(tp_rank)]
             return layer_scales_map.items()
 
     except FileNotFoundError:
