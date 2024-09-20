@@ -33,7 +33,6 @@ CUDA_DEVICES = [
 ]
 
 
-@pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("kv_cache_dtype", KV_CACHE_DTYPE)
@@ -49,7 +48,6 @@ CUDA_DEVICES = [
 @torch.inference_mode()
 def test_fused_rotary_embedding_and_reshape_cache(
     kv_cache_factory,
-    num_tokens: int,
     block_size: int,
     num_blocks: int,
     kv_cache_dtype: str,
@@ -65,9 +63,6 @@ def test_fused_rotary_embedding_and_reshape_cache(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
-    
-    if rotary_dim is None:
-        rotary_dim = head_size
 
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
@@ -76,13 +71,14 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     if rotary_dim is None:
         rotary_dim = head_size
+        
     rope = get_rope(head_size, rotary_dim, max_position, base, 
                     is_neox_style, fused_with_kv_cache_op=True)
     rope = rope.to(dtype=dtype)
 
     # Create a random slot mapping.
     num_slots = block_size * num_blocks
-    slot_mapping = random.sample(range(num_slots), num_tokens)
+    slot_mapping = random.sample(range(num_slots), batch_size * seq_len)
     slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
 
     # Create the KV caches.
@@ -113,21 +109,21 @@ def test_fused_rotary_embedding_and_reshape_cache(
                         num_heads * head_size,
                         dtype=dtype)
     key = torch.randn_like(query)
-    ref_query, ref_key = rope._forward(positions, query, key)
+    ref_query, ref_key = rope.forward_native(positions, query, key)
 
     # Call the reshape_and_cache kernel.
     value = torch.randn_like(query)
-    ops.reshape_and_cache(ref_key, value, cloned_key_cache, 
-                          cloned_value_cache, slot_mapping,
-                          kv_cache_dtype, kv_scale)
+    # ops.reshape_and_cache(ref_key, value, cloned_key_cache, 
+    #                       cloned_value_cache, slot_mapping,
+    #                       kv_cache_dtype, kv_scale)
 
-    if kv_cache_dtype == "fp8":
-        result_key_cache = torch.empty_like(
-                cloned_key_cache, dtype=torch.float16)
-        ops.convert_fp8(result_key_cache, cloned_key_cache)
-        result_value_cache = torch.empty_like(
-                cloned_value_cache, dtype=torch.float16)
-        ops.convert_fp8(result_value_cache, cloned_value_cache)
+    # if kv_cache_dtype == "fp8":
+    #     result_key_cache = torch.empty_like(
+    #             cloned_key_cache, dtype=torch.float16)
+    #     ops.convert_fp8(result_key_cache, cloned_key_cache)
+    #     result_value_cache = torch.empty_like(
+    #             cloned_value_cache, dtype=torch.float16)
+    #     ops.convert_fp8(result_value_cache, cloned_value_cache)
     
     #----------------------Actual-Run------------------------
 

@@ -22,21 +22,86 @@ typedef __hip_bfloat16 __nv_bfloat16;
 #endif
 
 namespace vllm {
-    
+
+template <typename scalar_t, bool IS_NEOX>
+inline __device__ void apply_token_rotary_embedding(
+    const scalar_t* __restrict__ arr, const scalar_t* __restrict__ cos_ptr,
+    const scalar_t* __restrict__ sin_ptr, int rot_offset, int embed_dim,
+    int &x_index, scalar_t &x, int &y_index, scalar_t &y) {
+  scalar_t cos, sin;
+  if (IS_NEOX) {
+    // GPT-NeoX style rotary embedding.
+    x_index = rot_offset;
+    y_index = embed_dim + rot_offset;
+    cos = VLLM_LDG(cos_ptr + x_index);
+    sin = VLLM_LDG(sin_ptr + x_index);
+  } else {
+    // GPT-J style rotary embedding.
+    x_index = 2 * rot_offset;
+    y_index = 2 * rot_offset + 1;
+    cos = VLLM_LDG(cos_ptr + x_index / 2);
+    sin = VLLM_LDG(sin_ptr + x_index / 2);
+  }
+
+  x = x * cos - y * sin;
+  y = y * cos + x * sin;
+}
+
+template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
+inline __device__ void store_value_into_key_cache(
+      const int head_size, const int num_kv_heads, 
+      const int64_t block_idx, const int block_size, const int64_t block_offset
+      const int x,
+      cache_t* __restrict__ key_cache, int &idx, scalar_t &val) {
+  const int head_idx = idx / head_size;
+  const int head_offset = idx % head_size;
+  const int x_idx = head_offset / x;
+  const int x_offset = head_offset % x;
+
+  const int64_t  tgt_key_idx = 
+      block_idx * num_kv_heads * (head_size / x) * block_size * x +
+      head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
+      block_offset * x + x_offset;
+
+  if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
+    key_cache[tgt_key_idx] = val;
+  } else {
+    key_cache[tgt_key_idx] =
+        fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
+  }
+}
+
+template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
+inline __device__ void store_value_into_value_cache(
+      const int head_size, const int num_kv_heads, 
+      const int64_t block_idx, const int block_size, const int64_t block_offset
+      cache_t* __restrict__ key_cache, int idx, scalar_t val) {
+  const int head_idx = idx / head_size;
+  const int head_offset = idx % head_size;
+
+  const int64_t tgt_value_idx =
+      block_idx * num_kv_heads * head_size * block_size +
+      head_idx * head_size * block_size + head_offset * block_size +
+      block_offset;
+
+  if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
+    value_cache[tgt_value_idx] = val;
+  } else {
+    value_cache[tgt_value_idx] =
+        fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
+  }
+
+
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
 __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
         const scalar_t* __restrict__ query,  // [batch_size, seq_len, num_heads, head_size] or 
                                              // [num_tokens, num_heads, head_size]
         const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
         const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
-        cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x,
-                                            // block_size, x]
-        cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size,
-                                            // block_size]
-        const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim //
-                                                    // 2]
-        const int64_t* __restrict__ positions,  // [batch_size, seq_len] or
-                                                // [num_tokens]
+        cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
+        cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size, block_size]
+        const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim // 2]
+        const int64_t* __restrict__ positions,  // [batch_size, seq_len] or [num_tokens]
         const int64_t* __restrict__ slot_mapping,  // [num_tokens]
         const int64_t query_stride, const int key_stride, const int value_stride, 
         const int num_heads, const int num_kv_heads, const int head_size, 
@@ -44,9 +109,57 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
         const float k_scale, const float v_scale) {
     
     // Each thread block is responsible for one token.
-    const int token_idx = blockIdx.x;
-    int64_t pos = positions[token_idx];
-    const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
+  const int token_idx = blockIdx.x;
+  int64_t pos = positions[token_idx];
+  const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
+
+  const int embed_dim = rot_dim / 2;
+  const scalar_t* cos_ptr = cache_ptr;
+  const scalar_t* sin_ptr = cache_ptr + embed_dim;
+
+  const int nq = num_heads * embed_dim;
+  for (int i = threadIdx.x; i < nq; i += blockDim.x) {
+    const int head_idx = i / embed_dim;
+    const int rot_offset = i % embed_dim;
+    const int64_t token_head = token_idx * query_stride + head_idx * head_size;
+    apply_token_rotary_embedding_and_cache<scalar_t, cache_t, IS_NEOX>(
+        query + token_head, cos_ptr, sin_ptr, rot_offset, embed_dim);
+  }
+
+  const int64_t slot_idx = slot_mapping[token_idx];
+  const int64_t block_idx = slot_idx / block_size;
+  const int64_t block_offset = slot_idx % block_size;
+
+  const int nk = num_kv_heads * embed_dim;
+  for (int i = threadIdx.x; i < nk; i += blockDim.x) {
+    const int head_idx = i / embed_dim;
+    const int rot_offset = i % embed_dim;
+    const int64_t token_head = token_idx * key_stride + head_idx * head_size;
+
+    int x_index, y_index;
+    scalar_t x_value, y_value; 
+    apply_token_rotary_embedding_and_cache<scalar_t, IS_NEOX>(
+                                key + token_head, cos_ptr, sin_ptr, 
+                                rot_offset, embed_dim, 
+                                x_index, x_value, y_index, y_value);
+
+    store_value_into_key_cache(head_size, num_kv_heads, block_idx, 
+                                block_size, block_offset, 
+                                key_cache, x_index, x_value);
+    store_value_into_key_cache(head_size, num_kv_heads, block_idx, 
+                                block_size, block_offset, 
+                                key_cache, key_cache, y_index, y_value);
+  }
+
+  const int n = num_heads * head_size;
+  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    const int64_t src_value_idx = token_idx * value_stride + i;
+    scalar_t value = value[src_value_idx];
+
+    store_value_into_value_cache(head_size, num_kv_heads, block_idx, 
+                                block_size, block_offset, x,
+                                value_cache, i, value);
+  }
 }
 } // namespace vllm
 
@@ -116,16 +229,16 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
 
 
 void fused_rotary_embedding_and_reshape_cache(
-        torch::Tensor& query,  // [batch_size, seq_len, num_heads * head_size] or
-                            // [num_tokens, num_heads * head_size]
-        torch::Tensor& key,    // [batch_size, seq_len, num_kv_heads * head_size] or
-                            // [num_tokens, num_kv_heads * head_size]
-        torch::Tensor& value,  // [num_tokens, num_heads, head_size]
-        torch::Tensor& key_cache,  // [num_blocks, num_heads, head_size/x, block_size, x]
-        torch::Tensor& value_cache,  // [num_blocks, num_heads, head_size, block_size]
+        torch::Tensor& query,   // [batch_size, seq_len, num_heads * head_size] or
+                                // [num_tokens, num_heads * head_size]
+        torch::Tensor& key,     // [batch_size, seq_len, num_kv_heads * head_size] or
+                                // [num_tokens, num_kv_heads * head_size]
+        torch::Tensor& value,   // [num_tokens, num_heads, head_size]
+        torch::Tensor& key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
+        torch::Tensor& value_cache,   // [num_blocks, num_heads, head_size, block_size]
         const std::string& kv_cache_dtype,
-        torch::Tensor& cos_sin_cache,  // [max_position, rot_dim]
-        torch::Tensor& positions,  // [batch_size, seq_len] or [num_tokens]
+        torch::Tensor& cos_sin_cache, // [max_position, rot_dim]
+        torch::Tensor& positions,     // [batch_size, seq_len] or [num_tokens]
         torch::Tensor& slot_mapping,  // [num_tokens]
         const double k_scale,
         const double v_scale,
