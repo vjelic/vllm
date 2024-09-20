@@ -20,11 +20,13 @@ from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
 import numpy as np
 import psutil
 import torch
+import torch.distributed as dist
 import sqlite3
 from contextlib import contextmanager, nullcontext
 from rpdTracerControl import rpdTracerControl
 import vllm.envs as envs
 from vllm.logger import enable_trace_function_call, init_logger
+from rpdTracerControl import rpdTracerControl
 
 T = TypeVar("T")
 logger = init_logger(__name__)
@@ -43,12 +45,11 @@ class rpd_trace():
     def __init__(self, filename=None, name=None, nvtx=False, args=None, skip=False):
         self.skip = skip
         if not self.skip:
-            from rpdTracerControl import rpdTracerControl
-            if 'RANK' in os.environ or int(os.getenv('WORLD_SIZE', 1)) > 1:
-                filename = f"{filename}_pid{os.getpid()}"
-            self.rpd = rpdTracerControl(filename, nvtx=nvtx)
             self.name = name
             self.args = args if args else ""
+            if 'RANK' in os.environ:
+                self.setup_environment_variables(filename)
+            self.rpd = self.initialize_rpd_tracer(filename, nvtx)
     
     def _recreate_cm(self):
         return self
@@ -77,6 +78,34 @@ class rpd_trace():
            self.rpd.rangePop()
            self.rpd.__exit__(None, None, None)
         return False
+   
+    def setup_environment_variables(self, filename):
+        os.environ['LD_PRELOAD'] = 'librpd_tracer.so'
+        os.environ['RPDT_AUTOSTART'] = '0'
+        os.environ['RPDT_FILENAME'] = filename
+
+        if dist.get_rank() == 0:
+            rpd_trace.create_file(filename)
+     
+    def initialize_rpd_tracer(self, filename, nvtx):
+        try:
+             rpdTracerControl.setFilename(name=filename, append=True)
+             return rpdTracerControl(nvtx=nvtx)
+        except Exception as e:
+            print(f"Error initializing rpdTracerControl: {e}")
+            raise 
+    
+    def create_file(filename):
+        from rocpd.schema import RocpdSchema
+        try:
+            with sqlite3.connect(filename) as connection:
+                schema = RocpdSchema()
+                schema.writeSchema(connection)
+                connection.commit()
+        except sqlite3.OperationalError as e:
+            print(f"SQLite operational error: {e}")
+        except Exception as e:
+            print(f"An error occurred while creating the filename: {e}")
 
 class rpd_mark():
 

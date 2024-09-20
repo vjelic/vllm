@@ -172,7 +172,7 @@ def run_vllm(
             os.makedirs(profile_dir, exist_ok=True)
         print(f"Profiling (results will be saved to '{profile_dir}')...")
         name = os.path.basename(os.path.normpath(args.model))
-        model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}"
+        model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}_tp_{args.tensor_parallel_size}"
         with get_profiling_context(profile_dir, model_trace_name):
             llm.generate(prompts, sampling_params, use_tqdm=True)
         return

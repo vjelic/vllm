@@ -8,6 +8,7 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from tqdm import tqdm
 
 from vllm import LLM, SamplingParams
@@ -22,7 +23,7 @@ def main(args: argparse.Namespace):
     @contextmanager
     def rpd_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
         trace_file_path = os.path.join(profile_dir, f"{trace_file_name}.rpd")
-        with rpd_trace(filename = f"{trace_file_path}", name = "run_to_completion", nvtx = True) as p:
+        with rpd_trace(filename = trace_file_path, name = "run_to_completion", nvtx = True) as p:
             yield p
         p.rpd.top_totals()
 
@@ -45,10 +46,8 @@ def main(args: argparse.Namespace):
 
     def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
          if args.profile_torch:
-             print(f"trace_file_name: {trace_file_name}")
              return torch_profiler_context(profile_dir, trace_file_name)
          elif args.profile_rpd:
-             print(f"trace_file_name: {trace_file_name}")
              return rpd_profiler_context(profile_dir, trace_file_name)
          else:
              return nullcontext()
@@ -97,7 +96,7 @@ def main(args: argparse.Namespace):
     def run_to_completion(profile_dir: Optional[str] = None, profiling_mode = None):
         if profile_dir:
             name = os.path.basename(os.path.normpath(args.model))
-            model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}_batch_{args.batch_size}"
+            model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}_batch_{args.batch_size}_tp_{args.tensor_parallel_size}"
             with get_profiling_context(profile_dir, model_trace_name):
                 llm.generate(dummy_inputs,
                              sampling_params=sampling_params,
