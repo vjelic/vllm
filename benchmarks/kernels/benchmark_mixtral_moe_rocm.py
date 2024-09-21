@@ -179,7 +179,7 @@ def run_timing(
     ]
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
-    topk_ = 2
+    topk_ = top_k
     topk_weights = torch.empty(M,
                                topk_,
                                dtype=torch.float32,
