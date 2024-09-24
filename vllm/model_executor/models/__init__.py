@@ -166,10 +166,10 @@ class ModelRegistry:
                 raise ValueError(
                     f"Model architecture {model_arch} is not supported by "
                     "ROCm for now.")
-            if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
-                logger.warning(
-                    "Model architecture %s is partially supported by ROCm: %s",
-                    model_arch, _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
+            # if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
+            #     logger.warning(
+            #         "Model architecture %s is partially supported by ROCm: %s",
+            #         model_arch, _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
 
         return ModelRegistry._get_model(model_arch)
 
