@@ -536,6 +536,7 @@ def get_moe_configs(E: int, N: int,
 
     # If no optimized configuration is available, we will use the default
     # configuration
+    logger.info("---> MOE tuned file not found at %s",config_file_path)
     return None
 
 
