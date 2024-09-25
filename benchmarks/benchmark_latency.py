@@ -17,17 +17,18 @@ from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import FlexibleArgumentParser
 
 from vllm.utils import rpd_trace
+from rpdTracerControl import rpdTracerControl as rpd
 from contextlib import contextmanager, nullcontext
 
 def main(args: argparse.Namespace):
     print(args)
     
     @contextmanager
-    def rpd_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
-        trace_file_path = os.path.join(profile_dir, f"{trace_file_name}.rpd")
-        with rpd_trace(filename = f"{trace_file_path}", name = "run_to_completion", nvtx = True) as p:
-            yield p
-        p.rpd.top_totals()
+    def rpd_profiler_context():
+        llm.start_profile()
+        yield 
+        llm.stop_profile()
+        rpd.top_totals()
 
     @contextmanager
     def torch_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
@@ -48,11 +49,9 @@ def main(args: argparse.Namespace):
 
     def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
          if args.profile_torch:
-             print(f"trace_file_name: {trace_file_name}")
              return torch_profiler_context(profile_dir, trace_file_name)
          elif args.profile_rpd:
-             print(f"trace_file_name: {trace_file_name}")
-             return rpd_profiler_context(profile_dir, trace_file_name)
+             return rpd_profiler_context()
          else:
              return nullcontext()
 
@@ -106,8 +105,7 @@ def main(args: argparse.Namespace):
     def run_to_completion(profile_dir: Optional[str] = None, profiling_mode = None):
         if profile_dir:
             name = os.path.basename(os.path.normpath(args.model))
-            model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}_batch_{args.batch_size}"
-            with get_profiling_context(profile_dir, model_trace_name):
+            with get_profiling_context():
                 llm.generate(dummy_inputs,
                              sampling_params=sampling_params,
                              use_tqdm=False)
@@ -126,10 +124,6 @@ def main(args: argparse.Namespace):
     
     if args.profile_torch or args.profile_rpd:
         profile_dir = args.profile_dir
-        if not profile_dir:
-            profile_dir = Path(".") / "vllm_benchmark_latency_result"
-            os.makedirs(profile_dir, exist_ok=True)
-        print(f"Profiling (results will be saved to '{profile_dir}')...")
         run_to_completion(profile_dir=profile_dir)    
         return
 
@@ -245,7 +239,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--profile-dir',
         type=str,
-        default=None,
+        default=os.getenv('VLLM_RPD_PROFILER_DIR',default=None),
         help=('path to save the profiler output. Can be visualized '
               'with ui.perfetto.dev or Tensorboard.'))
     parser.add_argument(

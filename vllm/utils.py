@@ -26,6 +26,7 @@ import numpy as np
 import numpy.typing as npt
 import psutil
 import torch
+import torch.distributed as dist
 import torch.types
 import yaml
 from packaging.version import Version
@@ -163,12 +164,9 @@ class rpd_trace():
     def __init__(self, filename=None, name=None, nvtx=False, args=None, skip=False):
         self.skip = skip
         if not self.skip:
-            from rpdTracerControl import rpdTracerControl
-            if 'RANK' in os.environ or int(os.getenv('WORLD_SIZE', 1)) > 1:
-                filename = f"{filename}_pid{os.getpid()}"
-            self.rpd = rpdTracerControl(filename, nvtx=nvtx)
             self.name = name
             self.args = args if args else ""
+            self.rpd = self.initialize_rpd_tracer(filename, nvtx)
     
     def _recreate_cm(self):
         return self
@@ -197,6 +195,32 @@ class rpd_trace():
            self.rpd.rangePop()
            self.rpd.__exit__(None, None, None)
         return False
+   
+    def setup_environment_variables(filename):
+        os.environ['RPDT_AUTOSTART'] = '0'
+        os.environ['RPDT_FILENAME'] = filename
+     
+    def initialize_rpd_tracer(self, filename, nvtx):
+        try:
+             rpd_trace.setup_environment_variables(filename)
+             rpdTracerControl.setFilename(name=filename, append=True)
+             return rpdTracerControl(nvtx=nvtx)
+        except Exception as e:
+            print(f"Error initializing rpdTracerControl: {e}")
+            raise 
+    
+    def create_file(filename):
+        from rocpd.schema import RocpdSchema
+        try:
+            print("Creating empty rpd schema file ...")
+            with sqlite3.connect(filename) as connection:
+                schema = RocpdSchema()
+                schema.writeSchema(connection)
+                connection.commit()
+        except sqlite3.OperationalError as e:
+            print(f"SQLite operational error: {e}")
+        except Exception as e:
+            print(f"An error occurred while creating the filename: {e}")
 
 class rpd_mark():
 

@@ -18,49 +18,8 @@ from vllm.entrypoints.openai.api_server import (
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import FlexibleArgumentParser, merge_async_iterators
 from vllm.utils import rpd_trace
+from rpdTracerControl import rpdTracerControl as rpd
 from contextlib import contextmanager, nullcontext
-
-@contextmanager
-def rpd_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
-    trace_file_path = os.path.join(profile_dir, f"{trace_file_name}.rpd")
-    with rpd_trace(filename = f"{trace_file_path}", name = "run_to_completion", nvtx = True) as p:
-        yield p
-    p.rpd.top_totals()
-
-@contextmanager
-def torch_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
-    p = torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    str(profile_dir)))
-    p.start()
-    try:
-        with torch.no_grad():
-            yield p
-    finally:
-        p.stop()
-        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
-
-def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
-     if args.profile_torch:
-         print(f"trace_file_name: {trace_file_name}")
-         return torch_profiler_context(profile_dir, trace_file_name)
-     elif args.profile_rpd:
-         print(f"trace_file_name: {trace_file_name}")
-         return rpd_profiler_context(profile_dir, trace_file_name)
-     else:
-         return nullcontext()
-
-def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
-         if args.profile_torch:
-             return torch_profiler_context(profile_dir, trace_file_name)
-         elif args.profile_rpd:
-             return rpd_profiler_context(profile_dir, trace_file_name)
-         else:
-             return nullcontext()
 
 def sample_requests(
     dataset_path: str,
@@ -136,6 +95,39 @@ def run_vllm(
     disable_async_output_proc: bool = False,
 ) -> float:
     from vllm import LLM, SamplingParams
+    
+    @contextmanager
+    def rpd_profiler_context():
+        llm.start_profile()
+        yield
+        llm.stop_profile()
+        rpd.top_totals()
+
+    @contextmanager
+    def torch_profiler_context(profile_dir: Optional[str] = None, trace_file_name = None):
+        p = torch.profiler.profile(
+                    activities=[
+                        torch.profiler.ProfilerActivity.CPU,
+                        torch.profiler.ProfilerActivity.CUDA,
+                    ],
+                    on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                        str(profile_dir)))
+        p.start()
+        try:
+            with torch.no_grad():
+                yield p
+        finally:
+            p.stop()
+            print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+    def get_profiling_context(profile_dir: Optional[str] = None, trace_file_name = None):
+         if args.profile_torch:
+             return torch_profiler_context(profile_dir, trace_file_name)
+         elif args.profile_rpd:
+             return rpd_profiler_context()
+         else:
+             return nullcontext()
+
     llm = LLM(
         model=model,
         tokenizer=tokenizer,
@@ -178,10 +170,6 @@ def run_vllm(
 
     if args.profile_torch or args.profile_rpd:
         profile_dir = args.profile_dir
-        if not profile_dir:
-            profile_dir = Path(".") / "vllm_benchmark_throughput_result"
-            os.makedirs(profile_dir, exist_ok=True)
-        print(f"Profiling (results will be saved to '{profile_dir}')...")
         name = os.path.basename(os.path.normpath(args.model))
         model_trace_name =f"{name}_in_{args.input_len}_out_{args.output_len}"
         with get_profiling_context(profile_dir, model_trace_name):
