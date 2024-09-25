@@ -21,6 +21,7 @@ class SamplingType(IntEnum):
     RANDOM = 1
     RANDOM_SEED = 2
     BEAM = 3
+    FORCED = 4
 
 
 LogitsProcessor = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
@@ -82,6 +83,8 @@ class SamplingParams(
         min_p: Float that represents the minimum probability for a token to be
             considered, relative to the probability of the most likely token.
             Must be in [0, 1]. Set to 0 to disable this.
+        ppl_measurement: Measure perplexity towards the deterministic string 
+            instead of probabilistic regressing.
         seed: Random seed to use for the generation.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
@@ -134,6 +137,9 @@ class SamplingParams(
     top_p: float = 1.0
     top_k: int = -1
     min_p: float = 0.0
+    ppl_measurement: bool = False
+    future_context: Optional[List[int]] = None
+    cntr: Optional[int] = None
     seed: Optional[int] = None
     use_beam_search: bool = False
     length_penalty: float = 1.0
@@ -174,6 +180,9 @@ class SamplingParams(
         top_p: Optional[float] = 1.0,
         top_k: int = -1,
         min_p: float = 0.0,
+        ppl_measurement: bool = False,
+        future_context: Optional[List[int]] = None,
+        cntr: Optional[int] = None,
         seed: Optional[int] = None,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
@@ -207,6 +216,9 @@ class SamplingParams(
             top_p=1.0 if top_p is None else top_p,
             top_k=top_k,
             min_p=min_p,
+            ppl_measurement=ppl_measurement,
+            future_context=future_context,
+            cntr=cntr,
             seed=seed,
             use_beam_search=use_beam_search,
             length_penalty=length_penalty,
@@ -273,9 +285,14 @@ class SamplingParams(
         self._all_stop_token_ids = set(self.stop_token_ids)
 
     def _verify_args(self) -> None:
+        if not isinstance(self.n, int):
+            raise ValueError(f"n must be an int, but is of "
+                             f"type {type(self.n)}")
         if self.n < 1:
             raise ValueError(f"n must be at least 1, got {self.n}.")
-        assert isinstance(self.best_of, int)
+        if not isinstance(self.best_of, int):
+            raise ValueError(f'best_of must be an int, but is of '
+                             f'type {type(self.best_of)}')
         if self.best_of < self.n:
             raise ValueError(f"best_of must be greater than or equal to n, "
                              f"got n={self.n} and best_of={self.best_of}.")
@@ -392,6 +409,8 @@ class SamplingParams(
 
     @cached_property
     def sampling_type(self) -> SamplingType:
+        if self.ppl_measurement:
+            return SamplingType.FORCED
         if self.use_beam_search:
             return SamplingType.BEAM
         if self.temperature < _SAMPLING_EPS:
@@ -429,6 +448,7 @@ class SamplingParams(
             f"top_p={self.top_p}, "
             f"top_k={self.top_k}, "
             f"min_p={self.min_p}, "
+            f"ppl_measurement={self.ppl_measurement}, "
             f"seed={self.seed}, "
             f"use_beam_search={self.use_beam_search}, "
             f"length_penalty={self.length_penalty}, "

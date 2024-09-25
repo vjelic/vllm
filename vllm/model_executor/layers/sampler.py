@@ -10,12 +10,6 @@ import msgspec
 import torch
 import torch.nn as nn
 
-from vllm.spec_decode.metrics import SpecDecodeWorkerMetrics
-from vllm.triton_utils import HAS_TRITON
-
-if HAS_TRITON:
-    from vllm.model_executor.layers.ops.sample import sample as sample_triton
-
 import vllm.envs as envs
 from vllm.model_executor.sampling_metadata import (SamplingMetadata,
                                                    SamplingTensors,
@@ -23,6 +17,7 @@ from vllm.model_executor.sampling_metadata import (SamplingMetadata,
 from vllm.sampling_params import SamplingType
 from vllm.sequence import (CompletionSequenceGroupOutput, Logprob,
                            PromptLogprobs, SampleLogprobs, SequenceOutput)
+from vllm.spec_decode.metrics import SpecDecodeWorkerMetrics
 
 if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
     import flashinfer.sampling
@@ -60,6 +55,7 @@ class SampleResultArgsType:
     multinomial_samples: MultinomialSamplesType
     sample_results_dict: SampleResultsDictType
     sampling_metadata: SamplingMetadata
+    forced_samples: Optional[torch.Tensor]
     greedy_samples: Optional[torch.Tensor]
     beam_search_logprobs: Optional[torch.Tensor]
 
@@ -438,12 +434,9 @@ def _apply_top_k_top_p(
     logits_sort.masked_fill_(top_p_mask, -float("inf"))
 
     # Re-sort the probabilities.
-    src = torch.arange(logits_idx.shape[-1],
-                       device=logits_idx.device).expand_as(logits_idx)
-    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
-                                                           index=logits_idx,
-                                                           src=src)
-    logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
+    logits = torch.empty_like(logits_sort).scatter_(dim=-1,
+                                                    index=logits_idx,
+                                                    src=logits_sort)
     return logits
 
 
@@ -494,6 +487,39 @@ def _greedy_sample(
             "Greedy sampling should have only one seq.")
         parent_ids = list(range(num_parent_seqs))
         next_token_ids = [samples_lst[sample_idx]]
+        results.append((next_token_ids, parent_ids))
+        sample_idx += num_parent_seqs
+    return results
+
+
+def _forced_sample(
+    selected_seq_groups: List[SequenceGroupToSample],
+    samples: torch.Tensor,
+) -> List[Tuple[List[int], List[int]]]:
+    """Run forced sampling on a given samples.
+    Args:
+        selected_seq_groups: A list of sequence groups batched.
+        samples: (num_selected_samples,) A tensor of samples. The length of
+            samples could be smaller than selected_seq_groups if
+            seq_group.do_sample is False.
+    Returns:
+        Tuple of (next_token_ids, parent_ids). The length of returned list is
+        same as the length of selected_seq_groups. If the corresponding
+        seq_group has do_sample=False, tuple contains ([], [])
+        
+        The next_token_ids is guided (forced) by the id containing in the 
+        sampling_parameters.future_context property.
+    """
+    samples = samples.tolist()
+    sample_idx = 0
+    results = []
+    for seq_group in selected_seq_groups:
+        seq_ids = seq_group.seq_ids
+        num_parent_seqs = len(seq_ids)
+        assert num_parent_seqs == 1, (
+            "Deterministic sampling should have only one seq.")
+        parent_ids = list(range(num_parent_seqs))
+        next_token_ids = [samples[sample_idx]]
         results.append((next_token_ids, parent_ids))
         sample_idx += num_parent_seqs
     return results
@@ -697,6 +723,7 @@ def get_pythonized_sample_results(
     (
         sample_metadata,
         sampling_metadata,
+        forced_samples,
         greedy_samples,
         multinomial_samples,
         beam_search_logprobs,
@@ -704,6 +731,7 @@ def get_pythonized_sample_results(
     ) = (
         sample_result_args.sample_metadata,
         sample_result_args.sampling_metadata,
+        sample_result_args.forced_samples,
         sample_result_args.greedy_samples,
         sample_result_args.multinomial_samples,
         sample_result_args.beam_search_logprobs,
@@ -722,6 +750,8 @@ def get_pythonized_sample_results(
         elif sampling_type == SamplingType.BEAM:
             sample_results = _beam_search_sample(seq_groups,
                                                  beam_search_logprobs)
+        elif sampling_type == SamplingType.FORCED:
+            sample_results = _forced_sample(seq_groups, forced_samples)
         sample_results_dict.update(zip(seq_group_id, sample_results))
 
     return [
@@ -740,7 +770,7 @@ def _sample_with_torch(
 ) -> SampleReturnType:
     '''Torch-oriented _sample() implementation.
 
-    Single-step scheduling: 
+    Single-step scheduling:
     * Perform GPU-side sampling computation
     * Immediately Pythonize sampling result
 
@@ -762,6 +792,7 @@ def _sample_with_torch(
     sample_results_dict: SampleResultsDictType = {}
     sample_metadata: SampleMetadataType = {}
     multinomial_samples: MultinomialSamplesType = {}
+    forced_samples: Optional[torch.Tensor] = None
     greedy_samples: Optional[torch.Tensor] = None
     beam_search_logprobs: Optional[torch.Tensor] = None
 
@@ -777,7 +808,7 @@ def _sample_with_torch(
     # Counterintiutively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
     for sampling_type in SamplingType:
-        sample_indices = categorized_sample_indices[sampling_type][:, 0]
+        sample_indices = categorized_sample_indices[sampling_type]
         num_tokens = len(sample_indices)
         if num_tokens == 0:
             continue
@@ -786,6 +817,7 @@ def _sample_with_torch(
         seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_id]
         sample_metadata[sampling_type] = (seq_group_id, seq_groups)
         long_sample_indices = sample_indices.long()
+
         if sampling_type == SamplingType.GREEDY:
             greedy_samples = torch.argmax(logprobs[long_sample_indices],
                                           dim=-1)
@@ -835,6 +867,18 @@ def _sample_with_torch(
 
         elif sampling_type == SamplingType.BEAM:
             beam_search_logprobs = logprobs[sample_indices]
+        elif sampling_type == SamplingType.FORCED:
+            if (seq_groups[0].sampling_params.future_context is not None):
+                forced_samples = torch.tensor([
+                    seq_groups[0].sampling_params.future_context[0][min(
+                        len(sampling_metadata.seq_groups[0].seq_data[
+                            sampling_params.cntr].output_token_ids),
+                        len(seq_groups[0].sampling_params.future_context[0]) -
+                        1)]
+                ])
+            else:
+                forced_samples = torch.argmax(logprobs[long_sample_indices],
+                                              dim=-1)
         else:
             raise ValueError(f"Unsupported sampling type: {sampling_type}")
 
@@ -843,6 +887,7 @@ def _sample_with_torch(
     maybe_deferred_args = SampleResultArgsType(
         sampling_metadata=sampling_metadata,
         sample_metadata=sample_metadata,
+        forced_samples=forced_samples,
         multinomial_samples=multinomial_samples,
         greedy_samples=greedy_samples,
         beam_search_logprobs=beam_search_logprobs,
@@ -861,88 +906,6 @@ def _sample_with_torch(
             maybe_deferred_args,
             sampled_token_ids_tensor,
         )
-
-
-def _sample_with_triton_kernel(
-    probs: torch.Tensor,
-    logprobs: torch.Tensor,
-    sampling_metadata: SamplingMetadata,
-    sampling_tensors: SamplingTensors,
-) -> SampleResultType:
-    categorized_seq_group_ids: Dict[SamplingType,
-                                    List[int]] = {t: []
-                                                  for t in SamplingType}
-    categorized_sample_indices = sampling_metadata.categorized_sample_indices
-    for i, seq_group in enumerate(sampling_metadata.seq_groups):
-        sampling_params = seq_group.sampling_params
-        sampling_type = sampling_params.sampling_type
-        categorized_seq_group_ids[sampling_type].append(i)
-
-    sample_results_dict: Dict[int, Tuple[List[int], List[int]]] = {}
-    sample_metadata: Dict[SamplingType,
-                          Tuple[List[int], List[SequenceGroupToSample],
-                                torch.Tensor, torch.Tensor]] = {}
-    max_best_of_in_batch = 1
-
-    # Counterintiutively, having two loops here is actually faster.
-    # The first loop can run without waiting on GPU<->CPU sync.
-    for sampling_type in SamplingType:
-        sample_indices = categorized_sample_indices[sampling_type][:, 0]
-        sampled_token_indices = categorized_sample_indices[sampling_type][:, 1]
-        num_tokens = len(sample_indices)
-        if num_tokens == 0:
-            continue
-        seq_group_id = categorized_seq_group_ids[sampling_type]
-        seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_id]
-        sample_metadata[sampling_type] = (seq_group_id, seq_groups,
-                                          sample_indices,
-                                          sampled_token_indices)
-        if sampling_type in (SamplingType.GREEDY, SamplingType.RANDOM,
-                             SamplingType.RANDOM_SEED):
-            for seq_group in seq_groups:
-                if seq_group.is_prompt:
-                    sampling_params = seq_group.sampling_params
-                    max_best_of_in_batch = max(max_best_of_in_batch,
-                                               sampling_params.best_of)
-        elif sampling_type == SamplingType.BEAM:
-            beam_search_logprobs = logprobs[sample_indices]
-        else:
-            raise ValueError(f"Unsupported sampling type: {sampling_type}")
-
-    sampled_tokens, _, _ = sample_triton(
-        probs=probs,
-        seeds=sampling_tensors.sampling_seeds,
-        max_best_of=max_best_of_in_batch,
-        sample_indices=sampling_tensors.sample_indices,
-        logprobs=logprobs,
-        # don't save logprobs because we have logic for that below
-        # TODO: use this instead of the CPU-based logic below
-        save_logprobs=False,
-    )
-
-    # GPU<->CPU sync happens in the loop below.
-
-    for sampling_type in SamplingType:
-        if sampling_type not in sample_metadata:
-            continue
-        (seq_group_id, seq_groups, sample_indices,
-         sampled_token_indices) = sample_metadata[sampling_type]
-        if sampling_type == SamplingType.GREEDY:
-            sample_results = _greedy_sample(
-                seq_groups, sampled_tokens[sampled_token_indices][:, 0])
-        elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
-            sample_results = _random_sample(
-                seq_groups, sampled_tokens[sampled_token_indices])
-        elif sampling_type == SamplingType.BEAM:
-            sample_results = _beam_search_sample(seq_groups,
-                                                 beam_search_logprobs)
-        sample_results_dict.update(zip(seq_group_id, sample_results))
-
-    sample_results = [
-        sample_results_dict.get(i, ([], []))
-        for i in range(len(sampling_metadata.seq_groups))
-    ]
-    return sample_results
 
 
 def _sample(
@@ -973,10 +936,6 @@ def _sample(
         include_gpu_probs_tensor=include_gpu_probs_tensor,
         modify_greedy_probs=modify_greedy_probs,
     )
-
-    # TODO: Enable once Triton kernel & associated code is faster.
-    # return _sample_with_triton_kernel(probs, logprobs, sampling_metadata,
-    #                                   sampling_tensors)
 
 
 def _get_ranks(x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
@@ -1383,7 +1342,8 @@ def _build_sampler_output(
         deferred_sample_results_args=deferred_sample_results_args)
 
 
-def _get_next_prompt_tokens(seq_group: SequenceGroupToSample) -> List[int]:
+def _get_next_prompt_tokens(
+        seq_group: SequenceGroupToSample) -> Tuple[int, ...]:
     """Get a list of next prompt tokens to compute logprob from a
         given sequence group.
 
