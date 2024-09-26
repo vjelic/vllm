@@ -21,7 +21,10 @@ from vllm.model_executor.layers.fused_moe import (get_config_file_name,
 
 def main(args):
     world_size = args.numGPU
-    mp.spawn(wrapper, args=(args, ), nprocs=world_size, join=False)
+    try:
+        mp.spawn(wrapper, args=(args,), nprocs=world_size, join=False)
+    except Exception as e:
+        print(f"An error occurred during multiprocessing: {e}")
 
 
 def wrapper(rank, args):
@@ -32,8 +35,11 @@ def wrapper(rank, args):
         1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 1536, 2048,
         3072, 4096
     ]
-    for i in range(device_id, len(batches), args.numGPU):
-        tune_batch(batches[i], model=args.model, TP=args.modelTP)
+    try:
+        for i in range(device_id, len(batches), args.numGPU):
+            tune_batch(batches[i], model=args.model, TP=args.modelTP)
+    except Exception as e:
+        print(f"An error occurred on device {device_id}: {e}")
 
 
 def tune_batch(bs, model, TP):
