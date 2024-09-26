@@ -22,7 +22,7 @@ from vllm.model_executor.layers.fused_moe import (get_config_file_name,
 def main(args):
     world_size = args.numGPU
     try:
-        mp.spawn(wrapper, args=(args,), nprocs=world_size, join=False)
+        mp.spawn(wrapper, args=(args, ), nprocs=world_size, join=False)
     except Exception as e:
         print(f"An error occurred during multiprocessing: {e}")
 
