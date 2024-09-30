@@ -330,7 +330,7 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.max_batch_size,
-            rgs.distributed_executor_backend, args.gpu_memory_utilization, 
+            args.distributed_executor_backend, args.gpu_memory_utilization, 
             args.num_scheduler_steps, args.use_v2_block_manager, 
             args.download_dir, args.load_format,
             args.disable_async_output_proc
@@ -354,6 +354,8 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(prompt_len + output_len
                            for _, prompt_len, output_len in requests)
+    aggregate_throughput = args.output_len * len(requests) / elapsed_time
+    print(f"Token throughput per request: {aggregate_throughput} tokens/s,")
     print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
           f"{total_num_tokens / elapsed_time:.2f} tokens/s")
 
@@ -364,6 +366,7 @@ def main(args: argparse.Namespace):
             "num_requests": len(requests),
             "total_num_tokens": total_num_tokens,
             "requests_per_second": len(requests) / elapsed_time,
+            "request_tokens_per_second": aggregate_throughput,
             "tokens_per_second": total_num_tokens / elapsed_time,
         }
         with open(args.output_json, "w") as f:
