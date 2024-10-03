@@ -164,7 +164,7 @@ class LLM:
         cpu_offload_gb: float = 0,
         enforce_eager: Optional[bool] = None,
         max_context_len_to_capture: Optional[int] = None,
-        max_seq_len_to_capture: int = 8192,
+        max_seq_len_to_capture: int = 32768,
         disable_custom_all_reduce: bool = False,
         disable_async_output_proc: bool = False,
         mm_processor_kwargs: Optional[Dict[str, Any]] = None,
