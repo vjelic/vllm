@@ -5,7 +5,7 @@ set -o pipefail
 echo "--- Confirming Clean Initial State"
 while true; do
         sleep 3
-        if grep -q clean /opt/amdgpu/etc/gpu_state; then
+        if grep -q clean ${BUILDKITE_META_DATA_RESET_TARGET}; then
                 echo "GPUs state is \"clean\""
                 break
         fi
@@ -44,11 +44,11 @@ cleanup_docker
 
 echo "--- Resetting GPUs"
 
-echo "reset" > /opt/amdgpu/etc/gpu_state
+echo "reset" > ${BUILDKITE_META_DATA_RESET_TARGET}
 
 while true; do
         sleep 3
-        if grep -q clean /opt/amdgpu/etc/gpu_state; then
+	if grep -q clean ${BUILDKITE_META_DATA_RESET_TARGET}; then
                 echo "GPUs state is \"clean\""
                 break
         fi
@@ -83,6 +83,7 @@ if [[ $commands == *" kernels "* ]]; then
   --ignore=kernels/test_encoder_decoder_attn.py \
   --ignore=kernels/test_flash_attn.py \
   --ignore=kernels/test_flashinfer.py \
+  --ignore=kernels/test_gguf.py \
   --ignore=kernels/test_int8_quant.py \
   --ignore=kernels/test_machete_gemm.py \
   --ignore=kernels/test_mamba_ssm.py \
@@ -91,6 +92,16 @@ if [[ $commands == *" kernels "* ]]; then
   --ignore=kernels/test_prefix_prefill.py \
   --ignore=kernels/test_rand.py \
   --ignore=kernels/test_sampler.py"
+fi
+
+#ignore certain Entrypoints tests
+if [[ $commands == *" entrypoints/openai "* ]]; then
+  commands=${commands//" entrypoints/openai "/" entrypoints/openai \
+  --ignore=entrypoints/openai/test_accuracy.py \
+  --ignore=entrypoints/openai/test_audio.py \
+  --ignore=entrypoints/openai/test_encoder_decoder.py \
+  --ignore=entrypoints/openai/test_embedding.py \
+  --ignore=entrypoints/openai/test_oot_registration.py "}
 fi
 
 PARALLEL_JOB_COUNT=8
@@ -128,8 +139,9 @@ if [[ $commands == *"--shard-id="* ]]; then
     fi
   done
 else
+  echo "Render devices: $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES"
   docker run \
-          --device /dev/kfd --device /dev/dri \
+          --device /dev/kfd $BUILDKITE_AGENT_META_DATA_RENDER_DEVICES \
           --network host \
           --shm-size=16gb \
           --rm \

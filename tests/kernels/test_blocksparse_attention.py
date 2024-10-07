@@ -7,7 +7,7 @@ import torch
 from vllm import _custom_ops as ops
 from vllm.attention.ops.blocksparse_attention.interface import (
     LocalStridedBlockSparseAttn)
-from vllm.utils import get_max_shared_memory_bytes, is_hip
+from vllm.utils import get_max_shared_memory_bytes, is_hip, seed_everything
 
 from .allclose_default import get_default_atol, get_default_rtol
 
@@ -20,7 +20,7 @@ MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 4321  # Arbitrary values for testing
-PARTITION_SIZE = 512
+PARTITION_SIZE = 512 if not is_hip() else 1024
 DTYPES = [torch.half, torch.bfloat16]
 NUM_GEN_SEQS = [3]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
@@ -172,10 +172,7 @@ def test_paged_attention(
     blocksparse_block_size: int,
     blocksparse_head_sliding_step: int,
 ) -> None:
-    random.seed(seed)
-    torch.random.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
+    seed_everything(seed)
     torch.set_default_device(device)
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
@@ -386,10 +383,7 @@ def test_varlen_blocksparse_attention_prefill(
     seed: int,
     device: str,
 ) -> None:
-    random.seed(seed)
-    torch.random.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
+    seed_everything(seed)
     torch.set_default_device(device)
     # MAX_SEQ_LEN sometimes causes OOM in the reference implementation.
     # As the xformers library is already tested with its own tests, we can use

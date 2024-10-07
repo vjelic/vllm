@@ -63,14 +63,17 @@ if TYPE_CHECKING:
     VERBOSE: bool = False
     VLLM_ALLOW_LONG_MAX_MODEL_LEN: bool = False
     VLLM_TEST_FORCE_FP8_MARLIN: bool = False
-    VLLM_RPC_GET_DATA_TIMEOUT_MS: int = 5000
+    VLLM_RPC_TIMEOUT: int = 10000  # ms
     VLLM_PLUGINS: Optional[List[str]] = None
     VLLM_TORCH_PROFILER_DIR: Optional[str] = None
+    VLLM_RPD_PROFILER_DIR: Optional[str] = None
+    VLLM_USE_TRITON_AWQ: bool = False
     VLLM_ALLOW_RUNTIME_LORA_UPDATING: bool = False
+    VLLM_ALLOW_DEPRECATED_BEAM_SEARCH: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
-    VLLM_MOE_PADDING: bool = True
-    VLLM_FP8_PADDING: bool = False
+    VLLM_MOE_PADDING: bool = False
+    VLLM_FP8_PADDING: bool = True
 
 
 def get_default_cache_root():
@@ -218,6 +221,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_USE_TRITON_FLASH_ATTN":
     lambda: (os.environ.get("VLLM_USE_TRITON_FLASH_ATTN", "True").lower() in
              ("true", "1")),
+
+    # If set, allowing the use of deprecated beam search implementation
+    "VLLM_ALLOW_DEPRECATED_BEAM_SEARCH":
+    lambda: os.environ.get("VLLM_ALLOW_DEPRECATED_BEAM_SEARCH", "0") == "1",
 
     # Internal flag to enable Dynamo graph capture
     "VLLM_TEST_DYNAMO_GRAPH_CAPTURE":
@@ -403,7 +410,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
             os.path.join(get_default_cache_root(), "vllm", "xla_cache"),
         )),
     "VLLM_FUSED_MOE_CHUNK_SIZE":
-    lambda: int(os.getenv("VLLM_FUSED_MOE_CHUNK_SIZE", "32768")),
+    lambda: int(os.getenv("VLLM_FUSED_MOE_CHUNK_SIZE", "65536")),
 
     # If set, vllm will skip the deprecation warnings.
     "VLLM_NO_DEPRECATION_WARNING":
@@ -432,8 +439,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Time in ms for the zmq client to wait for a response from the backend
     # server for simple data operations
-    "VLLM_RPC_GET_DATA_TIMEOUT_MS":
-    lambda: int(os.getenv("VLLM_RPC_GET_DATA_TIMEOUT_MS", "5000")),
+    "VLLM_RPC_TIMEOUT":
+    lambda: int(os.getenv("VLLM_RPC_TIMEOUT", "10000")),
 
     # a list of plugin names to load, separated by commas.
     # if this is not set, it means all plugins will be loaded
@@ -447,6 +454,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_TORCH_PROFILER_DIR":
     lambda: (None if os.getenv("VLLM_TORCH_PROFILER_DIR", None) is None else os
              .path.expanduser(os.getenv("VLLM_TORCH_PROFILER_DIR", "."))),
+
+    # Enables rpd profiler if set. Path to the directory where torch profiler
+    # traces are saved. Note that it must be an absolute path.
+    "VLLM_RPD_PROFILER_DIR":
+    lambda: (None if os.getenv("VLLM_RPD_PROFILER_DIR", None) is None else os.
+             path.expanduser(os.getenv("VLLM_RPD_PROFILER_DIR", "."))),
 
     # If set, vLLM will use Triton implementations of AWQ.
     "VLLM_USE_TRITON_AWQ":
@@ -468,11 +481,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Pad the weight for moe kernel or not
     "VLLM_MOE_PADDING":
-    lambda: bool(int(os.getenv("VLLM_MOE_PADDING", "1"))),
+    lambda: bool(int(os.getenv("VLLM_MOE_PADDING", "0"))),
 
     # Pad the weight for moe kernel or not
     "VLLM_FP8_PADDING":
-    lambda: bool(int(os.getenv("VLLM_FP8_PADDING", "0"))),
+    lambda: bool(int(os.getenv("VLLM_FP8_PADDING", "1"))),
 }
 
 # end-env-vars-definition
