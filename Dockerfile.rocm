@@ -4,7 +4,7 @@ ARG BASE_IMAGE="rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0"
 ARG COMMON_WORKDIR=/app
 
 # The following ARGs should be "0" or "1". If "1", the respective component will be built and installed on top of the base image
-ARG BUILD_HIPBLASLT="0"
+ARG BUILD_HIPBLASLT="1"
 ARG BUILD_RCCL="1"
 ARG BUILD_FA="1"
 ARG BUILD_TRITON="1"
@@ -23,7 +23,7 @@ USER root
 ARG BASE_IMAGE
 ARG COMMON_WORKDIR
 # Used as ARCHes for all components
-ARG ARG_PYTORCH_ROCM_ARCH="gfx90a;gfx942"
+ARG ARG_PYTORCH_ROCM_ARCH="gfx942"
 ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH}
 
 # Install some basic utilities
@@ -176,6 +176,7 @@ RUN cd vllm \
 # Build gradlib
 RUN cd vllm/gradlib \
     && python3 setup.py clean --all && python3 setup.py bdist_wheel --dist-dir=dist
+
 FROM scratch AS export_vllm
 ARG COMMON_WORKDIR
 COPY --from=build_vllm ${COMMON_WORKDIR}/vllm/dist/*.whl /
@@ -283,3 +284,29 @@ ENV HIP_FORCE_DEV_KERNARG=1
 
 CMD ["/bin/bash"]
 
+FROM final AS base_final
+#------------------------------------------------------
+# Copy benchmark script and tuned files
+FROM base_final AS Dell
+
+# Set the environment variable
+ENV NCCL_MIN_NCHANNELS=112
+ENV NCCL_MIN_NCHANNELS=112
+ENV VLLM_USE_TRITON_FLASH_ATTN=0
+ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
+ENV HIP_FORCE_DEV_KERNARG=1
+ENV VLLM_USE_ROCM_CUSTOM_PAGED_ATTN=1
+ENV VLLM_INSTALL_PUNICA_KERNELS=1
+ENV TOKENIZERS_PARALLELISM=false
+ENV RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1
+ENV VLLM_FP8_PADDING=1
+ENV VLLM_FP8_ACT_PADDING=1
+ENV VLLM_FP8_WEIGHT_PADDING=1
+ENV VLLM_SCHED_PREFILL_KVC_FREEPCT=31.0
+
+# Copy files
+COPY Mixtral-8x7B-Instruct-v0.1 /root/Mixtral-8x7B-Instruct-v0.1
+COPY Mixtral-8x7B-Instruct-v0.1/MoE/DELL_8GPU/E\=8\,N\=1792\,device_name\=AMD_Instinct_MI300X_OAM.json  \
+/opt/conda/envs/py_3.9/lib/python3.9/site-packages/vllm/model_executor/layers/fused_moe/configs/
+
+WORKDIR /root/Mixtral-8x7B-Instruct-v0.1
