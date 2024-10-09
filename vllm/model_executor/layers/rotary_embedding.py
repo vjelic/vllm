@@ -762,7 +762,6 @@ class FusedLlama3RotaryEmbedding(Llama3RotaryEmbedding):
             query, key,  value, key_cache, value_cache, kv_cache_dtype,
             self.cos_sin_cache, positions, slot_mapping, 
             key_scale, value_scale, self.is_neox_style)
-        print(f"{query[0,:]=}")
 
 class MRotaryEmbedding(RotaryEmbedding):
     """Rotary Embedding with Multimodal Sections."""

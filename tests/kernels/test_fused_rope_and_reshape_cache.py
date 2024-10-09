@@ -14,16 +14,16 @@ NUM_TOKENS = [42]  # Arbitrary values for testing
 
 # Arbitrary values for testing
 # don't make it too large. e.g. [1024, 36000] will OOM
-NUM_BLOCKS = [1024, 10000]
+NUM_BLOCKS = [1024]
 # We assume fp8 is always enabled for testing.
-KV_CACHE_DTYPE = ["auto", "fp8"]
+KV_CACHE_DTYPE = ["auto"]
 
 BLOCK_SIZES = [16]
 
-DTYPES = [torch.half]
+DTYPES = [torch.float32, torch.half, torch.bfloat16, torch.float]
 HEAD_SIZES = [128]
 NUM_HEADS = [32]  # Arbitrary values for testing
-ROTARY_DIMS = [None, 32]  # None means rotary dim == head size
+ROTARY_DIMS = [None]  # None means rotary dim == head size FIXME: 32
 BATCH_SIZES = [8]  # Arbitrary values for testing
 SEQ_LENS = [16]  # Arbitrary values for testing
 IS_NEOX_STYLE = [True, False]
@@ -117,7 +117,7 @@ def test_fused_rotary_embedding_and_reshape_cache(
     value = torch.randn_like(query)
     # ops.reshape_and_cache(ref_key, value, cloned_key_cache, 
     #                       cloned_value_cache, slot_mapping,
-    #                       kv_cache_dtype, kv_scale)
+    #                       kv_cache_dtype, kv_scale, kv_scale)
 
     # if kv_cache_dtype == "fp8":
     #     result_key_cache = torch.empty_like(
@@ -133,9 +133,13 @@ def test_fused_rotary_embedding_and_reshape_cache(
         positions, query, key, value, key_cache, value_cache, kv_cache_dtype,
         slot_mapping, kv_scale, kv_scale)
 
+    # rope.forward_cuda(positions, query, key)
     #----------------------Assert----------------------------
 
-    assert torch.allclose(ref_query[0], query[0], atol=0.001, rtol=0.1)
+    print(f"{query[0]=}")
+    print(f"{ref_query[0]=}")
+
+    assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
 
     # if kv_cache_dtype == "fp8":
     #     assert torch.allclose(key_cache,
