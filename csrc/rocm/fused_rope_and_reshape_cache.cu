@@ -17,8 +17,10 @@
 #include <vector>
 
 #ifdef USE_ROCM
-  #include <hip/hip_bf16.h>
+
+#include <hip/hip_bf16.h>
 typedef __hip_bfloat16 __nv_bfloat16;
+
 #endif
 
 namespace vllm {
@@ -49,10 +51,9 @@ inline __device__ void apply_token_rotary_embedding(
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
 inline __device__ void store_value_into_key_cache(
-      const int head_size, const int num_kv_heads, 
-      const int64_t block_idx, const int block_size, const int64_t block_offset
-      const int x,
-      cache_t* __restrict__ key_cache, int &idx, scalar_t &val) {
+      cache_t* __restrict__ key_cache, const int head_size, const int num_kv_heads, 
+      const int64_t block_idx, const int block_size, const int64_t block_offset,
+      const int x, int &idx, scalar_t &val, const float kv_scale) {
   const int head_idx = idx / head_size;
   const int head_offset = idx % head_size;
   const int x_idx = head_offset / x;
@@ -73,9 +74,9 @@ inline __device__ void store_value_into_key_cache(
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
 inline __device__ void store_value_into_value_cache(
-      const int head_size, const int num_kv_heads, 
-      const int64_t block_idx, const int block_size, const int64_t block_offset
-      cache_t* __restrict__ key_cache, int idx, scalar_t val) {
+      cache_t* __restrict__ value_cache, const int head_size, const int num_kv_heads, 
+      const int64_t block_idx, const int block_size, const int64_t block_offset,
+      int idx, scalar_t val, const float kv_scale) {
   const int head_idx = idx / head_size;
   const int head_offset = idx % head_size;
 
@@ -90,11 +91,12 @@ inline __device__ void store_value_into_value_cache(
     value_cache[tgt_value_idx] =
         fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
   }
+}
 
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
 __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
-        const scalar_t* __restrict__ query,  // [batch_size, seq_len, num_heads, head_size] or 
+        scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
                                              // [num_tokens, num_heads, head_size]
         const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
         const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
@@ -122,8 +124,16 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
     const int head_idx = i / embed_dim;
     const int rot_offset = i % embed_dim;
     const int64_t token_head = token_idx * query_stride + head_idx * head_size;
-    apply_token_rotary_embedding_and_cache<scalar_t, cache_t, IS_NEOX>(
-        query + token_head, cos_ptr, sin_ptr, rot_offset, embed_dim);
+
+    int x_index, y_index;
+    scalar_t x_value, y_value; 
+    apply_token_rotary_embedding<scalar_t, IS_NEOX>(
+                                query + token_head, cos_ptr, sin_ptr, 
+                                rot_offset, embed_dim,
+                                x_index, x_value, 
+                                y_index, y_value);
+    query[i] = 1.0;//x_value;
+    query[i + nq] = 1.0;//y_value;
   }
 
   const int64_t slot_idx = slot_mapping[token_idx];
@@ -138,29 +148,34 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
 
     int x_index, y_index;
     scalar_t x_value, y_value; 
-    apply_token_rotary_embedding_and_cache<scalar_t, IS_NEOX>(
+    apply_token_rotary_embedding<scalar_t, IS_NEOX>(
                                 key + token_head, cos_ptr, sin_ptr, 
                                 rot_offset, embed_dim, 
-                                x_index, x_value, y_index, y_value);
+                                x_index, x_value, 
+                                y_index, y_value);
 
-    store_value_into_key_cache(head_size, num_kv_heads, block_idx, 
-                                block_size, block_offset, 
-                                key_cache, x_index, x_value);
-    store_value_into_key_cache(head_size, num_kv_heads, block_idx, 
-                                block_size, block_offset, 
-                                key_cache, key_cache, y_index, y_value);
+    store_value_into_key_cache<scalar_t, cache_t, kv_dt>
+                              (key_cache, head_size, num_kv_heads,
+                                block_idx, block_size, block_offset, 
+                                x, x_index, x_value, k_scale);
+    store_value_into_key_cache<scalar_t, cache_t, kv_dt>
+                              (key_cache, head_size, num_kv_heads,
+                                block_idx, block_size, block_offset,
+                                x, y_index, y_value, k_scale);
   }
 
   const int n = num_heads * head_size;
   for (int i = threadIdx.x; i < n; i += blockDim.x) {
     const int64_t src_value_idx = token_idx * value_stride + i;
-    scalar_t value = value[src_value_idx];
+    scalar_t tgt_value = value[src_value_idx];
 
-    store_value_into_value_cache(head_size, num_kv_heads, block_idx, 
-                                block_size, block_offset, x,
-                                value_cache, i, value);
+    store_value_into_value_cache<scalar_t, cache_t, kv_dt>
+                              (value_cache, head_size, num_kv_heads, 
+                                block_idx, block_size, block_offset,
+                                i, tgt_value, v_scale);
   }
 }
+
 } // namespace vllm
 
 
@@ -233,7 +248,8 @@ void fused_rotary_embedding_and_reshape_cache(
                                 // [num_tokens, num_heads * head_size]
         torch::Tensor& key,     // [batch_size, seq_len, num_kv_heads * head_size] or
                                 // [num_tokens, num_kv_heads * head_size]
-        torch::Tensor& value,   // [num_tokens, num_heads, head_size]
+        torch::Tensor& value,   // [batch_size, seq_len, num_heads * head_size] or
+                                // [num_tokens, num_heads * head_size]
         torch::Tensor& key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
         torch::Tensor& value_cache,   // [num_blocks, num_heads, head_size, block_size]
         const std::string& kv_cache_dtype,
@@ -245,7 +261,7 @@ void fused_rotary_embedding_and_reshape_cache(
         bool is_neox) {
     int64_t num_tokens = query.numel() / query.size(-1);
     int rot_dim = cos_sin_cache.size(1);
-    int head_size = key.size(2);
+    int head_size = value_cache.size(2);
     int num_heads = query.size(-1) / head_size;
     int num_kv_heads = key.size(-1) / head_size;
     int64_t query_stride = query.stride(-2);
@@ -263,10 +279,10 @@ void fused_rotary_embedding_and_reshape_cache(
         "fused_rotary_embedding_and_reshape_cache_kernel", 
         [&] {
             if (is_neox) {
-                DISPATCH_ROPE_BY_KV_CACHE_DTYPE(query.scalar_type(), 
+                DISPATCH_ROPE_BY_KV_CACHE_DTYPE(query.scalar_type(),
                     kv_cache_dtype, true, CALL_ROTARY_EMBEDDING_RESHAPE_AND_CACHE)
             } else {
-                DISPATCH_ROPE_BY_KV_CACHE_DTYPE(query.scalar_type(), 
+                DISPATCH_ROPE_BY_KV_CACHE_DTYPE(query.scalar_type(),
                     kv_cache_dtype, false, CALL_ROTARY_EMBEDDING_RESHAPE_AND_CACHE)
             }
     });
