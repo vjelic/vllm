@@ -49,50 +49,40 @@ inline __device__ void apply_token_rotary_embedding(
   y = arr[y_index] * cos + arr[x_index] * sin;
 }
 
-template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
-inline __device__ void store_value_into_key_cache(
-      cache_t* __restrict__ key_cache, const int head_size, const int num_kv_heads, 
+template <typename scalar_t, typename cache_t, bool isKey, Fp8KVCacheDataType kv_dt>
+inline __device__ void store_value_into_cache(
+      cache_t* __restrict__ cache, 
+      const int head_size, const int num_kv_heads, 
       const int64_t block_idx, const int block_size, const int64_t block_offset,
-      const int x, int &idx, scalar_t &val, const float kv_scale) {
-  const int head_idx = idx / head_size;
-  const int head_offset = idx % head_size;
-  const int x_idx = head_offset / x;
-  const int x_offset = head_offset % x;
-
-  const int64_t  tgt_key_idx = 
-      block_idx * num_kv_heads * (head_size / x) * block_size * x +
-      head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
-      block_offset * x + x_offset;
-
-  if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
-    key_cache[tgt_key_idx] = val;
-  } else {
-    key_cache[tgt_key_idx] =
-        fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
-  }
-}
-
-template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
-inline __device__ void store_value_into_value_cache(
-      cache_t* __restrict__ value_cache, const int head_size, const int num_kv_heads, 
-      const int64_t block_idx, const int block_size, const int64_t block_offset,
-      int idx, scalar_t val, const float kv_scale) {
+      const int x, const int64_t idx, scalar_t val, const float kv_scale) {
   const int head_idx = idx / head_size;
   const int head_offset = idx % head_size;
 
-  const int64_t tgt_value_idx =
-      block_idx * num_kv_heads * head_size * block_size +
-      head_idx * head_size * block_size + head_offset * block_size +
-      block_offset;
+  int64_t tgt_idx;
+  if constexpr (isKey) {
+    const int x_idx = head_offset / x;
+    const int x_offset = head_offset % x;
+
+    tgt_idx = 
+        block_idx * num_kv_heads * (head_size / x) * block_size * x +
+        head_idx * (head_size / x) * block_size * x + 
+        x_idx * block_size * x +
+        block_offset * x + x_offset;
+  } else {
+    tgt_idx =
+        block_idx * num_kv_heads * head_size * block_size +
+        head_idx * head_size * block_size + 
+        head_offset * block_size +
+        block_offset;
+  }
 
   if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
-    value_cache[tgt_value_idx] = val;
+    cache[tgt_idx] = val;
   } else {
-    value_cache[tgt_value_idx] =
+    cache[tgt_idx] =
         fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
   }
 }
-
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
 __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
@@ -154,25 +144,25 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
                                 x_index, x_value, 
                                 y_index, y_value);
 
-    store_value_into_key_cache<scalar_t, cache_t, kv_dt>
-                              (key_cache, head_size, num_kv_heads,
-                                block_idx, block_size, block_offset, 
-                                x, x_index, x_value, k_scale);
-    store_value_into_key_cache<scalar_t, cache_t, kv_dt>
-                              (key_cache, head_size, num_kv_heads,
-                                block_idx, block_size, block_offset,
-                                x, y_index, y_value, k_scale);
+    store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+                          (key_cache, head_size, num_kv_heads,
+                            block_idx, block_size, block_offset, 
+                            x, head_idx * head_size + x_index, x_value, k_scale);
+    store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+                          (key_cache, head_size, num_kv_heads,
+                            block_idx, block_size, block_offset,
+                            x, head_idx * head_size + y_index, y_value, k_scale);
   }
 
-  const int n = num_heads * head_size;
-  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+  const int nv = num_kv_heads * head_size;
+  for (int i = threadIdx.x; i < nv; i += blockDim.x) {
     const int64_t src_value_idx = token_idx * value_stride + i;
     scalar_t tgt_value = value[src_value_idx];
 
-    store_value_into_value_cache<scalar_t, cache_t, kv_dt>
-                              (value_cache, head_size, num_kv_heads, 
-                                block_idx, block_size, block_offset,
-                                i, tgt_value, v_scale);
+    store_value_into_cache<scalar_t, cache_t, false, kv_dt>
+                          (value_cache, head_size, num_kv_heads, 
+                            block_idx, block_size, block_offset,
+                            0, i, tgt_value, v_scale);
   }
 }
 

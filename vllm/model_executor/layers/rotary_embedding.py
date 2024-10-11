@@ -747,17 +747,6 @@ class FusedLlama3RotaryEmbedding(Llama3RotaryEmbedding):
         key_scale: float,
         value_scale: float,
     ) -> None:
-        print(f"{query.shape=}")
-        print(f"{key.shape=}")
-        print(f"{value.shape=}")
-        print(f"{key_cache.shape=}")
-        print(f"{value_cache.shape=}")
-        print(f"{kv_cache_dtype=}")
-        print(f"{self.cos_sin_cache.shape=}")
-        print(f"{positions.shape=}")
-        print(f"{slot_mapping.shape=}")
-        print(f"{self.is_neox_style=}")
-        print(f"{query[0,:]=}")
         torch.ops._rocm_C.fused_rotary_embedding_and_reshape_cache(
             query, key,  value, key_cache, value_cache, kv_cache_dtype,
             self.cos_sin_cache, positions, slot_mapping, 

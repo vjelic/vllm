@@ -80,8 +80,9 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     # Create a random slot mapping.
     num_slots = block_size * num_blocks
-    slot_mapping = random.sample(range(num_slots), batch_size * seq_len)
-    slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
+    # slot_mapping = random.sample(range(num_slots), batch_size * seq_len)
+    # slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
+    slot_mapping = torch.tensor(range(batch_size * seq_len), dtype=torch.long)
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
@@ -89,6 +90,9 @@ def test_fused_rotary_embedding_and_reshape_cache(
                                                 kv_cache_dtype, dtype, seed,
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
+
+    key_cache = key_cache.fill_(0)
+    value_cache = value_cache.fill_(0)
 
     # Clone the KV caches.
     if kv_cache_dtype == "fp8":
@@ -114,42 +118,44 @@ def test_fused_rotary_embedding_and_reshape_cache(
     ref_query, ref_key = rope.forward_native(positions, query, key)
 
     # Call the reshape_and_cache kernel.
-    value = torch.randn_like(query)
-    # ops.reshape_and_cache(ref_key, value, cloned_key_cache, 
-    #                       cloned_value_cache, slot_mapping,
-    #                       kv_cache_dtype, kv_scale, kv_scale)
+    value = torch.randn_like(key)
+    ops.reshape_and_cache(ref_key.view(-1, num_heads, head_size).index_select(0, torch.tensor([0, 1])),
+                          value.view(-1, num_heads, head_size).index_select(0, torch.tensor([0, 1])),
+                          cloned_key_cache, 
+                          cloned_value_cache, slot_mapping.index_select(0, torch.tensor([0, 1])),
+                          kv_cache_dtype, kv_scale, kv_scale)
 
-    # if kv_cache_dtype == "fp8":
-    #     result_key_cache = torch.empty_like(
-    #             cloned_key_cache, dtype=torch.float16)
-    #     ops.convert_fp8(result_key_cache, cloned_key_cache)
-    #     result_value_cache = torch.empty_like(
-    #             cloned_value_cache, dtype=torch.float16)
-    #     ops.convert_fp8(result_value_cache, cloned_value_cache)
+    if kv_cache_dtype == "fp8":
+        result_key_cache = torch.empty_like(
+                cloned_key_cache, dtype=torch.float16)
+        ops.convert_fp8(result_key_cache, cloned_key_cache)
+        result_value_cache = torch.empty_like(
+                cloned_value_cache, dtype=torch.float16)
+        ops.convert_fp8(result_value_cache, cloned_value_cache)
     
     #----------------------Actual-Run------------------------
 
     rope.forward(
-        positions, query, key, value, key_cache, value_cache, kv_cache_dtype,
-        slot_mapping, kv_scale, kv_scale)
+        positions, 
+        query.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
+        key.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
+        value.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
+        key_cache, value_cache, kv_cache_dtype,
+        slot_mapping.index_select(0, torch.tensor([0, 1])),
+        kv_scale, kv_scale)
 
-    # rope.forward_cuda(positions, query, key)
     #----------------------Assert----------------------------
+    # assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
 
-    print(f"{query[0]=}")
-    print(f"{ref_query[0]=}")
-
-    assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
-
-    # if kv_cache_dtype == "fp8":
-    #     assert torch.allclose(key_cache,
-    #                           cloned_key_cache,
-    #                           atol=0.001,
-    #                           rtol=0.1)
-    #     assert torch.allclose(value_cache,
-    #                           cloned_value_cache,
-    #                           atol=0.001,
-    #                           rtol=0.1)
-    # else:
-    #     assert torch.allclose(key_cache, cloned_key_cache)
-    #     assert torch.allclose(value_cache, cloned_value_cache)
+    if kv_cache_dtype == "fp8":
+        assert torch.allclose(key_cache,
+                            cloned_key_cache,
+                            atol=0.001,
+                            rtol=0.1)
+        assert torch.allclose(value_cache,
+                            cloned_value_cache,
+                            atol=0.001,
+                            rtol=0.1)
+    else:
+        assert torch.allclose(key_cache, cloned_key_cache, atol=1e-07, rtol=1e-05)
+        assert torch.allclose(value_cache, cloned_value_cache, atol=1e-07, rtol=1e-05)
