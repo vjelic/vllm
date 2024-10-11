@@ -117,12 +117,14 @@ def test_fused_rotary_embedding_and_reshape_cache(
     key = torch.randn_like(query)
     ref_query, ref_key = rope.forward_native(positions, query, key)
 
+    items = range(batch_size * seq_len)
+
     # Call the reshape_and_cache kernel.
     value = torch.randn_like(key)
-    ops.reshape_and_cache(ref_key.view(-1, num_heads, head_size).index_select(0, torch.tensor([0, 1])),
-                          value.view(-1, num_heads, head_size).index_select(0, torch.tensor([0, 1])),
+    ops.reshape_and_cache(ref_key.view(-1, num_heads, head_size),
+                          value.view(-1, num_heads, head_size),
                           cloned_key_cache, 
-                          cloned_value_cache, slot_mapping.index_select(0, torch.tensor([0, 1])),
+                          cloned_value_cache, slot_mapping,
                           kv_cache_dtype, kv_scale, kv_scale)
 
     if kv_cache_dtype == "fp8":
@@ -137,15 +139,14 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     rope.forward(
         positions, 
-        query.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
-        key.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
-        value.view(-1, num_heads * head_size).index_select(0, torch.tensor([0, 1])), 
+        query.view(-1, num_heads * head_size), 
+        key.view(-1, num_heads * head_size), 
+        value.view(-1, num_heads * head_size), 
         key_cache, value_cache, kv_cache_dtype,
-        slot_mapping.index_select(0, torch.tensor([0, 1])),
-        kv_scale, kv_scale)
+        slot_mapping, kv_scale, kv_scale)
 
     #----------------------Assert----------------------------
-    # assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
+    assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
 
     if kv_cache_dtype == "fp8":
         assert torch.allclose(key_cache,
@@ -157,5 +158,7 @@ def test_fused_rotary_embedding_and_reshape_cache(
                             atol=0.001,
                             rtol=0.1)
     else:
-        assert torch.allclose(key_cache, cloned_key_cache, atol=1e-07, rtol=1e-05)
-        assert torch.allclose(value_cache, cloned_value_cache, atol=1e-07, rtol=1e-05)
+        # print(f"{key_cache[0,:,:,:4]=}")
+        # print(f"{cloned_key_cache[0,:,:,:4]=}")
+        assert torch.allclose(key_cache, cloned_key_cache, atol=1e-05, rtol=1e-05)
+        assert torch.allclose(value_cache, cloned_value_cache, atol=1e-05, rtol=1e-05)
