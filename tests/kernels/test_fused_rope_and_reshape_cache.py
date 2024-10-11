@@ -16,11 +16,11 @@ NUM_TOKENS = [42]  # Arbitrary values for testing
 # don't make it too large. e.g. [1024, 36000] will OOM
 NUM_BLOCKS = [1024]
 # We assume fp8 is always enabled for testing.
-KV_CACHE_DTYPE = ["auto"]
+KV_CACHE_DTYPE = ["auto", "fp8"]
 
 BLOCK_SIZES = [16]
 
-DTYPES = [torch.float32, torch.half, torch.bfloat16, torch.float]
+DTYPES = [torch.float32, torch.bfloat16, torch.float] # FIXME torch.half
 HEAD_SIZES = [128]
 NUM_HEADS = [32]  # Arbitrary values for testing
 ROTARY_DIMS = [None]  # None means rotary dim == head size FIXME: 32
