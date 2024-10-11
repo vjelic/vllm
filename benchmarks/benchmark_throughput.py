@@ -173,7 +173,7 @@ async def run_vllm_async(
     device: str,
     enable_prefix_caching: bool,
     enable_chunked_prefill: bool,
-    eax_num_batched_tokens: int,
+    max_num_batched_tokens: int,
     distributed_executor_backend: Optional[str],
     gpu_memory_utilization: float = 0.9,
     num_scheduler_steps: int = 1,
