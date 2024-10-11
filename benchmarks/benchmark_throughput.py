@@ -113,6 +113,7 @@ def run_vllm(
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
         num_scheduler_steps=num_scheduler_steps,
+        max_seq_len_to_capture=args.max_seq_len_to_capture,
         max_num_seqs=args.max_num_seqs,
         use_v2_block_manager=use_v2_block_manager,
         disable_async_output_proc=disable_async_output_proc,
@@ -468,17 +469,21 @@ if __name__ == "__main__":
                         choices=DEVICE_OPTIONS,
                         help='device type for vLLM execution')
     parser.add_argument(
-        "--num-scheduler-steps",
-        type=int,
-        default=1,
-        help="Maximum number of forward steps per scheduler call.")
-    parser.add_argument("--use-v2-block-manager",
-                        action='store_true',
-                        help="Enable block manager v2.")
+                        "--num-scheduler-steps",
+                        type=int,
+                        default=1,
+                        help="Maximum number of forward steps per scheduler call.")
+    parser.add_argument(
+                        "--max-seq-len-to-capture",
+                        type=int,
+                        help="Maximum sequence length covered by CUDA/HIP graph.")
     parser.add_argument('--max-num-seqs',
                         type=int,
                         default=256,
                         help="Max number of sequences a model can run in a single batch")
+    parser.add_argument("--use-v2-block-manager",
+                        action='store_true',
+                        help="Enable block manager v2.")
     parser.add_argument(
         "--enable-prefix-caching",
         action='store_true',

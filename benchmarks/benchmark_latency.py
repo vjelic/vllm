@@ -48,6 +48,7 @@ def main(args: argparse.Namespace):
         otlp_traces_endpoint=args.otlp_traces_endpoint,
         enable_prefix_caching=args.enable_prefix_caching,
         num_scheduler_steps=args.num_scheduler_steps,
+        max_seq_len_to_capture=args.max_seq_len_to_capture,
     )
 
     sampling_params = SamplingParams(
@@ -284,5 +285,9 @@ if __name__ == '__main__':
         type=int,
         default=1,
         help="Maximum number of forward steps per scheduler call.")
+    parser.add_argument(
+        "--max-seq-len-to-capture",
+        type=int,
+        help="Maximum sequence length covered by CUDA/HIP graph.")
     args = parser.parse_args()
     main(args)
