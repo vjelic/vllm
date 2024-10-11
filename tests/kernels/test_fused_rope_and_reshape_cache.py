@@ -80,9 +80,8 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     # Create a random slot mapping.
     num_slots = block_size * num_blocks
-    # slot_mapping = random.sample(range(num_slots), batch_size * seq_len)
-    # slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
-    slot_mapping = torch.tensor(range(batch_size * seq_len), dtype=torch.long)
+    slot_mapping = random.sample(range(num_slots), batch_size * seq_len)
+    slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
@@ -91,18 +90,9 @@ def test_fused_rotary_embedding_and_reshape_cache(
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
 
-    key_cache = key_cache.fill_(0)
-    value_cache = value_cache.fill_(0)
-
     # Clone the KV caches.
-    if kv_cache_dtype == "fp8":
-        cloned_key_cache = torch.empty_like(key_cache, dtype=torch.float16)
-        ops.convert_fp8(cloned_key_cache, key_cache)
-        cloned_value_cache = torch.empty_like(value_cache, dtype=torch.float16)
-        ops.convert_fp8(cloned_value_cache, value_cache)
-    else:
-        cloned_key_cache = key_cache.clone()
-        cloned_value_cache = value_cache.clone()
+    cloned_key_cache = key_cache.clone()
+    cloned_value_cache = value_cache.clone()
 
     # Using default kv_scale
     kv_scale = 1.0
@@ -137,6 +127,7 @@ def test_fused_rotary_embedding_and_reshape_cache(
     
     #----------------------Actual-Run------------------------
 
+    # FIXME case when batch dimension is provided
     rope.forward(
         positions, 
         query.view(-1, num_heads * head_size), 
@@ -158,7 +149,5 @@ def test_fused_rotary_embedding_and_reshape_cache(
                             atol=0.001,
                             rtol=0.1)
     else:
-        # print(f"{key_cache[0,:,:,:4]=}")
-        # print(f"{cloned_key_cache[0,:,:,:4]=}")
         assert torch.allclose(key_cache, cloned_key_cache, atol=1e-05, rtol=1e-05)
         assert torch.allclose(value_cache, cloned_value_cache, atol=1e-05, rtol=1e-05)
