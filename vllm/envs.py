@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     VLLM_USE_TRITON_FLASH_ATTN: bool = True
     VLLM_USE_ROCM_SKINNY_GEMM: bool = True
     VLLM_USE_ROCM_CUSTOM_PAGED_ATTN: bool = True
+    VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT: bool = True
     RANK: int = 0
     LOCAL_RANK: int = 0
     CUDA_VISIBLE_DEVICES: Optional[str] = None
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     VLLM_PP_LAYER_PARTITION: Optional[str] = None
     VLLM_CPU_KVCACHE_SPACE: int = 0
     VLLM_CPU_OMP_THREADS_BIND: str = ""
+    VLLM_OPENVINO_DEVICE: str = "CPU"
     VLLM_OPENVINO_KVCACHE_SPACE: int = 0
     VLLM_OPENVINO_CPU_KV_CACHE_PRECISION: Optional[str] = None
     VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS: bool = False
@@ -66,8 +68,10 @@ if TYPE_CHECKING:
     VLLM_RPC_TIMEOUT: int = 10000  # ms
     VLLM_PLUGINS: Optional[List[str]] = None
     VLLM_TORCH_PROFILER_DIR: Optional[str] = None
+    VLLM_RPD_PROFILER_DIR: Optional[str] = None
     VLLM_USE_TRITON_AWQ: bool = False
     VLLM_ALLOW_RUNTIME_LORA_UPDATING: bool = False
+    VLLM_SKIP_P2P_CHECK: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
     VLLM_MOE_PADDING: bool = False
@@ -248,6 +252,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: (os.getenv("VLLM_USE_ROCM_CUSTOM_PAGED_ATTN", "True").lower() in
              ("true", "1") != "0"),
 
+    # have custom paged attention implemented for MI3* cards write out fp8
+    "VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT":
+    lambda:
+    (os.getenv("VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT", "True").lower() in
+     ("true", "1") != "0"),
+
     # rank of the process in the distributed setting, used to determine
     # the driver worker
     "RANK":
@@ -335,6 +345,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # "0,1,2", "0-31,33". CPU cores of different ranks are separated by '|'.
     "VLLM_CPU_OMP_THREADS_BIND":
     lambda: os.getenv("VLLM_CPU_OMP_THREADS_BIND", "all"),
+
+    # OpenVINO device selection
+    # default is CPU
+    "VLLM_OPENVINO_DEVICE":
+    lambda: os.getenv("VLLM_OPENVINO_DEVICE", "CPU").upper(),
 
     # OpenVINO key-value cache space
     # default is 4GB
@@ -449,6 +464,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: (None if os.getenv("VLLM_TORCH_PROFILER_DIR", None) is None else os
              .path.expanduser(os.getenv("VLLM_TORCH_PROFILER_DIR", "."))),
 
+    # Enables rpd profiler if set. Path to the directory where torch profiler
+    # traces are saved. Note that it must be an absolute path.
+    "VLLM_RPD_PROFILER_DIR":
+    lambda: (None if os.getenv("VLLM_RPD_PROFILER_DIR", None) is None else os.
+             path.expanduser(os.getenv("VLLM_RPD_PROFILER_DIR", "."))),
+
     # If set, vLLM will use Triton implementations of AWQ.
     "VLLM_USE_TRITON_AWQ":
     lambda: bool(int(os.getenv("VLLM_USE_TRITON_AWQ", "0"))),
@@ -458,6 +479,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda:
     (os.environ.get("VLLM_ALLOW_RUNTIME_LORA_UPDATING", "0").strip().lower() in
      ("1", "true")),
+
+    # By default, vLLM will check the peer-to-peer capability itself,
+    # in case of broken drivers. See https://github.com/vllm-project/vllm/blob/a9b15c606fea67a072416ea0ea115261a2756058/vllm/distributed/device_communicators/custom_all_reduce_utils.py#L101-L108 for details. # noqa
+    # If this env var is set to 1, vLLM will skip the peer-to-peer check,
+    # and trust the driver's peer-to-peer capability report.
+    "VLLM_SKIP_P2P_CHECK":
+    lambda: os.getenv("VLLM_SKIP_P2P_CHECK", "0") == "1",
 
     # Try to accumulate this many requests before proceeding
     "VLLM_SYNC_SERVER_ACCUM_REQUESTS":

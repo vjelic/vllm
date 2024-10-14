@@ -28,12 +28,18 @@ class ModelRequestData(NamedTuple):
     chat_template: Optional[str]
 
 
+# NOTE: The default `max_num_seqs` and `max_model_len` may result in OOM on
+# lower-end GPUs.
+# Unless specified, these settings have been tested to work on a single L4.
+
+
 def load_qwenvl_chat(question: str, image_urls: List[str]) -> ModelRequestData:
     model_name = "Qwen/Qwen-VL-Chat"
     llm = LLM(
         model=model_name,
         trust_remote_code=True,
-        max_num_seqs=5,
+        max_model_len=1024,
+        max_num_seqs=2,
         limit_mm_per_prompt={"image": len(image_urls)},
     )
     placeholders = "".join(f"Picture {i}: <img></img>\n"
@@ -67,11 +73,25 @@ def load_qwenvl_chat(question: str, image_urls: List[str]) -> ModelRequestData:
 
 
 def load_phi3v(question: str, image_urls: List[str]) -> ModelRequestData:
+    # num_crops is an override kwarg to the multimodal image processor;
+    # For some models, e.g., Phi-3.5-vision-instruct, it is recommended
+    # to use 16 for single frame scenarios, and 4 for multi-frame.
+    #
+    # Generally speaking, a larger value for num_crops results in more
+    # tokens per image instance, because it may scale the image more in
+    # the image preprocessing. Some references in the model docs and the
+    # formula for image tokens after the preprocessing
+    # transform can be found below.
+    #
+    # https://huggingface.co/microsoft/Phi-3.5-vision-instruct#loading-the-model-locally
+    # https://huggingface.co/microsoft/Phi-3.5-vision-instruct/blob/main/processing_phi3_v.py#L194
     llm = LLM(
         model="microsoft/Phi-3.5-vision-instruct",
         trust_remote_code=True,
         max_model_len=4096,
+        max_num_seqs=2,
         limit_mm_per_prompt={"image": len(image_urls)},
+        mm_processor_kwargs={"num_crops": 4},
     )
     placeholders = "\n".join(f"<|image_{i}|>"
                              for i, _ in enumerate(image_urls, start=1))
@@ -93,9 +113,9 @@ def load_internvl(question: str, image_urls: List[str]) -> ModelRequestData:
     llm = LLM(
         model=model_name,
         trust_remote_code=True,
-        max_num_seqs=5,
         max_model_len=4096,
         limit_mm_per_prompt={"image": len(image_urls)},
+        mm_processor_kwargs={"max_dynamic_patch": 4},
     )
 
     placeholders = "\n".join(f"Image-{i}: <image>\n"
@@ -124,6 +144,39 @@ def load_internvl(question: str, image_urls: List[str]) -> ModelRequestData:
     )
 
 
+def load_nvlm_d(question: str, image_urls: List[str]):
+    model_name = "nvidia/NVLM-D-72B"
+
+    # Adjust this as necessary to fit in GPU
+    llm = LLM(
+        model=model_name,
+        trust_remote_code=True,
+        max_model_len=8192,
+        tensor_parallel_size=4,
+        limit_mm_per_prompt={"image": len(image_urls)},
+        mm_processor_kwargs={"max_dynamic_patch": 4},
+    )
+
+    placeholders = "\n".join(f"Image-{i}: <image>\n"
+                             for i, _ in enumerate(image_urls, start=1))
+    messages = [{'role': 'user', 'content': f"{placeholders}\n{question}"}]
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name,
+                                              trust_remote_code=True)
+    prompt = tokenizer.apply_chat_template(messages,
+                                           tokenize=False,
+                                           add_generation_prompt=True)
+    stop_token_ids = None
+
+    return ModelRequestData(
+        llm=llm,
+        prompt=prompt,
+        stop_token_ids=stop_token_ids,
+        image_data=[fetch_image(url) for url in image_urls],
+        chat_template=None,
+    )
+
+
 def load_qwen2_vl(question, image_urls: List[str]) -> ModelRequestData:
     try:
         from qwen_vl_utils import process_vision_info
@@ -135,10 +188,11 @@ def load_qwen2_vl(question, image_urls: List[str]) -> ModelRequestData:
 
     model_name = "Qwen/Qwen2-VL-7B-Instruct"
 
+    # Tested on L40
     llm = LLM(
         model=model_name,
-        max_num_seqs=5,
         max_model_len=32768 if process_vision_info is None else 4096,
+        max_num_seqs=5,
         limit_mm_per_prompt={"image": len(image_urls)},
     )
 
@@ -183,6 +237,7 @@ def load_qwen2_vl(question, image_urls: List[str]) -> ModelRequestData:
 model_example_map = {
     "phi3_v": load_phi3v,
     "internvl_chat": load_internvl,
+    "NVLM_D": load_nvlm_d,
     "qwen2_vl": load_qwen2_vl,
     "qwen_vl_chat": load_qwenvl_chat,
 }

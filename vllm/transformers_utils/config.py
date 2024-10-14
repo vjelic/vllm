@@ -1,4 +1,3 @@
-import contextlib
 import enum
 import json
 from pathlib import Path
@@ -20,10 +19,11 @@ from vllm.logger import init_logger
 # yapf: disable
 from vllm.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                              EAGLEConfig, ExaoneConfig,
-                                             GraniteConfig, Grok1Config,
-                                             InternVLChatConfig, JAISConfig,
-                                             MedusaConfig, MLPSpeculatorConfig,
+                                             Grok1Config, InternVLChatConfig,
+                                             JAISConfig, MedusaConfig,
+                                             MllamaConfig, MLPSpeculatorConfig,
                                              MPTConfig, NemotronConfig,
+                                             NVLM_D_Config, Qwen2VLConfig,
                                              RWConfig, SolarConfig,
                                              UltravoxConfig)
 # yapf: enable
@@ -38,6 +38,10 @@ MISTRAL_CONFIG_NAME = "params.json"
 
 logger = init_logger(__name__)
 
+_CONFIG_REGISTRY_OVERRIDE_HF: Dict[str, Type[PretrainedConfig]] = {
+    "mllama": MllamaConfig
+}
+
 _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "chatglm": ChatGLMConfig,
     "dbrx": DbrxConfig,
@@ -51,17 +55,13 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "exaone": ExaoneConfig,
     "internvl_chat": InternVLChatConfig,
     "nemotron": NemotronConfig,
+    "NVLM_D": NVLM_D_Config,
     "solar": SolarConfig,
     "ultravox": UltravoxConfig,
-    # Granite can be removed from here once we have upgraded to
-    # transformers 4.45+
-    "granite": GraniteConfig,
+    "qwen2_vl": Qwen2VLConfig,
     "grok-1": Grok1Config,
+    **_CONFIG_REGISTRY_OVERRIDE_HF
 }
-
-for name, cls in _CONFIG_REGISTRY.items():
-    with contextlib.suppress(ValueError):
-        AutoConfig.register(name, cls)
 
 
 class ConfigFormat(str, enum.Enum):
