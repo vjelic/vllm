@@ -6,7 +6,8 @@ import pytest
 import torch
 
 from vllm import _custom_ops as ops
-from vllm.model_executor.layers.rotary_embedding import get_rope
+from vllm.config import CacheConfig
+from vllm.model_executor.layers.rotary_embedding import _ROPE_DICT, get_rope
 
 from .allclose_default import get_default_atol, get_default_rtol
 
@@ -69,13 +70,16 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     if rotary_dim is None:
         rotary_dim = head_size
-        
+
+    _ROPE_DICT.clear()
+    cache_config = CacheConfig(block_size, 1.0, 1, kv_cache_dtype)
     rope = get_rope(head_size, rotary_dim, max_position, base, 
                     is_neox_style, rope_scaling={"type": "llama3", 
                                                 "low_freq_factor": 1.0, 
                                                 "high_freq_factor": 2.0,
                                                 "original_max_position_embeddings": 1024},
-                    fused_with_kv_cache_op=True)
+                    fused_with_kv_cache_op=True,
+                    cache_config = cache_config)
     rope = rope.to(dtype=dtype)
 
     # Create a random slot mapping.
@@ -127,13 +131,9 @@ def test_fused_rotary_embedding_and_reshape_cache(
     
     #----------------------Actual-Run------------------------
 
-    # FIXME case when batch dimension is provided
     rope.forward(
-        positions, 
-        query.view(-1, num_heads * head_size), 
-        key.view(-1, num_heads * head_size), 
-        value.view(-1, num_heads * head_size), 
-        key_cache, value_cache, kv_cache_dtype,
+        positions, query, key, value, 
+        key_cache, value_cache,
         slot_mapping, kv_scale, kv_scale)
 
     #----------------------Assert----------------------------

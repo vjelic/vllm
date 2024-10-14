@@ -23,10 +23,10 @@ void paged_attention(torch::Tensor& out, torch::Tensor& exp_sums,
                      double v_scale);
 
 void fused_rotary_embedding_and_reshape_cache(
-        torch::Tensor& query, torch::Tensor& key, torch::Tensor& value, 
+        torch::Tensor& positions, torch::Tensor& query,
+        torch::Tensor& key, torch::Tensor& value, 
         torch::Tensor& key_cache, torch::Tensor& value_cache,
         const std::string& kv_cache_dtype,
-        torch::Tensor& cos_sin_cache, 
-        torch::Tensor& positions, torch::Tensor& slot_mapping,
-        const double k_scale, const double v_scale,
+        torch::Tensor& cos_sin_cache,torch::Tensor& slot_mapping,
+        const int64_t head_size, const double k_scale, const double v_scale,
         bool is_neox);

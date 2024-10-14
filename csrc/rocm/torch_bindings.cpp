@@ -43,6 +43,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
   rocm_ops.impl("wvSpltK", torch::kCUDA, &wvSpltK);
   rocm_ops.def(
       "fused_rotary_embedding_and_reshape_cache("
+      "      Tensor positions,"
       "      Tensor! query,"
       "      Tensor key,"
       "      Tensor value,"
@@ -50,8 +51,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
       "      Tensor! value_cache,"
       "      str kv_cache_dtype,"
       "      Tensor cos_sin_cache,"
-      "      Tensor positions,"
       "      Tensor slot_mapping,"
+      "      int head_size,"
       "      float k_scale,"
       "      float v_scale,"
       "      bool is_neox) -> ()");

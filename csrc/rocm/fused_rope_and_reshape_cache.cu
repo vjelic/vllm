@@ -55,6 +55,11 @@ inline __device__ void store_value_into_cache(
       const int head_size, const int num_kv_heads, 
       const int64_t block_idx, const int block_size, const int64_t block_offset,
       const int x, const int64_t idx, scalar_t val, const float kv_scale) {
+  // KV cache is not provided on trial run when vllm 
+  // asses amount of cache it can use, 
+  if (block_size == 0)
+    return;
+
   const int head_idx = idx / head_size;
   const int head_offset = idx % head_size;
 
@@ -233,6 +238,7 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
 
 
 void fused_rotary_embedding_and_reshape_cache(
+        torch::Tensor& positions,     // [batch_size, seq_len] or [num_tokens]
         torch::Tensor& query,   // [batch_size, seq_len, num_heads * head_size] or
                                 // [num_tokens, num_heads * head_size]
         torch::Tensor& key,     // [batch_size, seq_len, num_kv_heads * head_size] or
@@ -243,8 +249,8 @@ void fused_rotary_embedding_and_reshape_cache(
         torch::Tensor& value_cache,   // [num_blocks, num_heads, head_size, block_size]
         const std::string& kv_cache_dtype,
         torch::Tensor& cos_sin_cache, // [max_position, rot_dim]
-        torch::Tensor& positions,     // [batch_size, seq_len] or [num_tokens]
         torch::Tensor& slot_mapping,  // [num_tokens]
+        const int64_t head_size,
         const double k_scale,
         const double v_scale,
         bool is_neox) {
@@ -253,7 +259,6 @@ void fused_rotary_embedding_and_reshape_cache(
 
   int64_t num_tokens = query.numel() / query.size(-1);
   int rot_dim = cos_sin_cache.size(1);
-  int head_size = value_cache.size(2);
   int num_heads = query.size(-1) / head_size;
   int num_kv_heads = key.size(-1) / head_size;
   int64_t query_stride = query.stride(-2);
