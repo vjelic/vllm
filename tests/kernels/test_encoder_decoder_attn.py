@@ -21,7 +21,8 @@ from vllm.attention.selector import (_Backend,
 from vllm.utils import is_hip
 
 # List of support backends for encoder/decoder models
-LIST_ENC_DEC_SUPPORTED_BACKENDS = [_Backend.XFORMERS]
+LIST_ENC_DEC_SUPPORTED_BACKENDS = [_Backend.XFORMERS] if not is_hip() \
+                                            else [_Backend.ROCM_FLASH]
 
 HEAD_SIZES = [64, 256]
 
@@ -136,7 +137,9 @@ def _make_test_resources(test_pt: TestPoint, ) -> TestResources:
     )
     if test_pt.num_blocks is None or test_pt.num_heads is None:
         # Caller does not require a KV cache
-        return TestResources(scale, attn_backend, attn, None)
+        return TestResources(
+            scale, attn_backend, attn,
+            torch.tensor([], dtype=torch.float32, device=CUDA_DEVICE))
 
     # Construct KV cache
     kv_cache = make_kv_cache(test_pt.num_blocks,
@@ -620,7 +623,9 @@ def _run_encoder_attention_test(
     return attn.forward(packed_qkv.query,
                         packed_qkv.key,
                         packed_qkv.value,
-                        None,
+                        torch.tensor([],
+                                     dtype=torch.float32,
+                                     device=packed_qkv.query.device),
                         attn_metadata,
                         attn_type=attn_type)
 
@@ -807,7 +812,6 @@ def test_encoder_only(
         assert_actual_matches_ideal(enc_test_params, enc_pckd_act_out)
 
 
-@pytest.mark.skipif(is_hip(), reason=STR_NOT_IMPL_ENC_DEC_ROCM_HIP)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("attn_backend", LIST_ENC_DEC_SUPPORTED_BACKENDS)

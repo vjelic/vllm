@@ -14,6 +14,7 @@ from vllm.attention.selector import (_Backend, get_env_variable_attn_backend,
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
                          PromptAdapterConfig, SchedulerConfig)
+from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
 from vllm.model_executor import SamplingMetadata
@@ -23,7 +24,8 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, MultiModalInputs,
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput,
                            SequenceGroupMetadata)
-from vllm.utils import STR_NOT_IMPL_ENC_DEC_BACKEND, make_tensor_with_pad
+from vllm.utils import (STR_NOT_IMPL_ENC_DEC_BACKEND, is_hip,
+                        make_tensor_with_pad)
 from vllm.worker.model_runner import (GPUModelRunnerBase,
                                       ModelInputForGPUBuilder,
                                       ModelInputForGPUWithSamplingMetadata,
@@ -120,7 +122,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
 
     def _maybe_force_supported_attention_backend(self):
         '''
-        Force vLLM to use the XFormers attention backend,
+        Force vLLM to use the XFormers or ROCM attention backend,
         which is currently the only supported option.
         '''
 
@@ -138,18 +140,21 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             # The user has not already specified an attention backend
             # override
             logger.info("EncoderDecoderModelRunner requires "
-                        "XFormers backend; overriding backend "
-                        "auto-selection and forcing XFormers.")
-            global_force_attn_backend(_Backend.XFORMERS)
+                        "XFormers or ROCM backend; overriding backend "
+                        "auto-selection and forcing XFormers or ROCM.")
+            global_force_attn_backend(
+                _Backend.ROCM_FLASH if is_hip() else _Backend.XFORMERS)
         elif is_forced_by_global:
             # Backend override enforced by global variable takes
             # precedence over vLLM backend environment variable.
-            if maybe_global_forced_backend != _Backend.XFORMERS:
+            if maybe_global_forced_backend != _Backend.XFORMERS and \
+                maybe_global_forced_backend != _Backend.ROCM_FLASH:
                 raise_backend_err()
         elif is_forced_by_env_var:
             # Backend override enforced by vLLM backend
             # environment variable
-            if maybe_env_var_forced_backend != _Backend.XFORMERS:
+            if maybe_env_var_forced_backend != _Backend.XFORMERS and \
+                maybe_global_forced_backend != _Backend.ROCM_FLASH:
                 raise_backend_err()
 
     def _list_to_int32_tensor(
@@ -198,17 +203,18 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         } if self.has_seqlen_agnostic else {}
 
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
-        hidden_or_intermediate_states = model_executable(
-            input_ids=model_input.input_tokens,
-            positions=model_input.input_positions,
-            encoder_input_ids=model_input.encoder_input_tokens,
-            encoder_positions=model_input.encoder_input_positions,
-            kv_caches=kv_caches,
-            attn_metadata=model_input.attn_metadata,
-            intermediate_tensors=intermediate_tensors,
-            **MultiModalInputs.as_kwargs(multi_modal_kwargs,
-                                         device=self.device),
-            **seqlen_agnostic_kwargs)
+        with set_forward_context(model_input.attn_metadata):
+            hidden_or_intermediate_states = model_executable(
+                input_ids=model_input.input_tokens,
+                positions=model_input.input_positions,
+                encoder_input_ids=model_input.encoder_input_tokens,
+                encoder_positions=model_input.encoder_input_positions,
+                kv_caches=kv_caches,
+                attn_metadata=model_input.attn_metadata,
+                intermediate_tensors=intermediate_tensors,
+                **MultiModalInputs.as_kwargs(multi_modal_kwargs,
+                                             device=self.device),
+                **seqlen_agnostic_kwargs)
 
         logits = self.model.compute_logits(hidden_or_intermediate_states,
                                            model_input.sampling_metadata)
@@ -268,11 +274,13 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             encoder_input_positions=encoder_input_positions_tensor,
         )
 
+        generators = self.get_generators(finished_requests_ids)
         sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
                                                      model_input.seq_lens,
                                                      model_input.query_lens,
                                                      self.device,
-                                                     self.pin_memory)
+                                                     self.pin_memory,
+                                                     generators=generators)
         is_prompt = (seq_group_metadata_list[0].is_prompt
                      if seq_group_metadata_list else None)
         return dataclasses.replace(model_input,
@@ -340,7 +348,14 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
 
         # Run the model with the dummy inputs.
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [None] * num_layers
+        # use an empty tensor instead of `None`` to force Dynamo to pass
+        # it by reference, rather by specializing on the value ``None``.
+        # the `dtype` argument does not matter, and we use `float32` as
+        # a placeholder (it has wide hardware support).
+        kv_caches = [
+            torch.tensor([], dtype=torch.float32, device=self.device)
+            for _ in range(num_layers)
+        ]
         finished_requests_ids = [seq.request_id for seq in seqs]
         model_input = self.prepare_model_input(
             seqs, finished_requests_ids=finished_requests_ids)
