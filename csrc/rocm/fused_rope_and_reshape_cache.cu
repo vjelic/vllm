@@ -55,10 +55,6 @@ inline __device__ void store_value_into_cache(
       const int head_size, const int num_kv_heads, 
       const int64_t block_idx, const int block_size, const int64_t block_offset,
       const int x, const int64_t idx, scalar_t val, const float kv_scale) {
-  // KV cache is not provided on trial run when vllm 
-  // asses amount of cache it can use, 
-  if (block_size == 0)
-    return;
 
   const int head_idx = idx / head_size;
   const int head_offset = idx % head_size;
@@ -93,7 +89,7 @@ template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS
 __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
         scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
                                              // [num_tokens, num_heads, head_size]
-        const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
+        scalar_t* __restrict__ key,          // [num_tokens, num_heads, head_size]
         const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
         cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
         cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size, block_size]
@@ -131,7 +127,12 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
     query[token_head + y_index] = y_value;
   }
 
-  const int64_t slot_idx = slot_mapping[token_idx];
+  const int64_t slot_idx = block_size == 0 ? 0: slot_mapping[token_idx];
+  if (slot_idx < 0) {
+    // Padding token that should be ignored.
+    return;
+  }
+
   const int64_t block_idx = slot_idx / block_size;
   const int64_t block_offset = slot_idx % block_size;
 
@@ -148,19 +149,25 @@ __global__ void fused_rotary_embedding_and_reshape_cache_kernel(
                                 rot_offset, embed_dim, 
                                 x_index, x_value, 
                                 y_index, y_value);
+    
+    // FIXME: probably not needed for decode path???
+    key[token_head + x_index] = x_value;
+    key[token_head + y_index] = y_value;
 
-    store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-                          (key_cache, head_size, num_kv_heads,
-                            block_idx, block_size, block_offset, 
-                            x, head_idx * head_size + x_index, x_value, k_scale);
-    store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-                          (key_cache, head_size, num_kv_heads,
-                            block_idx, block_size, block_offset,
-                            x, head_idx * head_size + y_index, y_value, k_scale);
+    if (block_size != 0) {
+      store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+                            (key_cache, head_size, num_kv_heads,
+                              block_idx, block_size, block_offset, 
+                              x, head_idx * head_size + x_index, x_value, k_scale);
+      store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+                            (key_cache, head_size, num_kv_heads,
+                              block_idx, block_size, block_offset,
+                              x, head_idx * head_size + y_index, y_value, k_scale);
+    }
   }
 
   const int nv = num_kv_heads * head_size;
-  for (int i = threadIdx.x; i < nv; i += blockDim.x) {
+  for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
     const int64_t src_value_idx = token_idx * value_stride + i;
     scalar_t tgt_value = value[src_value_idx];
 

@@ -45,7 +45,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
       "fused_rotary_embedding_and_reshape_cache("
       "      Tensor positions,"
       "      Tensor! query,"
-      "      Tensor key,"
+      "      Tensor! key,"
       "      Tensor value,"
       "      Tensor! key_cache,"
       "      Tensor! value_cache,"

@@ -193,17 +193,17 @@ class LlamaAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        if envs.VLLM_FUSED_ROPE_W_KV_CACHE:
-            key_cache, value_cache = torch.empty(0, 0, 0, 0, 0), torch.empty(0, 0, 0, 0)
-            if kv_cache is not None:
-                key_cache, value_cache =PagedAttention.split_kv_cache(
-                        kv_cache, self.num_kv_heads, self.head_dim)
-            self.rotary_emb(positions, q, k, v,
-                            key_cache, value_cache,
-                            attn_metadata.slot_mapping,
-                            self.attn._k_scale, self.attn._v_scale)
-        else:
-            q, k = self.rotary_emb(positions, q, k)
+        
+        key_cache, value_cache = torch.empty(0, 0, 0, 0, 0), torch.empty(0, 0, 0, 0)
+        if kv_cache is not None:
+            key_cache, value_cache =PagedAttention.split_kv_cache(
+                    kv_cache, self.num_kv_heads, self.head_dim)
+
+        self.rotary_emb(positions, q, k, v,
+                        key_cache, value_cache,
+                        attn_metadata.slot_mapping,
+                        self.attn._k_scale, self.attn._v_scale)
+
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
         return output

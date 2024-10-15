@@ -23,13 +23,92 @@ BLOCK_SIZES = [16]
 
 DTYPES = [torch.float32, torch.bfloat16, torch.float] # FIXME torch.half
 HEAD_SIZES = [128]
-NUM_HEADS = [32]  # Arbitrary values for testing
+NUM_HEADS = [32] # Arbitrary values for testing
+NUM_KV_HEADS = [8] # Arbitrary values for testing
 ROTARY_DIMS = [None]  # None means rotary dim == head size FIXME: 32
 BATCH_SIZES = [8]  # Arbitrary values for testing
 SEQ_LENS = [16]  # Arbitrary values for testing
 IS_NEOX_STYLE = [True, False]
 SEEDS = [0]
-CUDA_DEVICES = [6]
+CUDA_DEVICES = [5] # FIXME
+
+
+@pytest.mark.parametrize("batch_size", BATCH_SIZES)
+@pytest.mark.parametrize("seq_len", SEQ_LENS)
+@pytest.mark.parametrize("num_heads", NUM_HEADS)
+@pytest.mark.parametrize("num_kv_heads", NUM_KV_HEADS)
+@pytest.mark.parametrize("head_size", HEAD_SIZES)
+@pytest.mark.parametrize("rotary_dim", ROTARY_DIMS)
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
+@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+@torch.inference_mode()
+def test_fused_rotary_embedding_and_no_cache(
+    batch_size: int,
+    seq_len: int,
+    num_heads: int,
+    head_size: int,
+    num_kv_heads: int,
+    rotary_dim: Optional[int],
+    dtype: torch.dtype,
+    is_neox_style: bool,
+    seed: int,
+    device: str,
+    max_position: int = 8192,
+    base: int = 10000,
+) -> None:
+
+    torch.random.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    torch.set_default_device(device)
+
+    if rotary_dim is None:
+        rotary_dim = head_size
+
+    _ROPE_DICT.clear()
+    cache_config = CacheConfig(16, 1.0, 1, "auto")
+    rope = get_rope(head_size, rotary_dim, max_position, base, 
+                    is_neox_style, rope_scaling={"type": "llama3", 
+                                                "low_freq_factor": 1.0, 
+                                                "high_freq_factor": 2.0,
+                                                "original_max_position_embeddings": 1024},
+                    fused_with_kv_cache_op=True,
+                    cache_config = cache_config)
+    rope = rope.to(dtype=dtype)
+
+    #------------------Simulate------------------------------
+
+    positions = torch.randint(0, max_position, (batch_size, seq_len))
+    query = torch.randn(batch_size,
+                        seq_len,
+                        num_heads * head_size,
+                        dtype=dtype)
+    key = torch.randn(batch_size,
+                        seq_len,
+                        num_kv_heads * head_size,
+                        dtype=dtype)
+    value = torch.randn_like(key)
+
+    ref_query, ref_key = rope.forward_native(positions, query, key)
+
+    #----------------------Actual-Run------------------------
+
+    kv_scale = 1.0
+    key_cache, value_cache = torch.empty(0, 0, 0, 0, 0), torch.empty(0, 0, 0, 0)
+    slot_mapping = torch.empty(0, dtype=torch.long)
+
+    rope.forward(
+        positions, query, key, value, 
+        key_cache, value_cache,
+        slot_mapping, kv_scale, kv_scale)
+
+    #----------------------Assert----------------------------
+    assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
+    assert torch.allclose(key, ref_key, atol=0.001, rtol=0.1)
+
+
 
 
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -38,6 +117,7 @@ CUDA_DEVICES = [6]
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
 @pytest.mark.parametrize("seq_len", SEQ_LENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
+@pytest.mark.parametrize("num_kv_heads", NUM_KV_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("rotary_dim", ROTARY_DIMS)
 @pytest.mark.parametrize("dtype", DTYPES)
@@ -53,6 +133,7 @@ def test_fused_rotary_embedding_and_reshape_cache(
     batch_size: int,
     seq_len: int,
     num_heads: int,
+    num_kv_heads: int,
     head_size: int,
     rotary_dim: Optional[int],
     dtype: torch.dtype,
@@ -89,7 +170,7 @@ def test_fused_rotary_embedding_and_reshape_cache(
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
-                                                num_heads, head_size,
+                                                num_kv_heads, head_size,
                                                 kv_cache_dtype, dtype, seed,
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
@@ -108,15 +189,16 @@ def test_fused_rotary_embedding_and_reshape_cache(
                         seq_len,
                         num_heads * head_size,
                         dtype=dtype)
-    key = torch.randn_like(query)
+    key = torch.randn(batch_size,
+                        seq_len,
+                        num_kv_heads * head_size,
+                        dtype=dtype)
     ref_query, ref_key = rope.forward_native(positions, query, key)
-
-    items = range(batch_size * seq_len)
 
     # Call the reshape_and_cache kernel.
     value = torch.randn_like(key)
-    ops.reshape_and_cache(ref_key.view(-1, num_heads, head_size),
-                          value.view(-1, num_heads, head_size),
+    ops.reshape_and_cache(ref_key.view(-1, num_kv_heads, head_size),
+                          value.view(-1, num_kv_heads, head_size),
                           cloned_key_cache, 
                           cloned_value_cache, slot_mapping,
                           kv_cache_dtype, kv_scale, kv_scale)

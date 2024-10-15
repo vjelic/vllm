@@ -750,8 +750,8 @@ class FusedLlama3RotaryEmbedding(Llama3RotaryEmbedding):
         value_scale: float,
     ) -> None:
         torch.ops._rocm_C.fused_rotary_embedding_and_reshape_cache(
-            positions, query, key,  value, key_cache, value_cache, 
-            self.kv_cache_dtype, self.cos_sin_cache, slot_mapping, 
+            positions, query, key,  value, key_cache, value_cache,
+            self.kv_cache_dtype, self.cos_sin_cache, slot_mapping,
             self.head_size, key_scale, value_scale, self.is_neox_style)
 
 class MRotaryEmbedding(RotaryEmbedding):
