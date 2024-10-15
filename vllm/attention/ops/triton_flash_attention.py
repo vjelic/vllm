@@ -20,6 +20,7 @@ Not currently supported:
 
 """
 
+import sys
 import torch
 import triton
 import triton.language as tl
@@ -818,3 +819,131 @@ class _attention(torch.autograd.Function):
 
 
 triton_attention = _attention.apply
+
+
+def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype,
+                        equal_seqlens=False):
+    torch.manual_seed(20)
+
+    # Random sequence lengths.
+    # Using N_CTX as kind of max of sum of individual seqs
+    if not equal_seqlens:
+        max_seqlens_q = N_CTX_Q // Z
+        max_seqlens_k = N_CTX_K // Z
+        seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z, ),
+                                  dtype=torch.int32)
+        seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z, ),
+                                  dtype=torch.int32)
+    else:
+        seqlens_q = torch.full((Z, ), N_CTX_Q // Z)
+        seqlens_k = torch.full((Z, ), N_CTX_K // Z)
+
+    # Calculate cumulative sequence lengths
+    cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32),
+                              seqlens_q.cumsum(dim=0, dtype=torch.int32)])
+    cu_seqlens_k = torch.cat([torch.tensor([0], dtype=torch.int32),
+                              seqlens_k.cumsum(dim=0, dtype=torch.int32)])
+    cu_seqlens_q = cu_seqlens_q.to(device="cuda")
+    cu_seqlens_k = cu_seqlens_k.to(device="cuda")
+
+    # Initialize q, k, v with variable lengths
+    total_q = cu_seqlens_q[-1].item()
+    total_k = cu_seqlens_k[-1].item()
+    q = torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    sm_scale = D_HEAD**-0.5
+
+    return q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k, \
+        sm_scale
+
+
+def varlen_benchmark_configs():
+    configs = []
+    for mode in ['fwd']:
+        for dtype in ['fp16']:
+            for D_HEAD in [128]:
+                for causal in [False]:
+                    configs.append(
+                        triton.testing.Benchmark(
+                            x_names=['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K'],
+                            x_vals=[
+                                (2, 16, 4, 1024, 1024),
+                                (2, 16, 4, 1024, 2048),
+                                (2, 16, 4, 1024, 4096),
+                                (2, 16, 8, 1024, 1024),
+                                (2, 16, 16, 1024, 1024),
+                                # (8, 16, 2, 2048, 2048),
+                                # (4, 16, 8, 4096, 4096),
+                                # (2, 16, 4, 8192, 8192),
+                                # (2, 16, 8, 16384, 16384),
+                                # (2, 48, 12, 1024, 1024),
+                                # (2, 48, 24, 2048, 2048),
+                                # (2, 48, 8, 4096, 4096),
+                                # (2, 48, 4, 8192, 8192),
+                                # (2, 48, 2, 16384, 16384),
+                                # (2, 64, 32, 1024, 1024),
+                                # (4, 64, 16, 2048, 2048),
+                                # (4, 64, 8, 4096, 4096),
+                                # (4, 64, 32, 8192, 8192),
+                                # (4, 128, 16, 16384, 16384),
+                            ],
+                            line_arg='provider', line_vals=['triton'],
+                            line_names=['TFLOPS'],
+                            styles=[('red', '-')], ylabel='ms',
+                            plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}',
+                            args={'D_HEAD': D_HEAD,
+                                  'dtype': arg_to_torch_dtype[dtype],
+                                  'causal': causal,
+                                  'mode': mode}))
+
+    return configs
+
+
+def run_benchmark():
+    configs = varlen_benchmark_configs()
+
+    @triton.testing.perf_report(configs)
+    def bench_flash_attention(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype,
+                              causal, mode, provider, device="cuda"):
+        assert mode in ["fwd"]
+        warmup = 25
+        rep = 100
+        flops_per_matmul = 0
+        q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k, sm_scale \
+            = varlen_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD,
+                                  dtype, equal_seqlens=False)
+        num_contexts = len(cu_seqlens_q) - 1
+        for i in range(0, num_contexts):
+            seqlen_q = cu_seqlens_q[i + 1] - cu_seqlens_q[i]
+            seqlen_k = cu_seqlens_k[i + 1] - cu_seqlens_k[i]
+            # x2 for 2 GEMMs
+            flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
+
+        o = torch.empty_like(q)
+        fn = lambda: triton_attention(
+            q, k, v, o,
+            cu_seqlens_q, cu_seqlens_k,
+            max_seqlens_q, max_seqlens_k,
+            causal,
+            sm_scale)
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        total_flops = 2 * flops_per_matmul
+
+        if causal:
+            total_flops *= 0.5
+
+        return total_flops / ms * 1e-9
+
+    bench_flash_attention.run(save_path=".", print_data=True)
+
+
+arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32}
+
+
+def main():
+    run_benchmark()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
