@@ -202,15 +202,18 @@ class LlamaAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         
-        key_cache, value_cache = torch.empty(0, 0, 0, 0, 0), torch.empty(0, 0, 0, 0)
-        if kv_cache is not None and kv_cache.numel() > 0:
-            key_cache, value_cache =PagedAttention.split_kv_cache(
-                    kv_cache, self.num_kv_heads, self.head_dim)
+        if envs.VLLM_FUSED_ROPE_W_KV_CACHE:
+            key_cache, value_cache = torch.empty(0, 0, 0, 0, 0), torch.empty(0, 0, 0, 0)
+            if kv_cache is not None and kv_cache.numel() > 0:
+                key_cache, value_cache =PagedAttention.split_kv_cache(
+                        kv_cache, self.num_kv_heads, self.head_dim)
 
-        self.rotary_emb(positions, q, k, v,
-                        key_cache, value_cache,
-                        attn_metadata.slot_mapping,
-                        self.attn._k_scale, self.attn._v_scale)
+            self.rotary_emb(positions, q, k, v,
+                            key_cache, value_cache,
+                            attn_metadata.slot_mapping,
+                            self.attn._k_scale, self.attn._v_scale)
+        else:
+            q, k = self.rotary_emb(positions, q, k)
 
         attn_output = self.attn(q,
                                 k,
