@@ -1,3 +1,6 @@
+from itertools import product
+
+
 ## Utilize method from rocm/Triton tuning script
 def get_full_tuning_space():
     configs = []
@@ -15,29 +18,22 @@ def get_full_tuning_space():
     matrix_instr_nonkdim_range = [16, 32]
     kpack_range = [1, 2]
 
-    for block_m in block_mn_range:
-        for block_n in block_mn_range:
-            for block_k in block_k_range:
-                for num_warps in num_warps_range:
-                    for group_m in group_m_range:
-                        # for split_k in split_k_range:
-                        for num_stages in num_stage_range:
-                            for waves_per_eu in waves_per_eu_range:
-                                for (matrix_instr_nonkdim
-                                     ) in matrix_instr_nonkdim_range:
-                                    for kpack in kpack_range:
-                                        configs.append({
-                                            "BLOCK_SIZE_M": block_m,
-                                            "BLOCK_SIZE_N": block_n,
-                                            "BLOCK_SIZE_K": block_k,
-                                            "GROUP_SIZE_M": group_m,
-                                            "num_warps": num_warps,
-                                            "num_stages": num_stages,
-                                            "waves_per_eu": waves_per_eu,
-                                            "matrix_instr_nonkdim":
-                                            matrix_instr_nonkdim,
-                                            "kpack": kpack,
-                                        })
+    param_ranges = {
+        "BLOCK_SIZE_M": block_mn_range,
+        "BLOCK_SIZE_N": block_mn_range,
+        "BLOCK_SIZE_K": block_k_range,
+        "GROUP_SIZE_M": group_m_range,
+        "num_warps": num_warps_range,
+        "num_stages": num_stage_range,
+        "waves_per_eu": waves_per_eu_range,
+        "matrix_instr_nonkdim": matrix_instr_nonkdim_range,
+        "kpack": kpack_range,
+    }
+
+    keys, values = zip(*param_ranges.items())
+    for config_values in product(*values):
+        config = dict(zip(keys, config_values))
+        configs.append(config)
 
     return configs
 
