@@ -1,5 +1,6 @@
 import random
 from itertools import accumulate, product
+from time import perf_counter
 from typing import List, Optional
 
 import pytest
@@ -44,7 +45,7 @@ CUDA_DEVICES = [5] # FIXME
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 @torch.inference_mode()
-def test_fused_rotary_embedding_and_no_cache(
+def test_fused_rotary_embedding_with_no_cache(
     batch_size: int,
     seq_len: int,
     num_heads: int,
@@ -125,7 +126,7 @@ def test_fused_rotary_embedding_and_no_cache(
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 @torch.inference_mode()
-def test_fused_rotary_embedding_and_reshape_cache(
+def test_fused_rotary_embedding_with_reshape_cache(
     kv_cache_factory,
     block_size: int,
     num_blocks: int,
@@ -182,8 +183,6 @@ def test_fused_rotary_embedding_and_reshape_cache(
     # Using default kv_scale
     kv_scale = 1.0
 
-    #------------------Simulate------------------------------
-
     positions = torch.randint(0, max_position, (batch_size, seq_len))
     query = torch.randn(batch_size,
                         seq_len,
@@ -193,43 +192,39 @@ def test_fused_rotary_embedding_and_reshape_cache(
                         seq_len,
                         num_kv_heads * head_size,
                         dtype=dtype)
-    ref_query, ref_key = rope.forward_native(positions, query, key)
-
-    # Call the reshape_and_cache kernel.
     value = torch.randn_like(key)
+
+    #------------------Simulate------------------------------
+    time_start = perf_counter()
+
+    ref_query, ref_key = rope.forward_cuda(positions, query.clone(), key.clone())
     ops.reshape_and_cache(ref_key.view(-1, num_kv_heads, head_size),
                           value.view(-1, num_kv_heads, head_size),
                           cloned_key_cache, 
                           cloned_value_cache, slot_mapping,
                           kv_cache_dtype, kv_scale, kv_scale)
 
-    if kv_cache_dtype == "fp8":
-        result_key_cache = torch.empty_like(
-                cloned_key_cache, dtype=torch.float16)
-        ops.convert_fp8(result_key_cache, cloned_key_cache)
-        result_value_cache = torch.empty_like(
-                cloned_value_cache, dtype=torch.float16)
-        ops.convert_fp8(result_value_cache, cloned_value_cache)
-    
+    time_end = perf_counter()
+    # report the duration
+    print(f'Non fused call {(time_end - time_start) * 1000} ms')
+
     #----------------------Actual-Run------------------------
+    time_start = perf_counter()
 
     rope.forward(
         positions, query, key, value, 
         key_cache, value_cache,
         slot_mapping, kv_scale, kv_scale)
 
-    #----------------------Assert----------------------------
-    assert torch.allclose(query, ref_query, atol=0.001, rtol=0.1)
+    time_end = perf_counter()
+    # report the duration
+    print(f'Fused run {(time_end - time_start) * 1000} ms')
 
+    #----------------------Assert----------------------------
+    atol, rtol = 1e-05, 1e-05
     if kv_cache_dtype == "fp8":
-        assert torch.allclose(key_cache,
-                            cloned_key_cache,
-                            atol=0.001,
-                            rtol=0.1)
-        assert torch.allclose(value_cache,
-                            cloned_value_cache,
-                            atol=0.001,
-                            rtol=0.1)
-    else:
-        assert torch.allclose(key_cache, cloned_key_cache, atol=1e-05, rtol=1e-05)
-        assert torch.allclose(value_cache, cloned_value_cache, atol=1e-05, rtol=1e-05)
+        atol, rtol = 0.001, 0.001
+
+    assert torch.allclose(query, ref_query, atol=atol, rtol=rtol)
+    assert torch.allclose(key_cache, cloned_key_cache, atol=atol, rtol=rtol)
+    assert torch.allclose(value_cache, cloned_value_cache, atol=atol, rtol=rtol)
