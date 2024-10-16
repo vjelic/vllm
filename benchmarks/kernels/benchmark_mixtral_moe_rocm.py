@@ -9,6 +9,7 @@ import torch.multiprocessing as mp
 import torch.nn.functional as F
 import triton
 import triton.language as tl
+from natsort import natsorted
 from tqdm import tqdm
 from tuning_utils import (get_full_tuning_space, prune_configs,
                           union_of_list_of_dicts)
@@ -125,9 +126,17 @@ def tune_batch(bs, model, TP):
         with open(filename, "r") as f:
             existing_content = json.load(f)
     existing_content[str(bs)] = best_config
+    existing_content = sort_json(existing_content)
     with open(filename, "w") as f:
         json.dump(existing_content, f, indent=4)
         f.write("\n")
+
+
+def sort_json(json_file):
+    return {
+        k: v
+        for k, v in natsorted(json_file.items(), key=lambda item: item[0])
+    }
 
 
 def run_timing(
