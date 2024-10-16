@@ -187,7 +187,8 @@ def run_timing(
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
 
-    topk_weights, topk_ids = fused_topk(hidden_states, gating_output, top_k, True)
+    topk_weights, topk_ids = fused_topk(hidden_states, gating_output, top_k,
+                                        True)
 
     intermediate_cache1 = torch.empty(
         (M, topk_ids.shape[1], N),
