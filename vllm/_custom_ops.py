@@ -517,7 +517,6 @@ if hasattr(torch.ops._C, "gptq_marlin_24_gemm"):
 def cutlass_scaled_mm_supports_fp8(cuda_device_capability: int) -> bool:
     return torch.ops._C.cutlass_scaled_mm_supports_fp8(cuda_device_capability)
 
-
 def cutlass_scaled_mm(a: torch.Tensor,
                       b: torch.Tensor,
                       scale_a: torch.Tensor,
@@ -531,9 +530,15 @@ def cutlass_scaled_mm(a: torch.Tensor,
 
     m = a.shape[0]
     n = b.shape[1]
-    out = torch.empty((m, n), dtype=out_dtype, device=a.device)
 
-    torch.ops._C.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
+    if is_hip():
+        out = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        out = scale_a * out
+        out = scale_b.T * out
+        out = out.to(out_dtype)
+    else:
+        out = torch.empty((m, n), dtype=out_dtype, device=a.device)
+        torch.ops._C.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
 
     return out
 
