@@ -517,6 +517,7 @@ if hasattr(torch.ops._C, "gptq_marlin_24_gemm"):
 def cutlass_scaled_mm_supports_fp8(cuda_device_capability: int) -> bool:
     return torch.ops._C.cutlass_scaled_mm_supports_fp8(cuda_device_capability)
 
+
 def cutlass_scaled_mm(a: torch.Tensor,
                       b: torch.Tensor,
                       scale_a: torch.Tensor,
@@ -773,8 +774,8 @@ def scaled_int8_quant(
     if scale is not None:
         # static-per-tensor quantization.
         assert symmetric == (
-            azp is
-            None), "azp must only be provided for asymmetric quantization."
+            azp
+            is None), "azp must only be provided for asymmetric quantization."
         torch.ops._C.static_scaled_int8_quant(output, input, scale, azp)
         return output, scale, None
 
