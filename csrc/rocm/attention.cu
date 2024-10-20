@@ -1082,7 +1082,6 @@ void paged_attention_custom_launcher(
   const int gqa_ratio = num_heads / num_kv_heads;
   assert(num_heads % num_kv_heads == 0);
   assert(head_size == HEAD_SIZE);
-  assert(max_num_partitions <= 256);
 
   constexpr int NTHR = PARTITION_SIZE;
   dim3 grid(num_seqs, max_num_partitions, num_kv_heads);
@@ -1142,9 +1141,6 @@ void paged_attention_custom_launcher(
       TORCH_CHECK(false, "Unsupported gqa ratio: ", gqa_ratio);
       break;
   }
-  // dim3 grid2(num_heads,num_seqs,head_size/HEAD_ELEMS_PER_WG);
-  // dim3 block2(1024);
-  //  LAUNCH_CUSTOM_ATTENTION2;
 
   // reduction kernel is only required if max_context_len > partition size,
   // otherwise main kernel writes directly to final output
@@ -1155,6 +1151,7 @@ void paged_attention_custom_launcher(
     dim3 reduce_grid(num_heads, num_seqs);
     dim3 reduce_block(head_size);
     const int npar_loops = DIVIDE_ROUND_UP(max_num_partitions, WARP_SIZE);
+    //support upto 8*64*256=128K context length
     switch (npar_loops) {
       case 1:
         LAUNCH_CUSTOM_REDUCTION(1);
@@ -1167,6 +1164,18 @@ void paged_attention_custom_launcher(
         break;
       case 4:
         LAUNCH_CUSTOM_REDUCTION(4);
+        break;
+      case 5:
+        LAUNCH_CUSTOM_REDUCTION(5);
+        break;
+      case 6:
+        LAUNCH_CUSTOM_REDUCTION(6);
+        break;
+      case 7:
+        LAUNCH_CUSTOM_REDUCTION(7);
+        break;
+      case 8:
+        LAUNCH_CUSTOM_REDUCTION(8);
         break;
       default:
         TORCH_CHECK(false, "Unsupported npar_loops: ", npar_loops);
