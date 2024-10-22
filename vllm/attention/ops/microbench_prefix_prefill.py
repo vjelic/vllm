@@ -17,11 +17,10 @@ def generate_input(
     head_size: int,
     MAX_SEQ_LEN: int = 1024,
     MAX_CTX_LEN: int = 1024,
-    BS: int = 10,
+    batch: int = 10,
     cache_size: int = 640,
     block_size: int = 32,
     max_block_per_request: int = 64,
-    sliding_window: int = 0,
     dtype: torch.dtype = torch.float16,
     kv_cache_dtype: str = "auto",
     device: str = "None",
@@ -33,8 +32,10 @@ def generate_input(
     torch.set_default_device(device)
     torch.cuda.set_device(device)
 
-    query_lens = [random.randint(16, MAX_SEQ_LEN) for _ in range(BS)]
-    ctx_lens = [random.randint(16, MAX_CTX_LEN) for _ in range(BS)]
+    assert cache_size >= batch * max_block_per_request
+
+    query_lens = [random.randint(16, MAX_SEQ_LEN) for _ in range(batch)]
+    ctx_lens = [random.randint(16, MAX_CTX_LEN) for _ in range(batch)]
     seq_lens = [a + b for a, b in zip(query_lens, ctx_lens)]
     num_kv_heads = num_heads // num_queries_per_kv
 
@@ -65,8 +66,8 @@ def generate_input(
     v = torch.zeros(sum(query_lens), num_kv_heads, head_size, dtype=dtype)
     values = torch.arange(0, cache_size, dtype=torch.long)
     values = values[torch.randperm(cache_size)]
-    block_table = values[:BS * max_block_per_request].view(
-        BS, max_block_per_request)
+    block_table = values[:batch * max_block_per_request].view(
+        batch, max_block_per_request)
     b_seq_len = torch.tensor(seq_lens, dtype=torch.long)
     b_ctx_len = torch.tensor(ctx_lens, dtype=torch.long)
     b_start_loc = torch.cumsum(torch.tensor([0] + query_lens[:-1],
@@ -77,7 +78,7 @@ def generate_input(
     b_seq_start_loc = torch.cumsum(torch.tensor([0] + seq_lens[:-1],
                                                 dtype=torch.long),
                                    dim=0)
-    for i in range(BS):
+    for i in range(batch):
         for j in range(query_lens[i]):
             k[b_start_loc[i] + j].copy_(key[b_seq_start_loc[i] + b_ctx_len[i] +
                                             j])
@@ -122,27 +123,29 @@ arg_to_torch_dtype = {
 def generate_benchmark_configs():
     configs = []
 
-    for kv_cache_dtype in ['auto']:
-        for dtype in ['fp16']:
-            for NUM_QUERIES_PER_KV in [1, 8, 64]:
-                for D_HEAD in [128, 96, 24]:
-                    for SLIDING_WINDOW in [0, 16, 64, 128, 256, 512, 2048]:
+    for dtype in ['fp16']:
+        for kv_cache_dtype in ['auto']:  # 'fp8',
+            for head_dim in [128]:
+                for num_queries_per_kv in [1, 8, 64]:  # GQA ratio, i.e. how many Q each kv pair process, 1 == MHA
+                    for sliding_window in [0, 16]:  # sliding window length only affects the mask applied on qk, so only zero and non-zero should be sufficient
                         configs.append(
                             triton.testing.Benchmark(
-                                x_names=['BS', 'HEAD', 'MAX_SEQ_LEN', 'MAX_CTX_LEN', 'cache_size', 'block_size', 'max_block_per_request'],
+                                x_names=['batch', 'num_heads', 'max_seq_len', 'block_size', 'max_block_per_request'],
                                 x_vals=[
-                                    (10, 64, 1024, 1024, 640, 32, 64)
+                                    (10, 64, 1024, 32, 64),
+                                    # (10, 64, 8192, 32, 64),
                                 ],
                                 line_arg='provider', line_vals=['triton'],
-                                line_names=['TFLOPS'],
-                                styles=[('red', '-')], ylabel='ms',
-                                plot_name=f'prefix-prefill-d{D_HEAD}-win{SLIDING_WINDOW}',
-                                args={'D_HEAD': D_HEAD,
+                                line_names=['us'],
+                                styles=[('red', '-')], ylabel='us',
+                                plot_name=f'prefix-prefill-{dtype}-kvDtype-{kv_cache_dtype}-d{head_dim}-gqaRatio-{num_queries_per_kv}-win{sliding_window}',
+                                args={
                                     'dtype': arg_to_torch_dtype[dtype],
-                                    'NUM_QUERIES_PER_KV': NUM_QUERIES_PER_KV,
-                                    'SLIDING_WINDOW': SLIDING_WINDOW,
                                     'kv_cache_dtype': kv_cache_dtype,
-                                    }))
+                                    'head_dim': head_dim,
+                                    'num_queries_per_kv': num_queries_per_kv,
+                                    'sliding_window': sliding_window,
+                                }))
     return configs
 
 
@@ -150,23 +153,25 @@ def run_benchmark():
     configs = generate_benchmark_configs()
 
     @triton.testing.perf_report(configs)
-    def benchmark_prefix_prefill(BS, HEAD, MAX_SEQ_LEN, MAX_CTX_LEN, cache_size, block_size, max_block_per_request, kv_cache_dtype, dtype, NUM_QUERIES_PER_KV, D_HEAD, SLIDING_WINDOW, provider, device='cuda'):
+    def benchmark_prefix_prefill(
+        batch, num_heads, max_seq_len, block_size, max_block_per_request,
+        kv_cache_dtype, dtype, num_queries_per_kv,
+        head_dim, sliding_window, provider, device='cuda'):
         warmup = 25
         rep = 100
 
-        q, k, v, output, k_cache, v_cache, block_table, b_start_loc, b_seq_len, \
-            b_ctx_len, max_input_len = \
+        q, k, v, output, k_cache, v_cache, block_table, b_start_loc, \
+            b_seq_len, b_ctx_len, max_input_len = \
         generate_input(
-            HEAD,
-            NUM_QUERIES_PER_KV,
-            D_HEAD,
-            MAX_SEQ_LEN=MAX_SEQ_LEN,
-            MAX_CTX_LEN=MAX_CTX_LEN,
-            BS=BS,
-            cache_size=cache_size,
+            num_heads,
+            num_queries_per_kv,
+            head_dim,
+            MAX_SEQ_LEN=max_seq_len,
+            MAX_CTX_LEN=max_seq_len,
+            batch=batch,
+            cache_size=640,
             block_size=block_size,
             max_block_per_request=max_block_per_request,
-            sliding_window=SLIDING_WINDOW,
             dtype=dtype,
             kv_cache_dtype=kv_cache_dtype,
             device="cuda:0"
@@ -212,21 +217,21 @@ def run_benchmark():
         batch, head = b_seq_len.shape[0], q.shape[1]
         num_queries_per_kv = q.shape[1] // k.shape[1]
 
-        grid = (batch, head, triton.cdiv(max_input_len, BLOCK))  # batch, head,
+        grid = lambda meta : (batch, head, triton.cdiv(max_input_len, meta["BLOCK_M"]))  # batch, head,
 
         k_scale = 1.0
         v_scale = 1.0
-        print("q:", q.shape)
-        print("k:", k.shape)
-        print("v:", v.shape)
-        print("output:", output.shape)
-        print("k_cache:", k_cache.shape)
-        print("v_cache:", v_cache.shape)
-        print("block_table:", block_table.shape)
-        print("b_start_loc:", b_start_loc.shape)
-        print("b_seq_len:", b_seq_len.shape)
-        print("b_ctx_len:", b_ctx_len.shape)
-        print("max_input_len:", max_input_len)
+        # print("q:", q.shape)
+        # print("k:", k.shape)
+        # print("v:", v.shape)
+        # print("output:", output.shape)
+        # print("k_cache:", k_cache.shape)
+        # print("v_cache:", v_cache.shape)
+        # print("block_table:", block_table.shape)
+        # print("b_start_loc:", b_start_loc.shape)
+        # print("b_seq_len:", b_seq_len.shape)
+        # print("b_ctx_len:", b_ctx_len.shape)
+        # print("max_input_len:", max_input_len)
 
         fn = lambda : _fwd_kernel[grid](
             q,
@@ -262,26 +267,25 @@ def run_benchmark():
             k_cache.stride(1),
             k_cache.stride(2),
             k_cache.stride(3),
-            k_cache.stride(
-                4),  #[num_blocks, num_kv_heads, head_size/x, block_size, x]
+            k_cache.stride(4),  #[num_blocks, num_kv_heads, head_size/x, block_size, x]
             v_cache.stride(0),
             v_cache.stride(1),
             v_cache.stride(2),
             v_cache.stride(
                 3),  #[num_blocks, num_kv_heads, head_size, block_size]
             num_queries_per_kv=num_queries_per_kv,
-            BLOCK_M=BLOCK,
+            # BLOCK_M=BLOCK,
             BLOCK_DMODEL=Lk,
             BLOCK_DMODEL_PADDED=Lk_padded,
-            BLOCK_N=BLOCK,
-            SLIDING_WINDOW=SLIDING_WINDOW,
-            num_warps=NUM_WARPS,
-            num_stages=1,
+            # BLOCK_N=BLOCK,
+            SLIDING_WINDOW=sliding_window,
+            # num_warps=NUM_WARPS,
+            # num_stages=1,
         )
 
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
-        return ms * 1e-3
+        return ms * 1e3
 
 
     benchmark_prefix_prefill.run(save_path=".", print_data=True)

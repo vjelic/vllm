@@ -9,6 +9,39 @@ from vllm.platforms import current_platform
 
 if triton.__version__ >= "2.1.0":
 
+    def _get_fw_configs():  # noqa: C901
+        configs = []
+        if torch.version.hip:
+            for BLOCK_M in [32, 64, 128]:
+                for BLOCK_N in [32, 64]:
+                    for num_stages in [1]:
+                        for num_warps in [4, 8]:
+                            for matrix_instr_nonkdim in [16, 32]:
+                                for waves_per_eu in [0, 2, 3]:
+                                    configs.append(
+                                        triton.Config(
+                                            {
+                                                "BLOCK_M": BLOCK_M,
+                                                "BLOCK_N": BLOCK_N,
+                                                "matrix_instr_nonkdim": matrix_instr_nonkdim,
+                                                "waves_per_eu": waves_per_eu,
+                                            },
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                        )
+                                    )
+        return configs
+
+
+    @triton.autotune(
+        configs=_get_fw_configs(),
+        key=[
+            "num_queries_per_kv",
+            "BLOCK_DMODEL",
+            "SLIDING_WINDOW",
+            "block_size",
+        ],
+    )
     @triton.jit
     def _fwd_kernel(
         Q,
@@ -809,6 +842,17 @@ if triton.__version__ >= "2.1.0":
             )
             return
 
+        print("q:", q.shape)
+        print("k:", k.shape)
+        print("v:", v.shape)
+        print("o:", o.shape)
+        print("k_cache:", k_cache.shape)
+        print("v_cache:", v_cache.shape)
+        print("block_table:", b_loc.shape)
+        print("b_start_loc:", b_start_loc.shape)
+        print("b_seq_len:", b_seq_len.shape)
+        print("b_ctx_len:", b_ctx_len.shape)
+        print("max_input_len:", max_input_len)
         _fwd_kernel[grid](
             q,
             k,
