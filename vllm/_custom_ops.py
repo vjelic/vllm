@@ -546,14 +546,52 @@ def cutlass_scaled_mm(a: torch.Tensor,
         1] and bias.dtype == out_dtype
 
     m = a.shape[0]
+    k = a.shape[1]
     n = b.shape[1]
 
+    print(f"a.shape = {a.shape}, a.dtype = {a.dtype},"
+          f"b.shape = {b.shape}, b.dtye = {b.dtype},"
+          f"scale_a.shape = {scale_a.shape}, scale_a.dtype = {scale_a.dtype},"
+          f"scale_b.shape = {scale_b.shape}, scale_b.dtype = {scale_b.dtype},"
+          f"bias.shape = {None if bias is None else bias.shape},"
+          f"bias.dtype = {None if bias is None else bias.dtype}")
     if is_hip():
-        return scaled_mm_torch(a, b, scale_a, scale_b, out_dtype, bias)
+        # return scaled_mm_torch(a, b, scale_a, scale_b, out_dtype, bias)
+        from scaled_mm_triton import scaled_mm_triton
+        # out = scaled_mm_triton(a.to(torch.float32), b.to(torch.float32))
+        swap = False
+        # if m < 16 or n < 16 or k < 16:
+            # out = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        # else:
+            # out = scaled_mm_triton(a, b)
+        # if m < 16 or n < 16 or k < 16:
+            # out = scaled_mm_triton(a, b)
+        # else:
+            # out = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        # # out = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        # out = scale_a * out
+        # out = scale_b.T * out
+
+        if scale_a.shape[0] == 1 and scale_a.shape[0] == 1:
+            diag_a = torch.eye(m, m) * diag_a[0][0]
+        else:
+            diag_a = torch.diag(torch.squeeze(scale_a.to(torch.float32)))
+
+        if scale_b.shape[0] == 1 and scale_b.shape[0] == 1:
+            diag_b = torch.eye(n, n) * diag_b[0][0]
+        else:
+            diag_b = torch.diag(torch.squeeze(scale_b.to(torch.float32)))
+
+        ab = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        out = torch.mm(diag_a, torch.mm(ab, diag_b))
+        out = out.to(out_dtype)
+        if bias is not None:
+            out = out + bias
     else:
         out = torch.empty((m, n), dtype=out_dtype, device=a.device)
         torch.ops._C.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
 
+    # print("done!")
     return out
 
 
