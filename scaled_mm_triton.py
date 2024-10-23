@@ -3,8 +3,20 @@ import triton
 import triton.language as tl
 
 
+def prepare_matrix_for_triton(x: torch.Tensor):
+    strides = x.stride()
+    sizes = x.shape
+    is_not_transpose = strides[0] == 1 and (strides[1] >= max(1, sizes[0]))
+    is_transpose = strides[1] == 1 and (strides[0] >= max(1, sizes[1]))
+    if not is_not_transpose and not is_transpose:
+        return torch.clone(x, memory_format=torch.contiguous_format)
+    return x
+
+
 @triton.jit
-def scaled_mm_kernel(a_ptr, b_ptr, c_ptr, M, N, K, BLOCK_SIZE_M: tl.constexpr,
+def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, M, N, K,
+                     stride_am, stride_ak, stride_bk, stride_bn, stride_cm,
+                     stride_cn, BLOCK_SIZE_M: tl.constexpr,
                      BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
                      SPLIT_K: tl.constexpr):
     pid = tl.program_id(axis=0)
@@ -17,7 +29,7 @@ def scaled_mm_kernel(a_ptr, b_ptr, c_ptr, M, N, K, BLOCK_SIZE_M: tl.constexpr,
     pid_m = pid // num_pid_n
     pid_n = pid % num_pid_n
 
-    accumulator_dtype = tl.float32
+    accumulator_dtype = tl.int32
 
     # NOTE: This doesn't work in TRITON_INTERPRET=1 mode.  Use below instead.
     # accumulator = tl.arange(0, BLOCK_SIZE_N)
@@ -36,11 +48,23 @@ def scaled_mm_kernel(a_ptr, b_ptr, c_ptr, M, N, K, BLOCK_SIZE_M: tl.constexpr,
     masks_bn = offsets_bn < N
 
     offsets_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K).to(tl.int64)
-    offsets_a = K * offsets_am[:, None] + offsets_k[None, :]
-    offsets_b = N * offsets_k[:, None] + offsets_bn[None, :]
+    offsets_a = (stride_am * offsets_am[:, None] +
+                 stride_ak * offsets_k[None, :])
+    offsets_b = (stride_bk * offsets_k[:, None] +
+                 stride_bn * offsets_bn[None, :])
+
+    # A = M x K, scale_a = M x 1
+    offsets_scale_a = offsets_am[:, None] + tl.arange(0, 1)[None, :].to(
+        tl.int64)
+    # B = K x N, scale_b = N x 1
+    offsets_scale_b = offsets_bn[:, None] + tl.arange(0, 1)[None, :].to(
+        tl.int64)
 
     a_ptrs = a_ptr + offsets_a
     b_ptrs = b_ptr + offsets_b
+
+    scale_a_ptrs = scale_a_ptr + offsets_scale_a
+    scale_b_ptrs = scale_b_ptr + offsets_scale_b
 
     # NOTE: Use this in TRITON_INTERPRET=1 mode instead of tl.cdiv
     # block_offset = BLOCK_SIZE_K * SPLIT_K
@@ -48,26 +72,35 @@ def scaled_mm_kernel(a_ptr, b_ptr, c_ptr, M, N, K, BLOCK_SIZE_M: tl.constexpr,
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
         masks_k = offsets_k < K
         masks_a = masks_am[:, None] & masks_k[None, :]
-        a = tl.load(a_ptrs, mask=masks_a).to(tl.float32)
+        a = tl.load(a_ptrs, mask=masks_a)
 
         masks_b = masks_k[:, None] & masks_bn[None, :]
-        b = tl.load(b_ptrs, mask=masks_b).to(tl.float32)
+        b = tl.load(b_ptrs, mask=masks_b)
 
         # Accumulate results.
         accumulator = tl.dot(a, b, accumulator, out_dtype=accumulator_dtype)
 
         offsets_k += BLOCK_SIZE_K * SPLIT_K
-        a_ptrs += BLOCK_SIZE_K * SPLIT_K
-        b_ptrs += BLOCK_SIZE_K * SPLIT_K * N
+        a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
+        b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
 
+    # Apply scale at end
+    masks_scale_a = masks_am[:, None] & (tl.arange(0, 1) < 1)[:, None]
+    scale_a = tl.load(scale_a_ptrs, masks_scale_a)
+    accumulator = scale_a * accumulator.to(tl.float32)
+
+    masks_scale_b = masks_bn[:, None] & (tl.arange(0, 1) < 1)[None, :]
+    scale_b = tl.load(scale_b_ptrs, masks_scale_b)
+    accumulator = scale_b.T * accumulator.to(tl.float32)
+
+    # Save output
     c = accumulator.to(c_ptr.type.element_ty)
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
     offs_cm = offs_cm.to(tl.int64)
     offs_cn = offs_cn.to(tl.int64)
-    # c_ptrs = c_ptr + pid_z * N * M + N * offs_cm[:, None] + offs_cn[None, :]
-    # c_ptrs = c_ptr + pid_z * N * M + N * offs_cm[:, None] + offs_cn[None, :]
-    c_ptrs = c_ptr + pid_z * N * M + N * offs_cm[:, None] + offs_cn[None, :]
+    c_ptrs = (c_ptr + pid_z * N * M + stride_cm * offs_cm[:, None] +
+              stride_cn * offs_cn[None, :])
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
     c = c.to(tl.float32)
@@ -79,6 +112,8 @@ def scaled_mm_kernel(a_ptr, b_ptr, c_ptr, M, N, K, BLOCK_SIZE_M: tl.constexpr,
 # split_k_iters - parallelism along K-dimension, int, power of 2.
 def scaled_mm_triton(input: torch.Tensor,
                      weight: torch.Tensor,
+                     scale_a: torch.Tensor,
+                     scale_b: torch.Tensor,
                      block_size_m: int = 32,
                      block_size_n: int = 32,
                      block_size_k: int = 32) -> torch.Tensor:
@@ -96,26 +131,49 @@ def scaled_mm_triton(input: torch.Tensor,
         split_k_iters,
     )
 
-    result = torch.zeros((split_k_iters, M, N),
-                         dtype=torch.float32,
-                         device=input.device)
+    # result = torch.zeros((split_k_iters, M, N),
+    # dtype=torch.float32,
+    # device=input.device)
+    result = torch.zeros((M, N), dtype=torch.float32, device=input.device)
 
-    # print(f"scaled_mm_kernel:(before call)result.dtype = {result.dtype}")
+    has_scalar = lambda x: x.shape[0] == 1 and x.shape[1] == 1
+
+    if has_scalar(scale_a):
+        scalar = scale_a[0][0]
+        scale_a = scalar * torch.ones(
+            (M, 1), dtype=torch.float32, device=input.device)
+
+    if has_scalar(scale_b):
+        scalar = scale_b[0][0]
+        scale_b = scalar * torch.ones(
+            (N, 1), dtype=torch.float32, device=input.device)
+
+    input = prepare_matrix_for_triton(input)
+    weight = prepare_matrix_for_triton(weight)
+
     # A = input, B = weight, C = result
     # A = M x K, B = K x N, C = M x N
     scaled_mm_kernel[grid](input,
                            weight,
+                           scale_a,
+                           scale_b,
                            result,
                            M,
                            N,
                            K,
+                           input.stride(0),
+                           input.stride(1),
+                           weight.stride(0),
+                           weight.stride(1),
+                           result.stride(0),
+                           result.stride(1),
                            BLOCK_SIZE_M=block_size_m,
                            BLOCK_SIZE_N=block_size_n,
                            BLOCK_SIZE_K=block_size_k,
                            SPLIT_K=split_k_iters)
 
-    # print(f"scaled_mm_kernel:result.dtype = {result.dtype}")
-    result = result.sum(0, dtype=torch.float32)
+    # result = result.sum(0, dtype=torch.float32)
+    result = result.to(torch.float32)
 
     # print(f"=================result.shape = {result.shape}")
     return result
@@ -134,8 +192,9 @@ def scaled_mm_triton(input: torch.Tensor,
 # a.shape = torch.Size([15, 5120]), b.shape = torch.Size([5120, 5120]),scale_a.shape = torch.Size([15, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
 
 # a.shape = torch.Size([15, 5120]), b.shape = torch.Size([5120, 7680]),
-# scale_a.shape = torch.Size([15, 1]), 
+# scale_a.shape = torch.Size([15, 1]),
 # scale_b.shape = torch.Size([7680, 1]),bias.shape = None
+
 
 # a.shape = torch.Size([1, 17920]), a.dtype = torch.int8,
 # b.shape = torch.Size([17920, 5120]), b.dtye = torch.int8,
@@ -143,8 +202,33 @@ def scaled_mm_triton(input: torch.Tensor,
 # scale_b.shape = torch.Size([5120, 1]), scale_b.dtype = torch.float32,
 # bias.shape = None,bias.dtype = None
 def main():
+
+    which_test_fn = 0
+
+    golden_functions = [
+        lambda a, b, scale_a, scale_b: scale_a * scale_b.T * torch.mm(
+            a.to(torch.float32), b.to(torch.float32)),
+    ]
+    golden_fn = golden_functions[which_test_fn]
+
+    test_functions = [
+        lambda a, b, scale_a, scale_b: scaled_mm_triton(
+            a, b, scale_a, scale_b),
+    ]
+
+    test_fn = test_functions[which_test_fn]
+
     test_cases = [
         # M        K     N
+        # Toy cases
+        (32, 32, 32),
+        (1, 17, 15),
+        (15, 49, 19),
+        (64, 96, 32),
+        (27, 14, 103),
+        (15, 179, 51),
+        (15, 1792, 512),
+        # Realistic cases
         (1, 17920, 5120),
         (1, 5120, 35840),
         (1, 5120, 5120),
@@ -159,16 +243,23 @@ def main():
         (15, 5120, 7680),
     ]
 
+    comparisons = [torch.allclose]
+
+    comparison = comparisons[which_test_fn]
+
     import time
+
+    torch.manual_seed(0)
 
     for test_case in test_cases:
         M, K, N = test_case
         a = torch.randint(0, 127, (M, K), dtype=torch.int8, device='cuda')
         b = torch.randint(0, 127, (K, N), dtype=torch.int8, device='cuda')
-        print("=" * 5 + f" Testing: scaled_mm_triton M={M}, K={K}, N={N}" +
-              "=" * 5)
+        scale_a = torch.rand((M, 1), device='cuda')
+        scale_b = torch.rand((1, 1), device='cuda')
+        print("=" * 5 + f" Testing: mm_triton M={M}, K={K}, N={N}" + "=" * 5)
         start = time.time()
-        c_check = scaled_mm_triton(a, b)
+        c_check = test_fn(a, b, scale_a, scale_b)
         end = time.time()
 
         print(f"c_check time: {end - start}")
@@ -176,19 +267,24 @@ def main():
 
         a_cpu = a.cpu()
         b_cpu = b.cpu()
+        scale_a_cpu = scale_a.cpu()
+        scale_b_cpu = scale_b.cpu()
+
         start = time.time()
-        # c_actual = torch.mm(a_cpu.to(torch.float), b_cpu.to(torch.float))
-        c_actual = torch._int_mm(a_cpu, b_cpu)
+        c_actual = golden_fn(a_cpu, b_cpu, scale_a_cpu, scale_b_cpu)
         end = time.time()
 
-        # c_actual = c_actual.to(torch.int)
         print(f"c_actual time: {end - start}")
         print(f"c_actual.dtype = {c_actual.dtype}")
 
-        print(f"c_check = {c_check}")
-        print(f"c_actual = {c_actual}")
+        comparison_result = comparison(c_check.cpu(), c_actual)
+        print(f"compare?: {comparison_result}")
 
-        print(f"equal: {torch.equal(c_check.cpu(), c_actual)}")
+        if not comparison_result:
+            torch.set_printoptions(sci_mode=False)
+            print(f"c_check = {c_check}")
+            print(f"c_actual = {c_actual}")
+            break
 
 
 if __name__ == "__main__":
