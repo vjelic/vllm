@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-_PARTITION_SIZE_ROCM = 512
+_PARTITION_SIZE_ROCM = 256
 _ON_NAVI = "gfx1" in torch.cuda.get_device_properties("cuda").gcnArchName
 
 
@@ -610,22 +610,35 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             assert attn_metadata.num_encoder_tokens is not None
             num_prefill_tokens = attn_metadata.num_encoder_tokens
 
+        output = torch.empty_like(query)
         # Query for decode. KV is not needed because it is already cached.
         decode_query = query[num_prefill_tokens:]
-
         # QKV for prefill.
         query = query[:num_prefill_tokens]
+
         if key is not None and value is not None:
             key = key[:num_prefill_tokens]
             value = value[:num_prefill_tokens]
 
         if prefill_meta := attn_metadata.prefill_metadata:
-            output = torch.empty_like(query)
-            (query_seq_start_loc, query_max_seq_len, key_seq_start_loc,
-             key_max_seq_len, seq_lens,
-             causal_mask) = _get_seq_len_block_table_args(
-                 prefill_meta, attn_type)
-
+            # Prompt run.
+            # normal attention and DECODER
+            if attn_type == AttentionType.DECODER and (
+                    kv_cache.numel() == 0 or prefill_meta.block_tables is None
+                    or prefill_meta.block_tables.numel() == 0):
+                (query_seq_start_loc, query_max_seq_len, key_seq_start_loc,
+                 key_max_seq_len, seq_lens,
+                 causal_mask) = (prefill_meta.seq_start_loc,
+                                 prefill_meta.max_prefill_seq_len,
+                                 prefill_meta.seq_start_loc,
+                                 prefill_meta.max_prefill_seq_len,
+                                 attn_metadata.seq_lens, True)
+            # prefix-enabled attention and ENCODER/ENCODER_DECODER
+            else:
+                (query_seq_start_loc, query_max_seq_len, key_seq_start_loc,
+                 key_max_seq_len, seq_lens,
+                 causal_mask) = _get_seq_len_block_table_args(
+                     prefill_meta, attn_type)
             # Prompt run.
             if kv_cache.numel() == 0 or prefill_meta.block_tables.numel() == 0:
                 # triton attention
@@ -724,7 +737,6 @@ class ROCmFlashAttentionImpl(AttentionImpl):
         if decode_meta := attn_metadata.decode_metadata:
             # Decoding run.
             # Whether to use rocm custom paged attention or not
-            output = torch.empty_like(decode_query)
             num_seqs, num_heads, head_size = decode_query.shape
             block_size = value_cache.shape[3]
             gqa_ratio = num_heads // self.num_kv_heads
@@ -784,6 +796,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                     fp8_out_scale if cpa_fp8_out else None,
+                    _PARTITION_SIZE_ROCM,
                 )
                 if cpa_fp8_out:
                     return out.view(num_seqs, num_heads * head_size)
