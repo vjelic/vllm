@@ -52,11 +52,13 @@ def test_fused_moe(
     dtype: torch.dtype,
 ):
     a = torch.randn((m, k), device="cuda", dtype=dtype) / 10
-    w1 = torch.randn((e, 2 * n, k), device="cuda", dtype=dtype) / 10
+    w1 = torch.randn((e, n, k), device="cuda", dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device="cuda", dtype=dtype) / 10
 
     score = torch.randn((m, e), device="cuda", dtype=dtype)
     torch_output = torch_moe(a, w1, w2, score, topk)
+    print()
+    print(torch_output[0, :10])
 
     # Pad the input if use padding
     if envs.VLLM_MOE_PADDING:
@@ -65,6 +67,8 @@ def test_fused_moe(
         w2 = F.pad(w2, (0, 128), "constant", 0)
         torch.cuda.empty_cache()
     triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
+    print(triton_output[0, :10])
+    
     torch.testing.assert_close(triton_output, torch_output, atol=1e-2, rtol=0)
 
 @pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
@@ -84,7 +88,7 @@ def test_amd_moe_1(
     if n == k:
         pytest.skip()
     a = torch.randn((m, k), device='cuda', dtype=dtype) / 10
-    w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
+    w1 = torch.randn((e, n, k), device='cuda', dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
     if envs.VLLM_MOE_SHUFFLE:
         w1_shuffled = permute_weight(w1.data)
@@ -113,7 +117,7 @@ def test_amd_moe_2(
     if n == k:
         pytest.skip()
     a = torch.randn((m, k), device='cuda', dtype=dtype) / 10
-    w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
+    w1 = torch.randn((e, n, k), device='cuda', dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
     if envs.VLLM_MOE_SHUFFLE:
         w1_shuffled = permute_weight(w1.data)
@@ -221,7 +225,7 @@ def test_fused_marlin_moe(
                   if num_bits == 4 else scalar_types.uint8b128)
     dtype = torch.float16
     a = torch.randn((m, k), device="cuda", dtype=dtype) / 10
-    w1 = torch.randn((e, 2 * n, k), device="cuda", dtype=dtype) / 10
+    w1 = torch.randn((e, n, k), device="cuda", dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device="cuda", dtype=dtype) / 10
 
     w_ref1_l = []
@@ -319,7 +323,7 @@ def test_fused_marlin_moe(
         sorted_token_ids, _, _ = moe_align_block_size(topk_ids, block_size_m,
                                                       e)
 
-        max_workspace_size = ((m + 255) // 256) * (max(2 * n, k) // 64) * 16
+        max_workspace_size = ((m + 255) // 256) * (max(n, k) // 64) * 16
         workspace = torch.zeros(max_workspace_size,
                                 dtype=torch.int,
                                 device="cuda",
@@ -332,7 +336,7 @@ def test_fused_marlin_moe(
         opcheck(torch.ops._moe_C.marlin_gemm_moe,
                 (a, qweight1, sorted_token_ids, topk_weights, topk_ids,
                  scales1, zp, g_idx1, sort_indices1, workspace, quant_type, m,
-                 2 * n, k, True, e, topk, block_size_m, True, False))
+                 n, k, True, e, topk, block_size_m, True, False))
 
 
 @pytest.mark.skip("This test is here for the sake of debugging, "
