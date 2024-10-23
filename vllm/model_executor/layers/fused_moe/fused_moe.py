@@ -462,7 +462,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             use_fp8_w8a8=use_fp8_w8a8,
             use_int8_w8a16=use_int8_w8a16,
             **config,
-            enable_moe_lds_bypass=True
+            enable_moe_lds_bypass=False
         )
     else:
         NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
@@ -499,7 +499,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             compute_type=compute_type,
             use_fp8=use_fp8_w8a8,
             **config,
-            enable_moe_lds_bypass=True
+            enable_moe_lds_bypass=False
         )
 
 

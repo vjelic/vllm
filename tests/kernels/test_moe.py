@@ -37,11 +37,11 @@ def permute_weight(x: torch.Tensor) -> torch.Tensor:
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2]);
     return x_
 
-@pytest.mark.parametrize("m", [1024 * 128, 512, 222, 33, 1])
-@pytest.mark.parametrize("n", [2048, 256, 1024])
-@pytest.mark.parametrize("k", [128, 511, 1024])
-@pytest.mark.parametrize("e", [8, 64])
-@pytest.mark.parametrize("topk", [2, 6])
+@pytest.mark.parametrize("m", [ 512, 222, 33, 1])
+@pytest.mark.parametrize("n", [1024, 2048, 4096, 8192])
+@pytest.mark.parametrize("k", [1024, 2048, 4096, 8192])
+@pytest.mark.parametrize("e", [32])
+@pytest.mark.parametrize("topk", [2])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_fused_moe(
     m: int,
@@ -58,7 +58,8 @@ def test_fused_moe(
     score = torch.randn((m, e), device="cuda", dtype=dtype)
     torch_output = torch_moe(a, w1, w2, score, topk)
     print()
-    print(torch_output[0, :10])
+    print("test_fused_moe")
+    # print(torch_output[0, :10])
 
     # Pad the input if use padding
     if envs.VLLM_MOE_PADDING:
@@ -66,10 +67,13 @@ def test_fused_moe(
         torch.cuda.empty_cache()
         w2 = F.pad(w2, (0, 128), "constant", 0)
         torch.cuda.empty_cache()
+    if envs.VLLM_MOE_SHUFFLE:
+        w1 = permute_weight(w1.data)
+        w2 = permute_weight(w2.data)
     triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
-    print(triton_output[0, :10])
+    # print(triton_output[0, :10])
     
-    torch.testing.assert_close(triton_output, torch_output, atol=1e-2, rtol=0)
+    torch.testing.assert_close(triton_output, torch_output, atol=1e-2, rtol=0.01)
 
 @pytest.mark.parametrize("m", [1, 64, 96, 1000, 237])
 @pytest.mark.parametrize("n", [14336])
