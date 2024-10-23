@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import torch
 import torch.distributed as dist
@@ -23,10 +24,13 @@ from vllm.model_executor.layers.fused_moe import (fused_topk,
 
 def main(args):
     world_size = args.numGPU
+    start_time = time.time()
     try:
-        mp.spawn(wrapper, args=(args, ), nprocs=world_size, join=False)
+        mp.spawn(wrapper, args=(args, ), nprocs=world_size, join=True)
     except Exception as e:
         print(f"An error occurred during multiprocessing: {e}")
+    end_time = time.time()
+    print(f"Total time taken: {end_time - start_time:.2f} seconds")
 
 
 def wrapper(rank, args):
@@ -39,12 +43,15 @@ def wrapper(rank, args):
     ]
     try:
         for i in range(device_id, len(batches), args.numGPU):
-            tune_batch(batches[i], model=args.model, TP=args.modelTP)
+            tune_batch(batches[i], args)
     except Exception as e:
         print(f"An error occurred on device {device_id}: {e}")
 
 
-def tune_batch(bs, model, TP):
+def tune_batch(bs, args):
+    model = args.model
+    TP = args.modelTP
+    use_fp8 = args.use_fp8
     device_id = torch.distributed.get_rank()
 
     if model == '8x7B':
@@ -61,16 +68,16 @@ def tune_batch(bs, model, TP):
     tp_size = TP
     num_calls = 100
 
-    full_configs = get_full_tuning_space()
+    full_configs = get_full_tuning_space(use_fp8)
     M1 = bs * 2
     N1 = model_intermediate_size * 2 // tp_size
     K1 = d_model
-    prune_configs_1 = prune_configs(M1, N1, K1, full_configs)
+    prune_configs_1 = prune_configs(M1, N1, K1, full_configs, use_fp8)
 
     M2 = bs * 2
     N2 = d_model
     K2 = model_intermediate_size // tp_size
-    prune_configs_2 = prune_configs(M2, N2, K2, full_configs)
+    prune_configs_2 = prune_configs(M2, N2, K2, full_configs, use_fp8)
 
     configs = union_of_list_of_dicts(prune_configs_1, prune_configs_2)
 
@@ -87,7 +94,7 @@ def tune_batch(bs, model, TP):
             # warmup
             try:
                 run_timing(
-                    num_calls=num_calls,
+                    num_calls=5,
                     bs=bs,
                     d_model=d_model,
                     num_total_experts=num_total_experts,
@@ -95,8 +102,10 @@ def tune_batch(bs, model, TP):
                     tp_size=tp_size,
                     model_intermediate_size=model_intermediate_size,
                     config=config,
+                    use_fp8_w8a8=use_fp8,
                 )
-            except triton.runtime.autotuner.OutOfResources:
+            except Exception as e:
+                print(f"Error during warmup: {e}")
                 continue
 
             # benchmark
@@ -109,6 +118,7 @@ def tune_batch(bs, model, TP):
                 tp_size=tp_size,
                 model_intermediate_size=model_intermediate_size,
                 config=config,
+                use_fp8_w8a8=use_fp8,
             )
 
             kernel_dur_us = 1000 * kernel_dur_ms
@@ -117,9 +127,10 @@ def tune_batch(bs, model, TP):
                 best_config = config
                 best_time_us = kernel_dur_us
 
+    config_dtype = "fp8_w8a8" if use_fp8 else None
     filename = get_config_file_name(num_total_experts,
                                     model_intermediate_size // tp_size,
-                                    dtype=None)
+                                    dtype=config_dtype)
     print(f"writing config to file {filename}")
     existing_content = {}
     if os.path.exists(filename):
@@ -148,6 +159,7 @@ def run_timing(
     tp_size: int,
     model_intermediate_size: int,
     config,
+    use_fp8_w8a8: bool,
 ) -> float:
     shard_intermediate_size = model_intermediate_size // tp_size
 
@@ -180,6 +192,19 @@ def run_timing(
         ),
         dim=-1,
     )
+    w1_scale = None
+    w2_scale = None
+    a1_scale = None
+    a2_scale = None
+
+    if use_fp8_w8a8:
+        w1_scale = torch.randn(num_total_experts, dtype=torch.float32, device=device_)
+        w2_scale = torch.randn(num_total_experts, dtype=torch.float32, device=device_)
+        a1_scale = torch.randn(1, dtype=torch.float32, device=device_)
+        a2_scale = torch.randn(1, dtype=torch.float32, device=device_)
+
+        w1 = w1.to(torch.float8_e4m3fnuz)
+        w2 = w2.to(torch.float8_e4m3fnuz)
 
     ###### Stuff from fused moe ######
 
@@ -229,8 +254,8 @@ def run_timing(
             hidden_states,
             w1,
             intermediate_cache1,
-            None,  # a1_scale
-            None,  # w1_scale
+            a1_scale,
+            w1_scale,
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -241,7 +266,7 @@ def run_timing(
             config,
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
-            use_fp8_w8a8=False,
+            use_fp8_w8a8=use_fp8_w8a8,
             use_int8_w8a16=False)
 
         ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
@@ -250,8 +275,8 @@ def run_timing(
             intermediate_cache2,
             w2,
             intermediate_cache3,
-            None,  # a2_scale
-            None,  # w2_scale
+            a2_scale,
+            w2_scale,
             topk_weights,
             topk_ids,
             sorted_token_ids,
@@ -262,7 +287,7 @@ def run_timing(
             config,
             compute_type=(tl.bfloat16 if hidden_states.dtype == torch.bfloat16
                           else tl.float16),
-            use_fp8_w8a8=False,
+            use_fp8_w8a8=use_fp8_w8a8,
             use_int8_w8a16=False)
 
     end_event.record()
@@ -294,6 +319,11 @@ if __name__ == "__main__":
         help="Total number of GPUs to use for tuning",
         required=True,
     )
+    parser.add_argument(
+        "--use_fp8",
+        action="store_true",
+        help="Flag to indicate whether to use FP8 tuning",
+    )
     args = parser.parse_args()
     if "LOCAL_RANK" not in os.environ:
         print("Please use torchrun to launch this multi-gpu script. E.g:")
@@ -305,4 +335,5 @@ if __name__ == "__main__":
     print(f"Running tuning for {args.model} model")
     print(f"Model TP is set to: {args.modelTP}")
     print(f"GPUs being used for tuning: {args.numGPU}")
+    print(f"Using FP8: {args.use_fp8}")
     sys.exit(main(args))

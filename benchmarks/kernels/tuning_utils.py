@@ -2,11 +2,13 @@ from itertools import product
 
 
 ## Utilize method from rocm/Triton tuning script
-def get_full_tuning_space():
+def get_full_tuning_space(use_fp8):
     configs = []
 
     block_mn_range = [16, 32, 64, 128, 256]
     block_k_range = [16, 32, 64, 128, 256]
+    if use_fp8:
+        block_k_range.remove(16)  # BLOCK_K=16 not supported for fp8
     # split_k_range = [1] #, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8, 16, 32]
@@ -15,8 +17,8 @@ def get_full_tuning_space():
     # other values in the future
     num_stage_range = [0]
     waves_per_eu_range = [0]
-    matrix_instr_nonkdim_range = [16, 32]
-    kpack_range = [1, 2]
+    matrix_instr_nonkdim_range = [] if use_fp8 else [16, 32]
+    kpack_range = [] if use_fp8 else [1, 2]
 
     param_ranges = {
         "BLOCK_SIZE_M": block_mn_range,
@@ -26,9 +28,11 @@ def get_full_tuning_space():
         "num_warps": num_warps_range,
         "num_stages": num_stage_range,
         "waves_per_eu": waves_per_eu_range,
-        "matrix_instr_nonkdim": matrix_instr_nonkdim_range,
-        "kpack": kpack_range,
     }
+
+    if not use_fp8:
+        param_ranges["matrix_instr_nonkdim"] = matrix_instr_nonkdim_range
+        param_ranges["kpack"] = kpack_range
 
     keys, values = zip(*param_ranges.items())
     for config_values in product(*values):
@@ -39,10 +43,10 @@ def get_full_tuning_space():
 
 
 ## Utilize method from rocm/Triton tuning script
-def prune_configs(M, N, K, configs):
+def prune_configs(M, N, K, configs, is_fp8=False):
     pruned_configs = []
-    elemBytes_a = 2  # [DV Note] Hard-coded for float16 (2 bytes)
-    elemBytes_b = 2  # [DV Note] Hard-coded for float16 (2 bytes)
+    elemBytes_a = 1 if is_fp8 else 2  # Assuming fp16 or fp8 cases only
+    elemBytes_b = 1 if is_fp8 else 2  # Assuming fp16 or fp8 cases only
 
     mfma = 16 if M < 32 or N < 32 else 32
 
@@ -56,10 +60,11 @@ def prune_configs(M, N, K, configs):
         BLOCK_SIZE_N = config.get("BLOCK_SIZE_N")
         BLOCK_SIZE_K = config.get("BLOCK_SIZE_K")
         num_warps = config.get("num_warps")
-        matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
-        # kpack = config.get("kpack")
-        if matrix_instr_nonkdim > mfma:
-            continue
+
+        if not is_fp8:
+            matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
+            if matrix_instr_nonkdim > mfma:
+                continue
         if mfma == 4 and BLOCK_SIZE_K < 64:
             continue
         # some layouts could not work properly in case
@@ -68,13 +73,14 @@ def prune_configs(M, N, K, configs):
             continue
         SPLIT_K = 1  # config.get("SPLIT_K")
         GROUP_M = config.get("GROUP_SIZE_M")
-        if (matrix_instr_nonkdim > BLOCK_SIZE_M
-                or matrix_instr_nonkdim > BLOCK_SIZE_N):
-            continue
-        if matrix_instr_nonkdim >= M and matrix_instr_nonkdim != BLOCK_SIZE_M:
-            continue
-        if matrix_instr_nonkdim >= N and matrix_instr_nonkdim != BLOCK_SIZE_N:
-            continue
+        if not is_fp8:
+            if (matrix_instr_nonkdim > BLOCK_SIZE_M
+                    or matrix_instr_nonkdim > BLOCK_SIZE_N):
+                continue
+            if matrix_instr_nonkdim >= M and matrix_instr_nonkdim != BLOCK_SIZE_M:
+                continue
+            if matrix_instr_nonkdim >= N and matrix_instr_nonkdim != BLOCK_SIZE_N:
+                continue
         # Skip BLOCK_SIZE that is too large compare to M/N
         # unless BLOCK_SIZE is already small enough
         if M * 2 < BLOCK_SIZE_M and BLOCK_SIZE_M != 16:
