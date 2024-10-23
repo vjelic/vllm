@@ -728,9 +728,9 @@ def fused_experts(hidden_states: torch.Tensor,
     intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
                                       device=hidden_states.device,
                                       dtype=hidden_states.dtype)
-    intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
+    # intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N),
+    #                                   device=hidden_states.device,
+    #                                   dtype=hidden_states.dtype)
     intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
                                       device=hidden_states.device,
                                       dtype=hidden_states.dtype)
@@ -786,7 +786,13 @@ def fused_experts(hidden_states: torch.Tensor,
                                 use_fp8_w8a8=use_fp8_w8a8,
                                 use_int8_w8a16=use_int8_w8a16)
 
-        ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
+        # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
+
+        # ByteDance
+        intermediate_cache2 = torch.nn.functional.gelu(intermediate_cache1).view((M * topk_ids.shape[1], N))
+        # temp_tensor = intermediate_cache2.view_as(output_tensor)
+        # temp_tensor.copy_(output_tensor)
+
 
         invoke_fused_moe_kernel(intermediate_cache2,
                                 w2,
