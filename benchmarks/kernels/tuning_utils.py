@@ -77,9 +77,11 @@ def prune_configs(M, N, K, configs, is_fp8=False):
             if (matrix_instr_nonkdim > BLOCK_SIZE_M
                     or matrix_instr_nonkdim > BLOCK_SIZE_N):
                 continue
-            if matrix_instr_nonkdim >= M and matrix_instr_nonkdim != BLOCK_SIZE_M:
+            if (matrix_instr_nonkdim >= M
+                    and matrix_instr_nonkdim != BLOCK_SIZE_M):
                 continue
-            if matrix_instr_nonkdim >= N and matrix_instr_nonkdim != BLOCK_SIZE_N:
+            if (matrix_instr_nonkdim >= N
+                    and matrix_instr_nonkdim != BLOCK_SIZE_N):
                 continue
         # Skip BLOCK_SIZE that is too large compare to M/N
         # unless BLOCK_SIZE is already small enough

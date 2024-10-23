@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-import triton
 import triton.language as tl
 from natsort import natsorted
 from tqdm import tqdm
@@ -198,8 +197,12 @@ def run_timing(
     a2_scale = None
 
     if use_fp8_w8a8:
-        w1_scale = torch.randn(num_total_experts, dtype=torch.float32, device=device_)
-        w2_scale = torch.randn(num_total_experts, dtype=torch.float32, device=device_)
+        w1_scale = torch.randn(num_total_experts,
+                               dtype=torch.float32,
+                               device=device_)
+        w2_scale = torch.randn(num_total_experts,
+                               dtype=torch.float32,
+                               device=device_)
         a1_scale = torch.randn(1, dtype=torch.float32, device=device_)
         a2_scale = torch.randn(1, dtype=torch.float32, device=device_)
 
