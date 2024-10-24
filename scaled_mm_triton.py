@@ -4,6 +4,7 @@ import triton.language as tl
 
 from typing import Optional, Type
 
+
 def prepare_matrix_for_triton(x: torch.Tensor):
     strides = x.stride()
     sizes = x.shape
@@ -197,12 +198,12 @@ def scaled_mm_triton(input: torch.Tensor,
 # scale_a.shape = torch.Size([15, 1]),
 # scale_b.shape = torch.Size([7680, 1]),bias.shape = None
 
-
 # a.shape = torch.Size([1, 17920]), a.dtype = torch.int8,
 # b.shape = torch.Size([17920, 5120]), b.dtye = torch.int8,
 # scale_a.shape = torch.Size([1, 1]), scale_a.dtype = torch.float32,
 # scale_b.shape = torch.Size([5120, 1]), scale_b.dtype = torch.float32,
 # bias.shape = None,bias.dtype = None
+
 
 def scaled_mm_torch(a: torch.Tensor,
                     b: torch.Tensor,
@@ -219,6 +220,7 @@ def scaled_mm_torch(a: torch.Tensor,
 
     return out
 
+
 def main():
 
     which_test_fn = 0
@@ -226,8 +228,8 @@ def main():
     out_dtype = torch.float16
 
     golden_functions = [
-        lambda a, b, scale_a, scale_b, bias: scaled_mm_torch(a, b, scale_a,
-            scale_b, out_dtype, bias)
+        lambda a, b, scale_a, scale_b, bias: scaled_mm_torch(
+            a, b, scale_a, scale_b, out_dtype, bias)
     ]
     golden_fn = golden_functions[which_test_fn]
 
@@ -262,7 +264,7 @@ def main():
         (15, 5120, 7680),
     ]
 
-    use_bias = False 
+    use_bias = False
 
     comparisons = [torch.allclose]
 
