@@ -584,7 +584,7 @@ def cutlass_scaled_mm(a: torch.Tensor,
 
         # ab = torch.mm(a.to(torch.float32), b.to(torch.float32))
         # out = torch.mm(diag_a, torch.mm(ab, diag_b))
-        out = scaled_mm_triton(a, b, scale_a, scale_b, out_dtype)
+        out = scaled_mm_triton(a, b, scale_a, scale_b, out_dtype, bias)
 
         # golden = scaled_mm_torch(a, b, scale_a, scale_b, out_dtype, bias)
         # if not torch.allclose(out, golden):
