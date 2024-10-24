@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+from typing import Optional, Type
 
 def prepare_matrix_for_triton(x: torch.Tensor):
     strides = x.stride()
@@ -103,7 +104,6 @@ def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, M, N, K,
               stride_cn * offs_cn[None, :])
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
-    c = c.to(tl.float32)
     tl.store(c_ptrs, c, mask=c_mask)
 
 
@@ -114,6 +114,8 @@ def scaled_mm_triton(input: torch.Tensor,
                      weight: torch.Tensor,
                      scale_a: torch.Tensor,
                      scale_b: torch.Tensor,
+                     out_dtype: Type[torch.dtype],
+                     bias: Optional[torch.Tensor] = None,
                      block_size_m: int = 32,
                      block_size_n: int = 32,
                      block_size_k: int = 32) -> torch.Tensor:
@@ -134,7 +136,7 @@ def scaled_mm_triton(input: torch.Tensor,
     # result = torch.zeros((split_k_iters, M, N),
     # dtype=torch.float32,
     # device=input.device)
-    result = torch.zeros((M, N), dtype=torch.float32, device=input.device)
+    result = torch.empty((M, N), dtype=out_dtype, device=input.device)
 
     has_scalar = lambda x: x.shape[0] == 1 and x.shape[1] == 1
 
@@ -173,7 +175,7 @@ def scaled_mm_triton(input: torch.Tensor,
                            SPLIT_K=split_k_iters)
 
     # result = result.sum(0, dtype=torch.float32)
-    result = result.to(torch.float32)
+    # result = result.to(torch.float32)
 
     # print(f"=================result.shape = {result.shape}")
     return result
@@ -201,21 +203,38 @@ def scaled_mm_triton(input: torch.Tensor,
 # scale_a.shape = torch.Size([1, 1]), scale_a.dtype = torch.float32,
 # scale_b.shape = torch.Size([5120, 1]), scale_b.dtype = torch.float32,
 # bias.shape = None,bias.dtype = None
+
+def scaled_mm_torch(a: torch.Tensor,
+                    b: torch.Tensor,
+                    scale_a: torch.Tensor,
+                    scale_b: torch.Tensor,
+                    out_dtype: Type[torch.dtype],
+                    bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    out = torch.mm(a.to(torch.float32), b.to(torch.float32))
+    out = scale_a * out
+    out = scale_b.T * out
+    out = out.to(out_dtype)
+    if bias is not None:
+        out = out + bias
+
+    return out
+
 def main():
 
     which_test_fn = 0
 
+    out_dtype = torch.float16
+
     golden_functions = [
-        lambda a, b, scale_a, scale_b: scale_a * scale_b.T * torch.mm(
-            a.to(torch.float32), b.to(torch.float32)),
+        lambda a, b, scale_a, scale_b, bias: scaled_mm_torch(a, b, scale_a,
+            scale_b, out_dtype, bias)
     ]
     golden_fn = golden_functions[which_test_fn]
 
     test_functions = [
-        lambda a, b, scale_a, scale_b: scaled_mm_triton(
-            a, b, scale_a, scale_b),
+        lambda a, b, scale_a, scale_b, bias: scaled_mm_triton(
+            a, b, scale_a, scale_b, out_dtype, bias),
     ]
-
     test_fn = test_functions[which_test_fn]
 
     test_cases = [
@@ -243,6 +262,8 @@ def main():
         (15, 5120, 7680),
     ]
 
+    use_bias = False 
+
     comparisons = [torch.allclose]
 
     comparison = comparisons[which_test_fn]
@@ -251,15 +272,23 @@ def main():
 
     torch.manual_seed(0)
 
+    test_out_dtype = torch.bfloat16
+
     for test_case in test_cases:
         M, K, N = test_case
         a = torch.randint(0, 127, (M, K), dtype=torch.int8, device='cuda')
         b = torch.randint(0, 127, (K, N), dtype=torch.int8, device='cuda')
         scale_a = torch.rand((M, 1), device='cuda')
         scale_b = torch.rand((1, 1), device='cuda')
+        bias = None
+        if use_bias:
+            bias = torch.rand((N, ), device=device, dtype=out_dtype) * 10
+
         print("=" * 5 + f" Testing: mm_triton M={M}, K={K}, N={N}" + "=" * 5)
+
+        # Compute and time test result.
         start = time.time()
-        c_check = test_fn(a, b, scale_a, scale_b)
+        c_check = test_fn(a, b, scale_a, scale_b, bias)
         end = time.time()
 
         print(f"c_check time: {end - start}")
@@ -269,14 +298,17 @@ def main():
         b_cpu = b.cpu()
         scale_a_cpu = scale_a.cpu()
         scale_b_cpu = scale_b.cpu()
+        bias_cpu = None if bias is None else bias.cpu()
 
+        # Compute and time golden result.
         start = time.time()
-        c_actual = golden_fn(a_cpu, b_cpu, scale_a_cpu, scale_b_cpu)
+        c_actual = golden_fn(a_cpu, b_cpu, scale_a_cpu, scale_b_cpu, bias_cpu)
         end = time.time()
 
         print(f"c_actual time: {end - start}")
         print(f"c_actual.dtype = {c_actual.dtype}")
 
+        # Drrruuumrolll...
         comparison_result = comparison(c_check.cpu(), c_actual)
         print(f"compare?: {comparison_result}")
 
