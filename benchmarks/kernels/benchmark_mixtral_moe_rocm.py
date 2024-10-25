@@ -22,26 +22,48 @@ def main(args):
     for bs in [
             1,
             2,
+            3,
             4,
+            5,
+            6,
+            7,
             8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
             16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
             24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
             32,
+            40,
             48,
+            56,
             64,
+            72,
+            80,
+            88,
             96,
+            104,
+            112,
+            120,
             128,
-            256,
-            512,
-            1024,
-            1536,
-            2048,
-            3072,
-            4096,
-            8192,
-            16384,
-            18432,
-            20480,
     ]:
         run_grid(bs, model=args.model, TP=args.TP)
 
@@ -112,17 +134,17 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
 
 
 def run_grid(bs, model, TP):
-    if model == '8x7B':
-        d_model = 4096
-        model_intermediate_size = 14336
-    elif model == '8x22B':
-        d_model = 6144
-        model_intermediate_size = 16384
+    if model == 'BD_Model_1':
+        d_model = 8192
+        model_intermediate_size = 8192
+    elif model == 'BD_Model_2':
+        d_model = 8192
+        model_intermediate_size = 32768
     else:
         raise ValueError(f'Unsupported Mixtral model {model}')
 
-    num_total_experts = 8
-    top_k = 2
+    num_total_experts = 32
+    top_k = 5
     tp_size = TP
     num_calls = 100
 
@@ -131,7 +153,7 @@ def run_grid(bs, model, TP):
 
     full_configs = get_full_tuning_space()
     M1 = bs * 2
-    N1 = model_intermediate_size * 2 // tp_size
+    N1 = model_intermediate_size // tp_size
     K1 = d_model
     prune_configs_1 = prune_configs(M1, N1, K1, full_configs)
 
@@ -221,11 +243,11 @@ def run_timing(
     hidden_states = torch.rand(
         (bs, d_model),
         device="cuda",
-        dtype=torch.float16,
+        dtype=torch.bfloat16,
     )
 
     w1 = torch.rand(
-        (num_total_experts, 2 * shard_intermediate_size, d_model+128),
+        (num_total_experts, shard_intermediate_size, d_model+128),
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
@@ -260,7 +282,7 @@ def run_timing(
     ]
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
-    topk_ = 2
+    topk_ = 5
     topk_weights = torch.empty(M,
                                topk_,
                                dtype=torch.float32,
@@ -289,7 +311,7 @@ def run_timing(
         dtype=hidden_states.dtype,
     )
     intermediate_cache2 = torch.empty(
-        (M * topk_ids.shape[1], N // 2),
+        (M * topk_ids.shape[1], N ),
         device=hidden_states.device,
         dtype=hidden_states.dtype,
     )
@@ -329,7 +351,7 @@ def run_timing(
             use_int8_w8a16=False
         )
 
-        ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
+        intermediate_cache2=torch.nn.functional.gelu(intermediate_cache1).view((M * topk_ids.shape[1], N))
 
         invoke_fused_moe_kernel(
             intermediate_cache2,
@@ -373,7 +395,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--TP",
         type=int,
-        choices=[16, 8, 4, 2, 1],
+        choices=[8, 4, 2, 1],
         help="Specify the TP value that the actual model will run on",
         required=True,
     )
@@ -385,7 +407,7 @@ if __name__ == "__main__":
     )
     parser.add_argument('--model',
                         type=str,
-                        choices=['8x7B', '8x22B'],
+                        choices=['BD_Model_1', 'BD_Model_2'],
                         help='The Mixtral model to benchmark')
 
     args = parser.parse_args()
