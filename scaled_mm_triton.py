@@ -5,6 +5,21 @@ import triton.language as tl
 from typing import Optional, Type
 
 
+# This function handles some cases that can cause certain failure, e.g.
+# a tensor that has shape = (72, 48) but stride = (5120, 1).  It can happen,
+# for example by saving a tensor using torch.save() and then adjusting its
+# size afterwards and then trying to use it.  Unfortunately,
+# torch.is_contiguous() doesn't help since a transposed tensor doesn't return
+# True, even though it can be stored contiguously in memory.
+#
+# There is a way to handle this case, which I learned about from here:
+#
+# https://github.com/pytorch/pytorch/blob/
+# a874ec85e83cfe75e7238296022d53d7e20860df/aten/src/ATen/native/
+# cuda/Blas.cpp#L58
+#
+# This doesn't happen very often fortunately, because the only solution is
+# inefficient.
 def prepare_matrix_for_triton(x: torch.Tensor):
     strides = x.stride()
     sizes = x.shape
@@ -18,8 +33,9 @@ def prepare_matrix_for_triton(x: torch.Tensor):
 @triton.jit
 def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, bias_ptr,
                      M, N, K, stride_am, stride_ak, stride_bk, stride_bn,
-                     stride_cm, stride_cn, BLOCK_SIZE_M: tl.constexpr,
-                     BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+                     stride_cm, stride_cn, ACCUMULATOR_DTYPE: tl.constexpr,
+                     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr,
+                     BLOCK_SIZE_K: tl.constexpr,
                      BLOCK_SIZE_SCALE_A: tl.constexpr,
                      BLOCK_SIZE_SCALE_B: tl.constexpr):
     pid = tl.program_id(axis=0)
@@ -29,7 +45,7 @@ def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, bias_ptr,
     pid_m = pid // num_pid_n
     pid_n = pid % num_pid_n
 
-    accumulator_dtype = tl.int32
+    accumulator_dtype = ACCUMULATOR_DTYPE
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N),
                            dtype=accumulator_dtype)
 
@@ -140,12 +156,18 @@ def scaled_mm_triton(input: torch.Tensor,
 
     assert N > 0 and K > 0 and M > 0
     assert weight.shape[0] == K
+    assert input.dtype == weight.dtype
+    assert scale_a.dtype == scale_b.dtype and scale_a.is_floating_point()
+    assert scale_a.shape == torch.Size([1, 1]) or scale_a.shape == torch.Size(
+        [M, 1])
+    assert scale_b.shape == torch.Size([1, 1]) or scale_b.shape == torch.Size(
+        [N, 1])
+    assert torch.empty((1, 1), dtype=out_dtype).is_floating_point()
+    assert bias is None or bias.is_floating_point()
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(
         N, META['BLOCK_SIZE_N']), )
 
-    # dtype=torch.float32,
-    # device=input.device)
     result = torch.empty((M, N), dtype=out_dtype, device=input.device)
 
     has_scalar = lambda x: x.shape[0] == 1 and x.shape[1] == 1
@@ -155,6 +177,8 @@ def scaled_mm_triton(input: torch.Tensor,
 
     input = prepare_matrix_for_triton(input)
     weight = prepare_matrix_for_triton(weight)
+
+    accumulator_dtype = tl.float32 if input.is_floating_point() else tl.int32
 
     # A = input, B = weight, C = result
     # A = M x K, B = K x N, C = M x N
@@ -173,6 +197,7 @@ def scaled_mm_triton(input: torch.Tensor,
                            weight.stride(1),
                            result.stride(0),
                            result.stride(1),
+                           tl.int32,
                            BLOCK_SIZE_M=block_size_m,
                            BLOCK_SIZE_N=block_size_n,
                            BLOCK_SIZE_K=block_size_k,
