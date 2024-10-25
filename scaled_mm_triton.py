@@ -19,7 +19,9 @@ def prepare_matrix_for_triton(x: torch.Tensor):
 def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, bias_ptr,
                      M, N, K, stride_am, stride_ak, stride_bk, stride_bn,
                      stride_cm, stride_cn, BLOCK_SIZE_M: tl.constexpr,
-                     BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr):
+                     BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+                     BLOCK_SIZE_SCALE_A: tl.constexpr,
+                     BLOCK_SIZE_SCALE_B: tl.constexpr):
     pid = tl.program_id(axis=0)
 
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
@@ -48,10 +50,21 @@ def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, bias_ptr,
     offsets_b = (stride_bk * offsets_k[:, None] +
                  stride_bn * offsets_bn[None, :])
 
-    offsets_scale_a = offsets_am[:, None] + tl.arange(0, 1)[None, :].to(
-        tl.int64)
-    offsets_scale_b = offsets_bn[:, None] + tl.arange(0, 1)[None, :].to(
-        tl.int64)
+    # NOTE: BLOCK_SIZE_SCALE_A could be 1 or BLOCK_SIZE_M, so need to create
+    # appropriate offsets and masks for each case. Same goes for
+    # BLOCK_SIZE_SCALE_B.
+    offsets_scale_am = (tl.arange(0, BLOCK_SIZE_SCALE_A) +
+                        (BLOCK_SIZE_SCALE_A > 1) * pid_m * BLOCK_SIZE_M)
+    masks_scale_am = offsets_scale_am < M
+
+    offsets_scale_bn = (tl.arange(0, BLOCK_SIZE_SCALE_B) +
+                        (BLOCK_SIZE_SCALE_B > 1) * pid_n * BLOCK_SIZE_N)
+    masks_scale_bn = offsets_scale_bn < N
+
+    offsets_scale_a = (offsets_scale_am[:, None].to(tl.int64) +
+                       tl.arange(0, 1)[None, :].to(tl.int64))
+    offsets_scale_b = (offsets_scale_bn[:, None].to(tl.int64) +
+                       tl.arange(0, 1)[None, :].to(tl.int64))
 
     a_ptrs = a_ptr + offsets_a
     b_ptrs = b_ptr + offsets_b
@@ -75,12 +88,17 @@ def scaled_mm_kernel(a_ptr, b_ptr, scale_a_ptr, scale_b_ptr, c_ptr, bias_ptr,
         b_ptrs += BLOCK_SIZE_K * stride_bk
 
     # Apply scale at end.
-    masks_scale_a = masks_am[:, None] & (tl.arange(0, 1) < 1)[:, None]
+    masks_scale_a = masks_scale_am[:, None] & (tl.arange(0, 1) < 1)[:, None]
     scale_a = tl.load(scale_a_ptrs, masks_scale_a)
+    # Need to broadcast to the appropriate size, if scale_a is already
+    # (BLOCK_SIZE_M, 1) then it will broadcast to its own shape. Same goes
+    # for scale_b below.
+    scale_a = scale_a.broadcast_to((BLOCK_SIZE_M, 1))
     accumulator = scale_a * accumulator.to(tl.float32)
 
-    masks_scale_b = masks_bn[:, None] & (tl.arange(0, 1) < 1)[None, :]
+    masks_scale_b = masks_scale_bn[:, None] & (tl.arange(0, 1) < 1)[None, :]
     scale_b = tl.load(scale_b_ptrs, masks_scale_b)
+    scale_b = scale_b.broadcast_to((BLOCK_SIZE_N, 1))
     accumulator = scale_b.T * accumulator.to(tl.float32)
 
     # Convert to output format.
@@ -132,13 +150,8 @@ def scaled_mm_triton(input: torch.Tensor,
 
     has_scalar = lambda x: x.shape[0] == 1 and x.shape[1] == 1
 
-    if has_scalar(scale_a):
-        scale_a = scale_a[0][0] * torch.ones(
-            (M, 1), dtype=torch.float32, device=input.device)
-
-    if has_scalar(scale_b):
-        scale_b = scale_b[0][0] * torch.ones(
-            (M, 1), dtype=torch.float32, device=input.device)
+    block_size_sa = 1 if has_scalar(scale_a) else block_size_m
+    block_size_sb = 1 if has_scalar(scale_b) else block_size_n
 
     input = prepare_matrix_for_triton(input)
     weight = prepare_matrix_for_triton(weight)
@@ -162,36 +175,11 @@ def scaled_mm_triton(input: torch.Tensor,
                            result.stride(1),
                            BLOCK_SIZE_M=block_size_m,
                            BLOCK_SIZE_N=block_size_n,
-                           BLOCK_SIZE_K=block_size_k)
+                           BLOCK_SIZE_K=block_size_k,
+                           BLOCK_SIZE_SCALE_A=block_size_sa,
+                           BLOCK_SIZE_SCALE_B=block_size_sb)
 
-    # result = result.sum(0, dtype=torch.float32)
-    # result = result.to(torch.float32)
-
-    # print(f"=================result.shape = {result.shape}")
     return result
-
-
-# a.shape = torch.Size([1, 17920]), b.shape = torch.Size([17920, 5120]),scale_a.shape = torch.Size([1, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-# a.shape = torch.Size([1, 5120]), b.shape = torch.Size([5120, 35840]),scale_a.shape = torch.Size([1, 1]), scale_b.shape = torch.Size([35840, 1]),bias.shape = None
-# a.shape = torch.Size([1, 5120]), b.shape = torch.Size([5120, 5120]),scale_a.shape = torch.Size([1, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-# a.shape = torch.Size([1, 5120]), b.shape = torch.Size([5120, 7680]),scale_a.shape = torch.Size([1, 1]), scale_b.shape = torch.Size([7680, 1]),bias.shape = None
-# a.shape = torch.Size([131072, 17920]), b.shape = torch.Size([17920, 5120]),scale_a.shape = torch.Size([131072, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-# a.shape = torch.Size([131072, 5120]), b.shape = torch.Size([5120, 35840]),scale_a.shape = torch.Size([131072, 1]), scale_b.shape = torch.Size([35840, 1]),bias.shape = None
-# a.shape = torch.Size([131072, 5120]), b.shape = torch.Size([5120, 5120]),scale_a.shape = torch.Size([131072, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-# a.shape = torch.Size([131072, 5120]), b.shape = torch.Size([5120, 7680]),scale_a.shape = torch.Size([131072, 1]), scale_b.shape = torch.Size([7680, 1]),bias.shape = None
-# a.shape = torch.Size([15, 17920]), b.shape = torch.Size([17920, 5120]),scale_a.shape = torch.Size([15, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-# a.shape = torch.Size([15, 5120]), b.shape = torch.Size([5120, 35840]),scale_a.shape = torch.Size([15, 1]), scale_b.shape = torch.Size([35840, 1]),bias.shape = None
-# a.shape = torch.Size([15, 5120]), b.shape = torch.Size([5120, 5120]),scale_a.shape = torch.Size([15, 1]), scale_b.shape = torch.Size([5120, 1]),bias.shape = None
-
-# a.shape = torch.Size([15, 5120]), b.shape = torch.Size([5120, 7680]),
-# scale_a.shape = torch.Size([15, 1]),
-# scale_b.shape = torch.Size([7680, 1]),bias.shape = None
-
-# a.shape = torch.Size([1, 17920]), a.dtype = torch.int8,
-# b.shape = torch.Size([17920, 5120]), b.dtye = torch.int8,
-# scale_a.shape = torch.Size([1, 1]), scale_a.dtype = torch.float32,
-# scale_b.shape = torch.Size([5120, 1]), scale_b.dtype = torch.float32,
-# bias.shape = None,bias.dtype = None
 
 
 def scaled_mm_torch(a: torch.Tensor,
@@ -256,7 +244,7 @@ def main():
     use_bias = True
 
     use_scalar_scale_a = True
-    use_scalar_scale_b = True
+    use_scalar_scale_b = False
 
     comparisons = [torch.allclose]
 
