@@ -266,10 +266,10 @@ def main():
         (15, 5120, 7680),
     ]
 
-    use_bias = True
+    use_bias = False
 
-    use_scalar_scale_a = True
-    use_scalar_scale_b = False
+    # use_scalar_scale_a = False
+    # use_scalar_scale_b = False
 
     comparisons = [torch.allclose]
 
@@ -279,63 +279,99 @@ def main():
 
     torch.manual_seed(0)
 
-    test_out_dtype = torch.bfloat16
+    is_floating_point_type = lambda t: torch.tensor([1, 1], dtype=t
+                                                    ).is_floating_point()
+    for in_dtype in [
+            torch.int8, torch.float8_e5m2, torch.float16, torch.bfloat16,
+            torch.float32
+    ]:
+        for out_dtype in [torch.float16, torch.bfloat16, torch.float32]:
+            for use_scalar_scale_a in [True, False]:
+                for use_scalar_scale_b in [True, False]:
+                    for test_case in test_cases:
+                        M, K, N = test_case
+                        if is_floating_point_type(in_dtype):
+                            a = (0.25 * torch.rand(
+                                (M, K), dtype=torch.float32,
+                                device='cuda')).to(in_dtype)
+                            b = (0.25 * torch.rand(
+                                (K, N), dtype=torch.float32,
+                                device='cuda')).to(in_dtype)
+                        else:
+                            a = torch.randint(-32,
+                                              32, (M, K),
+                                              dtype=in_dtype,
+                                              device='cuda')
+                            b = torch.randint(-32,
+                                              32, (K, N),
+                                              dtype=in_dtype,
+                                              device='cuda')
 
-    for test_case in test_cases:
-        M, K, N = test_case
-        a = torch.randint(0, 127, (M, K), dtype=torch.int8, device='cuda')
-        b = torch.randint(0, 127, (K, N), dtype=torch.int8, device='cuda')
+                        if use_scalar_scale_a:
+                            scale_a = torch.rand((1, 1), device='cuda')
+                        else:
+                            scale_a = 0.25 * torch.rand((M, 1), device='cuda')
 
-        if use_scalar_scale_a:
-            scale_a = torch.rand((1, 1), device='cuda')
-        else:
-            scale_a = torch.rand((M, 1), device='cuda')
+                        if use_scalar_scale_b:
+                            scale_b = torch.rand((1, 1), device='cuda')
+                        else:
+                            scale_b = 0.25 * torch.rand((1, 1), device='cuda')
 
-        if use_scalar_scale_b:
-            scale_b = torch.rand((1, 1), device='cuda')
-        else:
-            scale_b = torch.rand((1, 1), device='cuda')
+                        bias = None
+                        if use_bias:
+                            bias = torch.rand((N, ),
+                                              device='cuda',
+                                              dtype=out_dtype)
 
-        bias = None
-        if use_bias:
-            bias = torch.rand((N, ), device='cuda', dtype=out_dtype) * 10
+                        print(
+                            f"=" * 5 + f""
+                            f" Testing: in_dtype = {in_dtype} out_dtype={out_dtype}, "
+                            f" scalar_a = {use_scalar_scale_a}"
+                            f", scalar_b = {use_scalar_scale_b}, M={M},"
+                            f"K={K}, N={N}"
+                            f" " + f"=" * 5)
 
-        print("=" * 5 + f" Testing: mm_triton M={M}, K={K}, N={N}" + "=" * 5)
+                        # Compute and time test result.
+                        start = time.time()
+                        c_check = test_fn(a, b, scale_a, scale_b, bias)
+                        end = time.time()
 
-        # Compute and time test result.
-        start = time.time()
-        c_check = test_fn(a, b, scale_a, scale_b, bias)
-        end = time.time()
+                        print(f"c_check time: {end - start}")
+                        print(f"c_check.dtype = {c_check.dtype}")
 
-        print(f"c_check time: {end - start}")
-        print(f"c_check.dtype = {c_check.dtype}")
+                        a_cpu = a.cpu()
+                        b_cpu = b.cpu()
+                        scale_a_cpu = scale_a.cpu()
+                        scale_b_cpu = scale_b.cpu()
+                        bias_cpu = None if bias is None else bias.cpu()
 
-        a_cpu = a.cpu()
-        b_cpu = b.cpu()
-        scale_a_cpu = scale_a.cpu()
-        scale_b_cpu = scale_b.cpu()
-        bias_cpu = None if bias is None else bias.cpu()
+                        # Compute and time golden result.
+                        start = time.time()
+                        c_actual = golden_fn(a_cpu, b_cpu, scale_a_cpu,
+                                             scale_b_cpu, bias_cpu)
+                        end = time.time()
 
-        # Compute and time golden result.
-        start = time.time()
-        c_actual = golden_fn(a_cpu, b_cpu, scale_a_cpu, scale_b_cpu, bias_cpu)
-        end = time.time()
+                        print(f"c_actual time: {end - start}")
+                        print(f"c_actual.dtype = {c_actual.dtype}")
 
-        print(f"c_actual time: {end - start}")
-        print(f"c_actual.dtype = {c_actual.dtype}")
+                        # Drrruuumrolll...
+                        c_check_cpu = c_check.cpu()
+                        comparison_result = comparison(c_check_cpu,
+                                                       c_actual,
+                                                       rtol=1e-1,
+                                                       atol=1e-1,
+                                                       equal_nan=True)
+                        print(f"compare?: {comparison_result}")
 
-        # Drrruuumrolll...
-        comparison_result = comparison(c_check.cpu(),
-                                       c_actual,
-                                       rtol=1e-1,
-                                       atol=1e-1)
-        print(f"compare?: {comparison_result}")
-
-        if not comparison_result:
-            torch.set_printoptions(sci_mode=False)
-            print(f"c_check = {c_check}")
-            print(f"c_actual = {c_actual}")
-            break
+                        if not comparison_result:
+                            torch.set_printoptions(sci_mode=False)
+                            print(f"c_check = {c_check}")
+                            print(f"c_actual = {c_actual}")
+                            torch.testing.assert_close(c_check_cpu,
+                                                       c_actual,
+                                                       rtol=1e-1,
+                                                       atol=1e-1)
+                            break
 
 
 if __name__ == "__main__":

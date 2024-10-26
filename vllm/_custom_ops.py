@@ -557,6 +557,8 @@ def cutlass_scaled_mm(a: torch.Tensor,
           # f"bias.shape = {None if bias is None else bias.shape},"
           # f"bias.dtype = {None if bias is None else bias.dtype}")
     if is_hip():
+        # out = torch.empty((m, n), dtype=out_dtype, device=a.device)
+        # return out
         # return scaled_mm_torch(a, b, scale_a, scale_b, out_dtype, bias)
         from scaled_mm_triton import scaled_mm_triton
         # out = scaled_mm_triton(a.to(torch.float32), b.to(torch.float32))
@@ -591,14 +593,14 @@ def cutlass_scaled_mm(a: torch.Tensor,
             # torch.save({'a':a, 'b':b, 'scale_a':scale_a,'scale_b':scale_b}, 'failure.pt')
             # assert(False)
 
-        if bias is not None:
-            print(f"a.shape = {a.shape}, a.dtype = {a.dtype},"
-                  f"b.shape = {b.shape}, b.dtye = {b.dtype},"
-                  f"scale_a.shape = {scale_a.shape}, scale_a.dtype = {scale_a.dtype},"
-                  f"scale_b.shape = {scale_b.shape}, scale_b.dtype = {scale_b.dtype},"
-                  f"bias.shape = {None if bias is None else bias.shape},"
-                  f"bias.dtype = {None if bias is None else bias.dtype}")
-            out = out + bias
+        # if bias is not None:
+            # print(f"a.shape = {a.shape}, a.dtype = {a.dtype},"
+                  # f"b.shape = {b.shape}, b.dtye = {b.dtype},"
+                  # f"scale_a.shape = {scale_a.shape}, scale_a.dtype = {scale_a.dtype},"
+                  # f"scale_b.shape = {scale_b.shape}, scale_b.dtype = {scale_b.dtype},"
+                  # f"bias.shape = {None if bias is None else bias.shape},"
+                  # f"bias.dtype = {None if bias is None else bias.dtype}")
+            # out = out + bias
     else:
         out = torch.empty((m, n), dtype=out_dtype, device=a.device)
         torch.ops._C.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
