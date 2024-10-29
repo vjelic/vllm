@@ -104,9 +104,11 @@ class LlamaMLP(nn.Module):
             x = out.view(x.shape[0], x.shape[1], out.shape[1])
         else:
             gate_up, _ = self.gate_up_proj(x)
+            print(f"LLAMA MLP - FC1: m {gate_up.shape[0]} , n {gate_up.shape[1]}, k {x.shape[1]}")
             x = self.act_fn(
                 gate_up, self.down_proj.input_scale if self.use_fp8 else None)
         x, _ = self.down_proj(x)
+        print(f"LLAMA MLP - FC2: m {x.shape[0]}, n {x.shape[1]}, k {gate_up.shape[1]}")
         return x
 
 
@@ -202,6 +204,10 @@ class LlamaAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        
+        # Print input projection.
+        print(f"LLAMA Attention - InProj: m {hidden_states.shape[0]}, n {qkv.shape[-1]}, k {hidden_states.shape[-1]}")
+
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q,
                                 k,
@@ -211,6 +217,7 @@ class LlamaAttention(nn.Module):
                                 fp8_out_scale=self.o_proj.input_scale
                                 if self.attn_fp8_out else None)
         output, _ = self.o_proj(attn_output)
+        print(f"LLAMA Attention - OutProj: m {attn_output.shape[0]}, n {self.o_proj.weight.shape[1]}, k {attn_output.shape[-1]}")
         return output
 
 
@@ -593,6 +600,8 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
     ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
+        # Print Logits
+        print(f"LlamaForCausalLM Logits: m {logits.shape[0]}, n {logits.shape[1]}, k {hidden_states.shape[1]} ")
         return logits
 
     def sample(self, logits: torch.Tensor,
