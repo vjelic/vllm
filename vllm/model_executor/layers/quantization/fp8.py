@@ -228,6 +228,7 @@ class Fp8LinearMethod(LinearMethodBase):
 
                 # If rocm, use float8_e4m3fnuz.
                 if is_hip():
+                    # print("DBG - is_hip()")
                     weight, weight_scale, input_scale = \
                         normalize_e4m3fn_to_e4m3fnuz(
                             weight=weight,
@@ -340,7 +341,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # If loading fp8 checkpoint, pass the weight loaders.
         # If loading an fp16 checkpoint, do not (we will quantize in
         #   process_weights_after_loading()
+        print("DBG - fp8.py: self.quant_config = ", self.quant_config)
         if self.quant_config.is_checkpoint_fp8_serialized:
+            print("DBG - fp8.py: chk is fp8")
             set_weight_attrs(w13_weight_scale, extra_weight_attrs)
             set_weight_attrs(w2_weight_scale, extra_weight_attrs)
 
@@ -370,7 +373,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def process_weights_after_loading(self, layer: Module) -> None:
 
         # If checkpoint is fp16, quantize in place.
+        print("DBG - fp8.py: self.quant_config = ", self.quant_config)
         if not self.quant_config.is_checkpoint_fp8_serialized:
+            print("DBG - fp8.py: chk is fp16 or bfloat16 or float32")
             # If rocm, use float8_e4m3fnuz as dtype
             fp8_dtype = torch.float8_e4m3fnuz \
                         if is_hip() else torch.float8_e4m3fn

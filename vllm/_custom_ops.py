@@ -423,6 +423,8 @@ def scaled_fp8_quant(
         shape = (max(num_token_padding, input.shape[0]), shape[1])
     output = torch.empty(shape, device=input.device, dtype=out_dtype)
 
+    # print("DBG - out_dtype: ", out_dtype)
+
     if scale is None:
         if use_per_token_if_dynamic:
             scale = torch.empty((shape[0], 1),
@@ -438,6 +440,7 @@ def scaled_fp8_quant(
         assert (scale.numel() == 1 or num_token_padding is None)
         torch.ops._C.static_scaled_fp8_quant(output, input, scale)
 
+    # print("DBG - output.dtype: ", output.dtype)
     return output, scale
 
 
