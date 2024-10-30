@@ -7,6 +7,7 @@ steps:
   - label: ":docker: build image"
     depends_on: ~
     commands:
+      - "ls -l ~/.docker/config.json"
       - "docker login"
       - "docker build --build-arg max_jobs=16 --tag {{ docker_image_amd }} -f Dockerfile.rocm --progress plain ."
       - "docker push {{ docker_image_amd }}"
