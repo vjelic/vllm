@@ -129,6 +129,7 @@ ARG PYTORCH_VISION_REPO="https://github.com/pytorch/vision.git"
 RUN git clone ${PYTORCH_REPO} pytorch \
     && cd pytorch && git checkout ${PYTORCH_BRANCH} && git submodule update --init --recursive \
     && python tools/amd_build/build_amd.py \
+    && unset AOTRITON_INSTALLED_PREFIX \
     && CMAKE_PREFIX_PATH=$(python3 -c 'import sys; print(sys.prefix)') python3 setup.py bdist_wheel --dist-dir=dist \
     && pip install dist/*.whl \
     && cd .. \
