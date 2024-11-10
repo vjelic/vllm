@@ -139,6 +139,14 @@ __device__ __forceinline__ _B16x4 from_floatx4(const floatx4& inp) {
     __hip_bfloat16 b;
   } t16;
   _B16x4 ret;
+#if 0
+  #pragma unroll
+    for (int i = 0; i < 4; i++) {
+      t16.f = (_Float16)inp[i];
+      ret[i] = t16.u;
+    }
+    return ret;
+#else
   if constexpr (std::is_same<T, _Float16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
@@ -149,13 +157,20 @@ __device__ __forceinline__ _B16x4 from_floatx4(const floatx4& inp) {
   } else if constexpr (std::is_same<T, __hip_bfloat16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
-      t16.b = __float2bfloat16(inp[i]);
-      ret[i] = t16.u;
+      union fcvt {
+          uint32_t i32;
+          float f32;
+      } u;
+      u.f32 = inp[i];
+      ret[i] = uint16_t(u.i32 >> 16);
+      //t16.b = __float2bfloat16(inp[i]);
+      //ret[i] = t16.u;
     }
     return ret;
   } else {
     static_assert(false, "unsupported 16b dtype");
   }
+#endif
 }
 
 template <typename T>
@@ -167,6 +182,16 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
     __hip_bfloat16 b;
   } t1, t2, res;
   _B16x4 ret;
+#if 0
+  #pragma unroll
+    for (int i = 0; i < 4; i++) {
+      t1.u = inp1[i];
+      t2.u = inp2[i];
+      res.f = t1.f + t2.f;
+      ret[i] = res.u;
+    }
+    return ret;
+#else
   if constexpr (std::is_same<T, _Float16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
@@ -179,15 +204,24 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
   } else if constexpr (std::is_same<T, __hip_bfloat16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
-      t1.u = inp1[i];
-      t2.u = inp2[i];
-      res.b = t1.b + t2.b;
-      ret[i] = res.u;
+      union fcvt {
+          float f32;
+          uint32_t i32;
+      } u1,u2,s;
+      u1.i32 = uint32_t(inp1[i])<<16;
+      u2.i32 = uint32_t(inp2[i])<<16;
+      s.f32 = u1.f32 + u2.f32;
+      ret[i] = uint16_t(s.i32>>16);
+      //t1.u = inp1[i];
+      //t2.u = inp2[i];
+      //res.b = t1.b + t2.b;
+      //ret[i] = res.u;
     }
     return ret;
   } else {
     static_assert(false, "unsupported 16b dtype");
   }
+#endif
 }
 
 template <typename T, vllm::Fp8KVCacheDataType KV_DTYPE>
@@ -210,6 +244,36 @@ __device__ __forceinline__ _B16x8 scaled_convert_b8x8(const _B8x8 input,
   }
 }
 
+template <typename T>
+__device__ __forceinline__ _B16x8 scaled_convert_b8x8_custom(const _B8x8 input,
+                                                      const float scale) {
+  union {
+    floatx4 f32x4[2];
+    vllm::Float8_ f32x8;
+  } tmpf8;
+  tmpf8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&input));
+  
+  tmpf8.f32x4[0] *= scale;
+  tmpf8.f32x4[1] *= scale;
+  
+  _B16x8 ret;
+  ret.xy[0] = from_floatx4<T>(tmpf8.f32x4[0]);
+  ret.xy[1] = from_floatx4<T>(tmpf8.f32x4[1]);
+  return ret;
+}
+
+template <typename T>
+__device__ __forceinline__ _B16x8 convert_b8x8_custom(const _B8x8 input) {
+  union {
+    floatx4 f32x4[2];
+    vllm::Float8_ f32x8;
+  } tmpf8;
+  tmpf8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&input));
+  _B16x8 ret;
+  ret.xy[0] = from_floatx4<T>(tmpf8.f32x4[0]);
+  ret.xy[1] = from_floatx4<T>(tmpf8.f32x4[1]);
+  return ret;
+}
 ///////////////////////////////////////
 
 // grid (num_seqs, num_partitions,num_heads/gqa_ratio)
@@ -270,6 +334,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       WARP_SIZE;  // v head_size dimension is distributed across lanes
   constexpr int VTLOOP = 8;  // 16 separate 4xtokens across warp -> 16/2
                              // 8xtokens
+  constexpr int VBLOCKS = 8 * VTLOOP / BLOCK_SIZE;
+  int vphysical_blocks[VBLOCKS];
   _B16x8 Vlocal[VHELOOP][VTLOOP];
   _B8x8 Vlocalb8[VHELOOP][VTLOOP];
   floatx4 dout[QHLOOP];
@@ -312,8 +378,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         static_cast<int64_t>(block_table[block_idx]);
 
     // fetch vphysical block numbers up front
-    constexpr int VBLOCKS = 8 * VTLOOP / BLOCK_SIZE;
-    int vphysical_blocks[VBLOCKS];
 
     const int warp_start_block_idx = warp_start_token_idx / BLOCK_SIZE;
     if constexpr (GQA_RATIO < 12) {
@@ -392,6 +456,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       }
     }
 
+#if 1 //fetch vcache in normal case
     const cache_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
     if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
       const _B16x8* v_ptrh8 = reinterpret_cast<const _B16x8*>(v_ptr);
@@ -416,7 +481,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
           }
         }
       }
-    } else {
+    } //if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
+#endif
+#if 1 //fetch vcache in fp8 case
+    else { // if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto)
       const _B8x8* v_ptrh8 = reinterpret_cast<const _B8x8*>(v_ptr);
       // iterate over each v block
   #pragma unroll
@@ -435,23 +503,73 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
           // iterate over all velems within block
   #pragma unroll
           for (int d = 0; d < BLOCK_SIZE / 8; d++) {
-            // Vlocalb8[h][b * BLOCK_SIZE / 8 + d] = v_ptrh8be[d];
-            const _B8x8 Vlocalb8 = v_ptrh8be[d];
-            Vlocal[h][b * BLOCK_SIZE / 8 + d] =
-                scaled_convert_b8x8<scalar_t, KV_DTYPE>(Vlocalb8, v_scale);
+            Vlocalb8[h][b * BLOCK_SIZE / 8 + d] = v_ptrh8be[d];
+            //const _B8x8 Vlocalb8 = v_ptrh8be[d];
+            //Vlocal[h][b * BLOCK_SIZE / 8 + d] =
+            //    scaled_convert_b8x8<scalar_t, KV_DTYPE>(Vlocalb8, v_scale);
           }
         }
       }
     }
-
+#endif
+#if 0 //cvt kf8 to kf/bf16 up front
     if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
   #pragma unroll
       for (int d = 0; d < KHELOOP; d++) {
         Klocal[d] =
-            scaled_convert_b8x8<scalar_t, KV_DTYPE>(Klocalb8[d], k_scale);
+            //scaled_convert_b8x8<scalar_t, KV_DTYPE>(Klocalb8[d], k_scale);
+            convert_b8x8_custom<scalar_t>(Klocalb8[d]);
       }
     }
+#endif
 
+      /*Klocal[x] = scaled_convert_b8x8<scalar_t, KV_DTYPE>(Klocalb8[x], k_scale); \*/
+      /*Klocal[x] = scaled_convert_b8x8_custom<scalar_t>(Klocalb8[x], k_scale); \*/
+#define QK_mfma(x) \
+    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) { \
+      Klocal[x] = convert_b8x8_custom<scalar_t>(Klocalb8[x]); \
+    } \
+    for (int h = 0; h < QHLOOP; h++) { \
+      dout[h] = gcn_mfma_instr<scalar_t, 4, x, 0>(Qlocal[h].xy[0], \
+                                                  Klocal[x].xy[0], dout[h]);\
+      dout[h] = gcn_mfma_instr<scalar_t, 4, x, 0>(Qlocal[h].xy[1], \
+                                                  Klocal[x].xy[1], dout[h]);\
+    }
+
+  //#pragma unroll
+    //for (int h = 0; h < QHLOOP; h++) {
+      QK_mfma(0);
+      QK_mfma(1);
+      QK_mfma(2);
+      QK_mfma(3);
+      QK_mfma(4);
+      QK_mfma(5);
+      QK_mfma(6);
+      QK_mfma(7);
+      if constexpr (KHELOOP > 8) {
+        QK_mfma(8);
+        QK_mfma(9);
+        QK_mfma(10);
+        QK_mfma(11);
+        QK_mfma(12);
+        QK_mfma(13);
+        QK_mfma(14);
+        QK_mfma(15);
+      }
+    //}
+#undef QK_mfma
+    float scale2 = scale;
+    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+        scale2 *= k_scale;
+    }
+  #pragma unroll
+    for (int h = 0; h < QHLOOP; h++) {
+      dout[h] *= scale2;
+      //if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+      //  dout[h] *= k_scale;
+      //}
+    }
+#if 0
   #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
       dout[h] = gcn_mfma_instr<scalar_t, 4, 0, 0>(Qlocal[h].xy[0],
@@ -522,6 +640,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       }  // KHELOOP>8
       dout[h] *= scale;
     }
+#endif
   // transpose dout so that 4 token ids are in each lane, and 4 heads are across
   // 4 lanes
   #pragma unroll
@@ -641,6 +760,139 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       }
     }
   } else {  // warp in context
+#if 0 //fetch v cache
+    const cache_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
+    if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+      const _B16x8* v_ptrh8 = reinterpret_cast<const _B16x8*>(v_ptr);
+      // iterate over each v block
+  #pragma unroll
+      for (int b = 0; b < VBLOCKS; b++) {
+        // int32 physical_block_number leads to overflow when multiplied with
+        // kv_block_stride
+        const int64_t vphysical_block_number =
+            static_cast<int64_t>(vphysical_blocks[b]);
+        const _B16x8* v_ptrh8b =
+            v_ptrh8 + (vphysical_block_number * kv_block_stride) / 8;
+        // iterate over each head elem (within head_size)
+  #pragma unroll
+        for (int h = 0; h < VHELOOP; h++) {
+          const int head_size_elem = h * WARP_SIZE + laneid;
+          const _B16x8* v_ptrh8be = v_ptrh8b + head_size_elem * BLOCK_SIZE / 8;
+          // iterate over all velems within block
+  #pragma unroll
+          for (int d = 0; d < BLOCK_SIZE / 8; d++) {
+            Vlocal[h][b * BLOCK_SIZE / 8 + d] = v_ptrh8be[d];
+          }
+        }
+      }
+    } //if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
+
+    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+      const _B8x8* v_ptrh8 = reinterpret_cast<const _B8x8*>(v_ptr);
+      // iterate over each v block
+  #pragma unroll
+      for (int b = 0; b < VBLOCKS; b++) {
+        // int32 physical_block_number leads to overflow when multiplied with
+        // kv_block_stride
+        const int64_t vphysical_block_number =
+            static_cast<int64_t>(vphysical_blocks[b]);
+        const _B8x8* v_ptrh8b =
+            v_ptrh8 + (vphysical_block_number * kv_block_stride) / 8;
+        // iterate over each head elem (within head_size)
+  #pragma unroll
+        for (int h = 0; h < VHELOOP; h++) {
+          const int head_size_elem = h * WARP_SIZE + laneid;
+          const _B8x8* v_ptrh8be = v_ptrh8b + head_size_elem * BLOCK_SIZE / 8;
+          // iterate over all velems within block
+  #pragma unroll
+          for (int d = 0; d < BLOCK_SIZE / 8; d++) {
+            Vlocalb8[h][b * BLOCK_SIZE / 8 + d] = v_ptrh8be[d];
+            //const _B8x8 Vlocalb8 = v_ptrh8be[d];
+            //Vlocal[h][b * BLOCK_SIZE / 8 + d] =
+            //    scaled_convert_b8x8<scalar_t, KV_DTYPE>(Vlocalb8, v_scale);
+          }
+        }
+      }
+    }
+#endif
+#if 0 //cvt vf8 ->f16/bf16 up front
+    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+      for (int vh = 0; vh < VHELOOP; vh++) {
+        for (int b=0; b < VTLOOP; b++) {
+          //Vlocal[vh][b] = scaled_convert_b8x8<scalar_t, KV_DTYPE>(Vlocalb8[vh][b], v_scale);
+          Vlocal[vh][b] = convert_b8x8_custom<scalar_t>(Vlocalb8[vh][b]);
+        }
+      }
+    }
+#endif
+
+        /*Vlocal[vh][x] = scaled_convert_b8x8<scalar_t, KV_DTYPE>(Vlocalb8[vh][x], v_scale);\*/
+        /*Vlocal[vh][x] = scaled_convert_b8x8_custom<scalar_t>(Vlocalb8[vh][x], v_scale);\*/
+  #define SV_mfma(x) \
+    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {\
+        Vlocal[vh][x] = convert_b8x8_custom<scalar_t>(Vlocalb8[vh][x]);\
+    }\
+    for (int qh = 0; qh < QHLOOP; qh++) { \
+        acc[qh] = gcn_mfma_instr<scalar_t, 4, 2*x, 0>(logits[qh], Vlocal[vh][x].xy[0], \
+                                                acc[qh]); \
+        acc[qh] = gcn_mfma_instr<scalar_t, 4, 2*x+1, 0>(logits[qh], Vlocal[vh][x].xy[1], \
+                                                acc[qh]); \
+    }
+#if 0
+    floatx4 acc[QHLOOP][VHELOOP];
+    for (int qh = 0; qh < QHLOOP; qh++) {
+      for (int vh = 0; vh < VHELOOP; vh++) {
+        acc[qh][vh] = {0};
+      }
+    }
+#endif
+  //#pragma unroll
+    // for (int qh = 0; qh < QHLOOP; qh++) {
+  // iterate over each v head elem (within head_size)
+  //#pragma unroll
+      for (int vh = 0; vh < VHELOOP; vh++) {
+        floatx4 acc[QHLOOP];
+        for (int qh = 0; qh < QHLOOP; qh++) {
+                acc[qh] = {0};
+        }
+        // iterate over tokens
+        SV_mfma(0);
+        SV_mfma(1);
+        SV_mfma(2);
+        SV_mfma(3);
+        SV_mfma(4);
+        SV_mfma(5);
+        SV_mfma(6);
+        SV_mfma(7);
+#if 0
+        SV_mfma(8);
+        SV_mfma(9);
+        SV_mfma(10);
+        SV_mfma(11);
+        SV_mfma(12);
+        SV_mfma(13);
+        SV_mfma(14);
+        SV_mfma(15);
+#endif
+        for (int qh = 0; qh < QHLOOP; qh++) {
+            if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+                acc[qh] *= v_scale;
+            }
+            vout_shared[qh][vh][laneid][warpid] = from_floatx4<scalar_t>(acc[qh]);
+        }
+      }
+    //}
+
+#if 0
+    for (int qh = 0; qh < QHLOOP; qh++) {
+      for (int vh = 0; vh < VHELOOP; vh++) {
+        vout_shared[qh][vh][laneid][warpid] = from_floatx4<scalar_t>(acc[qh][vh]);
+      }
+    }
+#endif
+
+#undef SV_mfma
+#if 0
   // iterate across heads
   #pragma unroll
     for (int qh = 0; qh < QHLOOP; qh++) {
@@ -684,6 +936,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         vout_shared[qh][vh][laneid][warpid] = from_floatx4<scalar_t>(acc);
       }
     }
+#endif
   }  // warp in context
 
   __syncthreads();
@@ -1088,54 +1341,54 @@ void paged_attention_custom_launcher(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(query));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   switch (gqa_ratio) {
-    case 1:
-      LAUNCH_CUSTOM_ATTENTION(1);
-      break;
-    case 2:
-      LAUNCH_CUSTOM_ATTENTION(2);
-      break;
-    case 3:
-      LAUNCH_CUSTOM_ATTENTION(3);
-      break;
-    case 4:
-      LAUNCH_CUSTOM_ATTENTION(4);
-      break;
-    case 5:
-      LAUNCH_CUSTOM_ATTENTION(5);
-      break;
-    case 6:
-      LAUNCH_CUSTOM_ATTENTION(6);
-      break;
-    case 7:
-      LAUNCH_CUSTOM_ATTENTION(7);
-      break;
+    //case 1:
+    //  LAUNCH_CUSTOM_ATTENTION(1);
+    //  break;
+    //case 2:
+    //  LAUNCH_CUSTOM_ATTENTION(2);
+    //  break;
+    //case 3:
+    //  LAUNCH_CUSTOM_ATTENTION(3);
+    //  break;
+    //case 4:
+    //  LAUNCH_CUSTOM_ATTENTION(4);
+    //  break;
+    //case 5:
+    //  LAUNCH_CUSTOM_ATTENTION(5);
+    //  break;
+    //case 6:
+    //  LAUNCH_CUSTOM_ATTENTION(6);
+    //  break;
+    //case 7:
+    //  LAUNCH_CUSTOM_ATTENTION(7);
+    //  break;
     case 8:
       LAUNCH_CUSTOM_ATTENTION(8);
       break;
-    case 9:
-      LAUNCH_CUSTOM_ATTENTION(9);
-      break;
-    case 10:
-      LAUNCH_CUSTOM_ATTENTION(10);
-      break;
-    case 11:
-      LAUNCH_CUSTOM_ATTENTION(11);
-      break;
-    case 12:
-      LAUNCH_CUSTOM_ATTENTION(12);
-      break;
-    case 13:
-      LAUNCH_CUSTOM_ATTENTION(13);
-      break;
-    case 14:
-      LAUNCH_CUSTOM_ATTENTION(14);
-      break;
-    case 15:
-      LAUNCH_CUSTOM_ATTENTION(15);
-      break;
-    case 16:
-      LAUNCH_CUSTOM_ATTENTION(16);
-      break;
+    //case 9:
+    //  LAUNCH_CUSTOM_ATTENTION(9);
+    //  break;
+    //case 10:
+    //  LAUNCH_CUSTOM_ATTENTION(10);
+    //  break;
+    //case 11:
+    //  LAUNCH_CUSTOM_ATTENTION(11);
+    //  break;
+    //case 12:
+    //  LAUNCH_CUSTOM_ATTENTION(12);
+    //  break;
+    //case 13:
+    //  LAUNCH_CUSTOM_ATTENTION(13);
+    //  break;
+    //case 14:
+    //  LAUNCH_CUSTOM_ATTENTION(14);
+    //  break;
+    //case 15:
+    //  LAUNCH_CUSTOM_ATTENTION(15);
+    //  break;
+    //case 16:
+    //  LAUNCH_CUSTOM_ATTENTION(16);
+    //  break;
     default:
       TORCH_CHECK(false, "Unsupported gqa ratio: ", gqa_ratio);
       break;
@@ -1197,14 +1450,15 @@ void paged_attention_custom_launcher(
     case 256:                                                                 \
       CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 256); \
       break;                                                                  \
-    case 512:                                                                 \
-      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 512); \
-      break;                                                                  \
     default:                                                                  \
       TORCH_CHECK(false, "Unsupported partition size: ", partition_size);     \
       break;                                                                  \
   }
-
+/*
+    case 512:                                                                 \
+      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 512); \
+      break;                                                                  \
+*/
 #if defined(__HIPCC__) && defined(__gfx90a__)
   #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
     if (fp8_out_scale) {                                                    \
@@ -1214,31 +1468,33 @@ void paged_attention_custom_launcher(
     }
 #else
   #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
+      CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T);
+/*
+  #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
     if (fp8_out_scale) {                                                    \
       CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE,     \
                                  uint8_t);                                  \
     } else {                                                                \
       CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T); \
     }
+    */
 #endif
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)     \
   switch (block_size) {                                           \
     case 16:                                                      \
       CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 16, HEAD_SIZE);  \
       break;                                                      \
-    case 32:                                                      \
-      CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE);  \
-      break;                                                      \
     default:                                                      \
       TORCH_CHECK(false, "Unsupported block size: ", block_size); \
       break;                                                      \
   }
-
+/*
+    case 32:                                                      \
+      CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE);  \
+      break;                                                      \
+*/
 #define CALL_CUSTOM_LAUNCHER_BLK_HEAD(T, KVT, KV_DTYPE)         \
   switch (head_size) {                                          \
-    case 64:                                                    \
-      CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 64);           \
-      break;                                                    \
     case 128:                                                   \
       CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 128);          \
       break;                                                    \
@@ -1246,7 +1502,11 @@ void paged_attention_custom_launcher(
       TORCH_CHECK(false, "Unsupported head size: ", head_size); \
       break;                                                    \
   }
-
+/*
+    case 64:                                                    \
+      CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 64);           \
+      break;                                                    \
+*/
 void paged_attention(
     torch::Tensor& out,         // [num_seqs, num_heads, head_size]
     torch::Tensor& exp_sums,    // [num_seqs, num_heads, max_num_partitions]
