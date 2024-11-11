@@ -97,6 +97,7 @@ pip install -U -r requirements-rocm.txt \
 && pip install *.whl
 
 
+# Install amd_smi
 # cd /opt/rocm/share/amd_smi \
 # && pip wheel . --wheel-dir=dist \
 # && pip install dist/*.whl \
