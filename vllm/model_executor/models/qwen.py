@@ -424,8 +424,10 @@ class QWenMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate_up, _ = self.gate_up_proj(x)
+        print(f"QWEN MLP - FC1: m {gate_up.shape[0]} , n {gate_up.shape[1]}, k {x.shape[1]}")
         x = self.act_fn(gate_up)
         x, _ = self.c_proj(x)
+        print(f"QWEN MLP - FC2: m {x.shape[0]}, n {x.shape[1]}, k {gate_up.shape[1]}")
         return x
 
 
@@ -487,9 +489,11 @@ class QWenAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.c_attn(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
+         print(f"QWEN Attention - InProj: m {hidden_states.shape[0]}, n {qkv.shape[-1]}, k {hidden_states.shape[-1]}")
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.c_proj(attn_output)
+        print(f"QWEN Attention - OutProj: m {attn_output.shape[0]}, n {self.o_proj.weight.shape[1]}, k {attn_output.shape[-1]}")
         return output
 
 
@@ -945,6 +949,7 @@ class QWenLMHeadModel(nn.Module, SupportsMultiModal, SupportsPP):
     ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
+        print(f"QWEN Logits: m {logits.shape[0]}, n {logits.shape[1]}, k {hidden_states.shape[1]} ")
         return logits
 
     def sample(

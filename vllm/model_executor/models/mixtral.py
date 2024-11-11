@@ -97,8 +97,12 @@ class MixtralMoE(nn.Module):
         orig_shape = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (num_tokens, n_experts)
+        #print(f"orig_shape: {hidden_states.shape}")
         router_logits, _ = self.gate(hidden_states)
+        #print(f"router_logits: {router_logits.shape}")
+        print(f"Mixtral - FC1: m {router_logits.shape[0]}, n {router_logits.shape[1]}, k {hidden_states.shape[1]}")
         final_hidden_states = self.experts(hidden_states, router_logits)
+        print(f"Mixtral - FC2: m {final_hidden_states.shape[0]}, n {final_hidden_states.shape[1]}, k {router_logits.shape[1]}")
         return final_hidden_states.view(orig_shape)
 
 
@@ -176,9 +180,11 @@ class MixtralAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        print(f"Mixtral Attention - InProj: m {hidden_states.shape[0]}, n {qkv.shape[-1]}, k {hidden_states.shape[-1]}")
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
+        print(f"Mixtral Attention - OutProj: m {attn_output.shape[0]}, n {self.o_proj.weight.shape[1]}, k {attn_output.shape[-1]}")
         return output
 
 
@@ -388,6 +394,7 @@ class MixtralForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
     ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
+        #print(f"Mixtral ForCausalLM Logits: m {logits.shape[0]}, n {logits.shape[1]}, k {hidden_states.shape[1]} ")
         return logits
 
     def sample(
