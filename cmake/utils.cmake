@@ -122,8 +122,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG)
       "-DENABLE_FP8"
       "-U__HIP_NO_HALF_CONVERSIONS__"
       "-U__HIP_NO_HALF_OPERATORS__"
-      "-fno-gpu-rdc"
-      "-std=c++17")
+      "-fno-gpu-rdc")
 
   endif()
   set(${OUT_GPU_FLAGS} ${GPU_FLAGS} PARENT_SCOPE)
