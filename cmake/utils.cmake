@@ -424,14 +424,40 @@ function (define_gpu_extension_target GPU_MOD_NAME)
   # Don't use `TORCH_LIBRARIES` for CUDA since it pulls in a bunch of
   # dependencies that are not necessary and may not be installed.
   if (GPU_LANGUAGE STREQUAL "CUDA")
-    if ("${CUDA_CUDA_LIB}" STREQUAL "")
-      set(CUDA_CUDA_LIB "${CUDA_CUDA_LIBRARY}")
-    endif()
-    target_link_libraries(${GPU_MOD_NAME} PRIVATE ${CUDA_CUDA_LIB}
-      ${CUDA_LIBRARIES})
+    target_link_libraries(${GPU_MOD_NAME} PRIVATE CUDA::cudart CUDA::cuda_driver)
   else()
     target_link_libraries(${GPU_MOD_NAME} PRIVATE ${TORCH_LIBRARIES})
   endif()
 
   install(TARGETS ${GPU_MOD_NAME} LIBRARY DESTINATION ${GPU_DESTINATION} COMPONENT ${GPU_MOD_NAME})
 endfunction()
+
+
+# gfx12xx should not be compiled together with gfx94x (MI300) because they support different types of FP8 format.
+# FP8_FORMAT will be returned (E4M3FN / E4M3FNUZ / NONE / CONFLICT)
+macro (get_supported_fp8_format FP8_FORMAT GPU_LANG GPU_ARCHES)
+  set(_USING_CUDA_FP8_FORMAT "FALSE")
+  set(_USING_HIP_FP8_FORMAT "FALSE")
+
+  if (NOT (${GPU_LANG} STREQUAL "HIP"))
+    set(_USING_CUDA_FP8_FORMAT "TRUE")
+  else()
+    foreach (_ARCH ${GPU_ARCHES})
+      if (_ARCH MATCHES "gfx94.")
+        set(_USING_HIP_FP8_FORMAT "TRUE")
+      elseif(_ARCH MATCHES "gfx12..")
+        set(_USING_CUDA_FP8_FORMAT "TRUE")
+      endif()
+    endforeach()
+  endif()
+
+  if ((${_USING_CUDA_FP8_FORMAT} STREQUAL "FALSE") AND (${_USING_HIP_FP8_FORMAT} STREQUAL "FALSE"))
+    set(FP8_FORMAT "NONE")
+  elseif((${_USING_CUDA_FP8_FORMAT} STREQUAL "FALSE") AND (${_USING_HIP_FP8_FORMAT} STREQUAL "TRUE"))
+    set(FP8_FORMAT "E4M3FNUZ")
+  elseif((${_USING_CUDA_FP8_FORMAT} STREQUAL "TRUE") AND (${_USING_HIP_FP8_FORMAT} STREQUAL "FALSE"))
+    set(FP8_FORMAT "E4M3FN")
+  else()
+    set(FP8_FORMAT "CONFLICT")
+  endif()
+endmacro()

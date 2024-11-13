@@ -7,7 +7,7 @@
 #include "cuda_compat.h"
 #include "dispatch_utils.h"
 
-#ifndef USE_ROCM
+#if defined(USE_CUDA_FP8_FORMAT)
   #include <cub/util_type.cuh>
   #include <cub/cub.cuh>
 #else
@@ -15,7 +15,7 @@
   #include <hipcub/hipcub.hpp>
 #endif
 
-#ifndef USE_ROCM
+#if defined(USE_CUDA_FP8_FORMAT)
 using FP8_TYPE = c10::Float8_e4m3fn;
 C10_HOST_DEVICE constexpr auto FP8_E4M3_MAX =
     std::numeric_limits<FP8_TYPE>::max();
@@ -50,7 +50,7 @@ __device__ __forceinline__ FP8_TYPE scaled_fp8_conversion(float const val,
   }
 
   float r = fmax(-FP8_E4M3_MAX, fmin(x, FP8_E4M3_MAX));
-#ifndef USE_ROCM
+#if defined(USE_CUDA_FP8_FORMAT)
   return static_cast<c10::Float8_e4m3fn>(r);
 #else
   // Use hardware cvt instruction for fp8 on rocm
@@ -204,8 +204,10 @@ __global__ void dynamic_per_token_scaled_fp8_quant_kernel(
   int const tid = threadIdx.x;
   int const token_idx = blockIdx.x;
 
-  scalar_t const* __restrict__ token_input = &input[token_idx * hidden_size];
-  FP8_TYPE* __restrict__ token_output = &out[token_idx * hidden_size];
+  // Use int64 to avoid overflowing an int32 when calculating this offset
+  int64_t offset = static_cast<int64_t>(token_idx) * hidden_size;
+  scalar_t const* __restrict__ token_input = &input[offset];
+  FP8_TYPE* __restrict__ token_output = &out[offset];
 
   // For vectorization, token_input and token_output pointers need to be
   // aligned at 8-byte and 4-byte addresses respectively.

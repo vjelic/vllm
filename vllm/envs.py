@@ -34,11 +34,13 @@ if TYPE_CHECKING:
     VLLM_USAGE_SOURCE: str = ""
     VLLM_CONFIGURE_LOGGING: int = 1
     VLLM_LOGGING_LEVEL: str = "INFO"
+    VLLM_LOGGING_PREFIX: str = ""
     VLLM_LOGGING_CONFIG_PATH: Optional[str] = None
     VLLM_TRACE_FUNCTION: int = 0
     VLLM_ATTENTION_BACKEND: Optional[str] = None
     VLLM_USE_FLASHINFER_SAMPLER: bool = False
     VLLM_USE_FLASHINFER_REJECTION_SAMPLER: bool = False
+    VLLM_FLASHINFER_FORCE_TENSOR_CORES: bool = False
     VLLM_PP_LAYER_PARTITION: Optional[str] = None
     VLLM_CPU_KVCACHE_SPACE: int = 0
     VLLM_CPU_OMP_THREADS_BIND: str = ""
@@ -72,6 +74,10 @@ if TYPE_CHECKING:
     VLLM_USE_TRITON_AWQ: bool = False
     VLLM_ALLOW_RUNTIME_LORA_UPDATING: bool = False
     VLLM_SKIP_P2P_CHECK: bool = False
+    VLLM_TORCH_COMPILE_LEVEL: int = 0
+    VLLM_CUSTOM_OPS: List[str] = []
+    VLLM_DISABLED_KERNELS: List[str] = []
+    VLLM_USE_V1: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
     VLLM_MOE_PADDING: bool = False
@@ -225,24 +231,28 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: (os.environ.get("VLLM_USE_TRITON_FLASH_ATTN", "True").lower() in
              ("true", "1")),
 
-    # Internal flag to enable Dynamo graph capture
-    "VLLM_TEST_DYNAMO_GRAPH_CAPTURE":
-    lambda: int(os.environ.get("VLLM_TEST_DYNAMO_GRAPH_CAPTURE", "0")),
-    "VLLM_DYNAMO_USE_CUSTOM_DISPATCHER":
-    lambda:
-    (os.environ.get("VLLM_DYNAMO_USE_CUSTOM_DISPATCHER", "True").lower() in
-     ("true", "1")),
-
-    # Internal flag to control whether we use custom op,
-    # or use the native pytorch implementation
-    "VLLM_TEST_COMPILE_NO_CUSTOM_OPS":
-    lambda: int(os.environ.get("VLLM_TEST_COMPILE_NO_CUSTOM_OPS", "0")),
-
     # Internal flag to enable Dynamo fullgraph capture
     "VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE":
     lambda: bool(
         os.environ.get("VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+    "VLLM_TORCH_COMPILE_LEVEL":
+    lambda: int(os.environ.get("VLLM_TORCH_COMPILE_LEVEL", "0")),
 
+    # Path to the config file for torch compile
+    "VLLM_TORCH_COMPILE_CONFIG":
+    lambda: os.environ.get("VLLM_TORCH_COMPILE_CONFIG", None),
+
+    # Fine-grained control over which custom ops to enable/disable.
+    # Use 'all' to enable all, 'none' to disable all.
+    # Also specify a list of custom op names to enable (prefixed with a '+'),
+    # or disable (prefixed with a '-').
+    # Examples:
+    # - 'all,-op1' to enable all except op1
+    # - 'none,+op1,+op2' to enable only op1 and op2
+    # By default, all custom ops are enabled when running without Inductor
+    # and disabled when running with Inductor (compile_level >= Inductor).
+    "VLLM_CUSTOM_OPS":
+    lambda: os.environ.get("VLLM_CUSTOM_OPS", "").replace(" ", "").split(","),
     # small gemms custom implementation for MI3* cards
     "VLLM_USE_ROCM_SKINNY_GEMM":
     lambda: (os.getenv("VLLM_USE_ROCM_SKINNY_GEMM", "True").lower() in
@@ -313,6 +323,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_LOGGING_LEVEL":
     lambda: os.getenv("VLLM_LOGGING_LEVEL", "INFO"),
 
+    # if set, VLLM_LOGGING_PREFIX will be prepended to all log messages
+    "VLLM_LOGGING_PREFIX":
+    lambda: os.getenv("VLLM_LOGGING_PREFIX", ""),
+
     # Trace function calls
     # If set to 1, vllm will trace function calls
     # Useful for debugging
@@ -332,6 +346,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # If set, vllm will use flashinfer sampler
     "VLLM_USE_FLASHINFER_SAMPLER":
     lambda: bool(int(os.getenv("VLLM_USE_FLASHINFER_SAMPLER", "0"))),
+
+    # If set, vllm will force flashinfer to use tensor cores;
+    # otherwise will use heuristic based on model architecture.
+    "VLLM_FLASHINFER_FORCE_TENSOR_CORES":
+    lambda: bool(int(os.getenv("VLLM_FLASHINFER_FORCE_TENSOR_CORES", "0"))),
 
     # Pipeline stage partition strategy
     "VLLM_PP_LAYER_PARTITION":
@@ -446,6 +465,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda:
     (os.environ.get("VLLM_TEST_FORCE_FP8_MARLIN", "0").strip().lower() in
      ("1", "true")),
+    "VLLM_TEST_FORCE_LOAD_FORMAT":
+    lambda: os.getenv("VLLM_TEST_FORCE_LOAD_FORMAT", "dummy"),
 
     # Time in ms for the zmq client to wait for a response from the backend
     # server for simple data operations
@@ -487,6 +508,18 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # and trust the driver's peer-to-peer capability report.
     "VLLM_SKIP_P2P_CHECK":
     lambda: os.getenv("VLLM_SKIP_P2P_CHECK", "0") == "1",
+
+    # List of quantization kernels that should be disabled, used for testing
+    # and performance comparisons. Currently only affects MPLinearKernel
+    # selection
+    # (kernels: MacheteLinearKernel, MarlinLinearKernel, ExllamaLinearKernel)
+    "VLLM_DISABLED_KERNELS":
+    lambda: [] if "VLLM_DISABLED_KERNELS" not in os.environ else os.environ[
+        "VLLM_DISABLED_KERNELS"].split(","),
+
+    # If set, use the V1 code path.
+    "VLLM_USE_V1":
+    lambda: bool(int(os.getenv("VLLM_USE_V1", "0"))),
 
     # Try to accumulate this many requests before proceeding
     "VLLM_SYNC_SERVER_ACCUM_REQUESTS":

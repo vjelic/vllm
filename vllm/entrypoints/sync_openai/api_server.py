@@ -17,7 +17,7 @@ from prometheus_client import make_asgi_app
 import vllm
 import vllm.envs as envs
 from vllm import FastSyncLLM as LLM
-from vllm.config import EngineConfig
+from vllm.config import VllmConfig
 from vllm.engine.arg_utils import EngineArgs
 from vllm.entrypoints.chat_utils import (MultiModalItemTracker,
                                          _parse_chat_message_content,
@@ -53,7 +53,7 @@ class BackgroundRunner:
     def __init__(self):
         self.value = 0
         self.engine_args: EngineArgs
-        self.engine_config: EngineConfig
+        self.engine_config: VllmConfig
         self.input_queue: multiprocessing.Queue = mp.Queue()
         self.result_queue: multiprocessing.Queue = mp.Queue()
         self.result_queues: Dict[str, asyncio.Queue] = {}
@@ -341,7 +341,9 @@ async def chat_completions(request: ChatCompletionRequest,
     mm_tracker = MultiModalItemTracker(runner.engine_config.model_config,
                                        runner.tokenizer)
     for msg in request.messages:
-        parsed_msg = _parse_chat_message_content(msg, mm_tracker)
+        parsed_msg = _parse_chat_message_content(
+            msg, mm_tracker,
+            runner.engine_config.model_config.chat_template_text_format)
         conversation.extend(parsed_msg)
 
     prompt = runner.tokenizer.apply_chat_template(  # type: ignore

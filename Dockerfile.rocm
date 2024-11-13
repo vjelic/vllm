@@ -1,11 +1,11 @@
 # default base image
-ARG BASE_IMAGE="rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0"
+ARG BASE_IMAGE="rocm/pytorch:rocm6.2.2_ubuntu20.04_py3.9_pytorch_release_2.1.2"
 
 ARG COMMON_WORKDIR=/app
 
 # The following ARGs should be "0" or "1". If "1", the respective component will be built and installed on top of the base image
 ARG BUILD_HIPBLASLT="0"
-ARG BUILD_RCCL="1"
+ARG BUILD_RCCL="0"
 ARG BUILD_FA="1"
 ARG BUILD_TRITON="1"
 ARG BUILD_PYTORCH="1"
@@ -13,6 +13,7 @@ ARG BUILD_PYTORCH="1"
 # If "0", it is copied in from the local working directory.
 ARG REMOTE_VLLM="0"
 ARG USE_CYTHON="0"
+ARG BUILD_RPD="1"
 
 # -----------------------
 # vLLM base image
@@ -30,6 +31,10 @@ ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH}
 RUN apt-get update -q -y && apt-get install -q -y python3 python3-pip
 RUN apt-get update -q -y && apt-get install -q -y \
     sqlite3 libsqlite3-dev libfmt-dev libmsgpack-dev libsuitesparse-dev
+# Remove sccache    
+RUN python3 -m pip install --upgrade pip
+RUN apt-get purge -y sccache; python3 -m pip uninstall -y sccache; rm -f "$(which sccache)"
+
 
 ENV LLVM_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer
 ENV PATH=$PATH:/opt/rocm/bin:/opt/conda/envs/py_3.9/lib/python3.9/site-packages/torch/bin:
@@ -46,7 +51,7 @@ RUN apt-get purge -y hipblaslt \
     && git clone https://github.com/ROCm/hipBLASLt.git \
     && cd hipBLASLt \
     && git checkout ${HIPBLASLT_BRANCH} \
-    && SCCACHE_IDLE_TIMEOUT=1800 ./install.sh --architecture ${PYTORCH_ROCM_ARCH} --legacy_hipblas_direct \
+    && ./install.sh --architecture ${PYTORCH_ROCM_ARCH} --legacy_hipblas_direct \
     && cd build/release \
     && make package
 FROM scratch AS export_hipblaslt_1
@@ -68,23 +73,6 @@ ARG COMMON_WORKDIR
 COPY --from=build_rccl ${COMMON_WORKDIR}/rccl/build/release/*.deb /
 FROM scratch AS export_rccl_0
 FROM export_rccl_${BUILD_RCCL} AS export_rccl
-
-# -----------------------
-# flash attn build stages
-FROM base AS build_flash_attn
-ARG FA_BRANCH="3cea2fb"
-ARG FA_REPO="https://github.com/ROCm/flash-attention.git"
-RUN git clone ${FA_REPO} \
-    && cd flash-attention \
-    && git checkout ${FA_BRANCH} \
-    && git submodule update --init \
-    && GPU_ARCHS=${PYTORCH_ROCM_ARCH} python3 setup.py bdist_wheel --dist-dir=dist
-FROM scratch AS export_flash_attn_1
-ARG COMMON_WORKDIR
-COPY --from=build_flash_attn ${COMMON_WORKDIR}/flash-attention/dist/*.whl /
-FROM scratch AS export_flash_attn_0
-FROM export_flash_attn_${BUILD_FA} AS export_flash_attn
-
 # -----------------------
 # Triton build stages
 FROM base AS build_triton
@@ -139,6 +127,27 @@ FROM scratch as export_pytorch_0
 from export_pytorch_${BUILD_PYTORCH} as export_pytorch
 
 # -----------------------
+# flash attn build stages
+FROM base AS build_flash_attn
+ARG FA_BRANCH="3cea2fb"
+ARG FA_REPO="https://github.com/ROCm/flash-attention.git"
+RUN --mount=type=bind,from=export_pytorch,src=/,target=/install \
+if ls /install/*.whl; then \
+    pip uninstall -y torch torchvision \
+    && pip install /install/*.whl; \
+fi
+RUN git clone ${FA_REPO} \
+    && cd flash-attention \
+    && git checkout ${FA_BRANCH} \
+    && git submodule update --init \
+    && MAX_JOBS=64 GPU_ARCHS=${PYTORCH_ROCM_ARCH} python3 setup.py bdist_wheel --dist-dir=dist
+FROM scratch AS export_flash_attn_1
+ARG COMMON_WORKDIR
+COPY --from=build_flash_attn ${COMMON_WORKDIR}/flash-attention/dist/*.whl /
+FROM scratch AS export_flash_attn_0
+FROM export_flash_attn_${BUILD_FA} AS export_flash_attn
+
+# -----------------------
 # vLLM (and gradlib) fetch stages
 FROM base AS fetch_vllm_0
 ONBUILD COPY ./ vllm/
@@ -168,12 +177,13 @@ RUN --mount=type=bind,from=export_pytorch,src=/,target=/install \
 if ls /install/*.whl; then \
     pip install /install/*.whl; \
 fi
+
 # Build vLLM
 RUN cd vllm \
     && python3 -m pip install -r requirements-rocm.txt \
     && python3 setup.py clean --all  \
     && if [ ${USE_CYTHON} -eq "1" ]; then python3 setup_cython.py build_ext --inplace; fi \
-    && SCCACHE_IDLE_TIMEOUT=1800 python3 setup.py bdist_wheel --dist-dir=dist
+    && python3 setup.py bdist_wheel --dist-dir=dist
 # Build gradlib
 RUN cd vllm/gradlib \
     && python3 setup.py clean --all && python3 setup.py bdist_wheel --dist-dir=dist
@@ -246,13 +256,14 @@ RUN --mount=type=bind,from=export_pytorch,src=/,target=/install \
         && pip install /install/*.whl; \
     fi
 
-RUN python3 -m pip install --upgrade numba scipy huggingface-hub[cli]
-
-RUN git clone -b nvtx_enabled https://github.com/ROCm/rocmProfileData.git \
+RUN python3 -m pip install --upgrade huggingface-hub[cli]
+ARG BUILD_RPD
+RUN if [ ${BUILD_RPD} -eq "1" ]; then \
+    git clone -b nvtx_enabled https://github.com/ROCm/rocmProfileData.git \
     && cd rocmProfileData/rpd_tracer \
     && pip install -r requirements.txt && cd ../ \
     && make && make install \
-    && cd hipMarker && python setup.py install
+    && cd hipMarker && python setup.py install ; fi
 
 # Install vLLM (and gradlib)
 # Make sure punica kernels are built (for LoRA)

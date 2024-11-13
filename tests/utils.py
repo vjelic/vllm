@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import functools
 import os
 import signal
@@ -8,14 +9,16 @@ import time
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import openai
 import pytest
 import requests
+import torch
 from openai.types.completion import Completion
-from typing_extensions import ParamSpec, assert_never
+from typing_extensions import ParamSpec
 
+import vllm.envs as envs
 from tests.models.utils import TextTextLogprobs
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
@@ -25,7 +28,7 @@ from vllm.model_executor.model_loader.loader import get_model_loader
 from vllm.platforms import current_platform
 from vllm.transformers_utils.tokenizer import get_tokenizer
 from vllm.utils import (FlexibleArgumentParser, GB_bytes,
-                        cuda_device_count_stateless, get_open_port, is_hip)
+                        cuda_device_count_stateless, get_open_port)
 
 if current_platform.is_rocm():
     from amdsmi import (amdsmi_get_gpu_vram_usage,
@@ -132,15 +135,19 @@ class RemoteOpenAIServer:
             try:
                 if requests.get(url).status_code == 200:
                     break
-            except Exception as err:
+            except Exception:
+                # this exception can only be raised by requests.get,
+                # which means the server is not ready yet.
+                # the stack trace is not useful, so we suppress it
+                # by using `raise from None`.
                 result = self.proc.poll()
                 if result is not None and result != 0:
-                    raise RuntimeError("Server exited unexpectedly.") from err
+                    raise RuntimeError("Server exited unexpectedly.") from None
 
                 time.sleep(0.5)
                 if time.time() - start > timeout:
                     raise RuntimeError(
-                        "Server failed to start in time.") from err
+                        "Server failed to start in time.") from None
 
     @property
     def url_root(self) -> str:
@@ -267,6 +274,31 @@ def _test_completion(
     return results
 
 
+def _test_completion_close(
+    client: openai.OpenAI,
+    model: str,
+    prompt: str,
+):
+    results = []
+
+    # test with text prompt
+    completion = client.completions.create(model=model,
+                                           prompt=prompt,
+                                           max_tokens=1,
+                                           logprobs=5,
+                                           temperature=0.0)
+
+    logporbs = completion.choices[0].logprobs.top_logprobs[0]
+    logporbs = {k: round(v, 2) for k, v in logporbs.items()}
+
+    results.append({
+        "test": "completion_close",
+        "logprobs": logporbs,
+    })
+
+    return results
+
+
 def _test_embeddings(
     client: openai.OpenAI,
     model: str,
@@ -290,13 +322,81 @@ def _test_embeddings(
     return results
 
 
+def _test_image_text(
+    client: openai.OpenAI,
+    model_name: str,
+    image_url: str,
+):
+    results = []
+
+    # test pure text input
+    messages = [{
+        "role":
+        "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "How do you feel today?"
+            },
+        ],
+    }]
+
+    chat_completion = client.chat.completions.create(model=model_name,
+                                                     messages=messages,
+                                                     temperature=0.0,
+                                                     max_tokens=1,
+                                                     logprobs=True,
+                                                     top_logprobs=5)
+    top_logprobs = chat_completion.choices[0].logprobs.content[0].top_logprobs
+
+    for x in top_logprobs:
+        x.logprob = round(x.logprob, 2)
+
+    results.append({
+        "test": "pure_text",
+        "logprobs": top_logprobs,
+    })
+
+    messages = [{
+        "role":
+        "user",
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_url
+                }
+            },
+            {
+                "type": "text",
+                "text": "What's in this image?"
+            },
+        ],
+    }]
+
+    chat_completion = client.chat.completions.create(model=model_name,
+                                                     messages=messages,
+                                                     temperature=0.0,
+                                                     max_tokens=1,
+                                                     logprobs=True,
+                                                     top_logprobs=5)
+    top_logprobs = chat_completion.choices[0].logprobs.content[0].top_logprobs
+
+    results.append({
+        "test": "text_image",
+        "logprobs": top_logprobs,
+    })
+
+    return results
+
+
 def compare_two_settings(model: str,
                          arg1: List[str],
                          arg2: List[str],
                          env1: Optional[Dict[str, str]] = None,
                          env2: Optional[Dict[str, str]] = None,
                          *,
-                         method: Literal["generate", "encode"] = "generate",
+                         method: str = "generate",
                          max_wait_seconds: Optional[float] = None) -> None:
     """
     Launch API server with two different sets of arguments/environments
@@ -323,7 +423,7 @@ def compare_all_settings(model: str,
                          all_args: List[List[str]],
                          all_envs: List[Optional[Dict[str, str]]],
                          *,
-                         method: Literal["generate", "encode"] = "generate",
+                         method: str = "generate",
                          max_wait_seconds: Optional[float] = None) -> None:
     """
     Launch API server with several different sets of arguments/environments
@@ -352,10 +452,26 @@ def compare_all_settings(model: str,
         tokenizer_mode=tokenizer_mode,
     )
 
+    can_force_load_format = True
+
+    for args in all_args:
+        if "--load-format" in args:
+            can_force_load_format = False
+            break
+
     prompt = "Hello, my name is"
     token_ids = tokenizer(prompt).input_ids
     ref_results: List = []
     for i, (args, env) in enumerate(zip(all_args, all_envs)):
+        if can_force_load_format:
+            # we are comparing the results and
+            # usually we don't need real weights.
+            # we force to use dummy weights by default,
+            # and it should work for most of the cases.
+            # if not, we can use VLLM_TEST_FORCE_LOAD_FORMAT
+            # environment variable to force the load format,
+            # e.g. in quantization tests.
+            args = args + ["--load-format", envs.VLLM_TEST_FORCE_LOAD_FORMAT]
         compare_results: List = []
         results = ref_results if i == 0 else compare_results
         with RemoteOpenAIServer(model,
@@ -376,10 +492,17 @@ def compare_all_settings(model: str,
 
             if method == "generate":
                 results += _test_completion(client, model, prompt, token_ids)
+            elif method == "generate_close":
+                results += _test_completion_close(client, model, prompt)
+            elif method == "generate_with_image":
+                results += _test_image_text(
+                    client, model,
+                    "https://upload.wikimedia.org/wikipedia/commons/0/0b/RGBA_comp.png"
+                )
             elif method == "encode":
                 results += _test_embeddings(client, model, prompt)
             else:
-                assert_never(method)
+                raise ValueError(f"Unknown method: {method}")
 
             if i > 0:
                 # if any setting fails, raise an error early
@@ -389,6 +512,18 @@ def compare_all_settings(model: str,
                 compare_envs = all_envs[i]
                 for ref_result, compare_result in zip(ref_results,
                                                       compare_results):
+                    ref_result = copy.deepcopy(ref_result)
+                    compare_result = copy.deepcopy(compare_result)
+                    if "embedding" in ref_result and method == "encode":
+                        ref_embedding = torch.tensor(ref_result["embedding"])
+                        compare_embedding = torch.tensor(
+                            compare_result["embedding"])
+                        mse = ((ref_embedding - compare_embedding)**2).mean()
+                        assert mse < 1e-6, (
+                            f"Embedding for {model=} are not the same.\n"
+                            f"mse={mse}\n")
+                        del ref_result["embedding"]
+                        del compare_result["embedding"]
                     assert ref_result == compare_result, (
                         f"Results for {model=} are not the same.\n"
                         f"{ref_args=} {ref_envs=}\n"
@@ -437,13 +572,13 @@ def multi_process_parallel(
 
 
 @contextmanager
-def error_on_warning():
+def error_on_warning(category: Type[Warning] = Warning):
     """
     Within the scope of this context manager, tests will fail if any warning
-    is emitted.
+    of the given category is emitted.
     """
     with warnings.catch_warnings():
-        warnings.simplefilter("error")
+        warnings.filterwarnings("error", category=category)
 
         yield
 
@@ -470,7 +605,7 @@ def wait_for_gpu_memory_to_clear(devices: List[int],
         output: Dict[int, str] = {}
         output_raw: Dict[int, float] = {}
         for device in devices:
-            if is_hip():
+            if current_platform.is_rocm():
                 dev_handle = amdsmi_get_processor_handles()[device]
                 mem_info = amdsmi_get_gpu_vram_usage(dev_handle)
                 gb_used = mem_info["vram_used"] / 2**10
@@ -544,12 +679,11 @@ def fork_new_process_for_each_test(
     return wrapper
 
 
-def large_gpu_test(*, min_gb: int):
-    """
-    Decorate a test to be skipped if no GPU is available or it does not have
-    sufficient memory.
-
-    Currently, the CI machine uses L4 GPU which has 24 GB VRAM.
+def large_gpu_mark(min_gb: int) -> pytest.MarkDecorator:
+    """Gets a pytest skipif mark, which triggers ig the the device doesn't have
+    meet a minimum memory requirement in gb; can be leveraged via 
+    @large_gpu_test to skip tests in environments without enough resources, or
+    called when filtering tests to run directly.
     """
     try:
         if current_platform.is_cpu():
@@ -561,16 +695,25 @@ def large_gpu_test(*, min_gb: int):
             f"An error occurred when finding the available memory: {e}",
             stacklevel=2,
         )
-
         memory_gb = 0
 
-    test_skipif = pytest.mark.skipif(
+    return pytest.mark.skipif(
         memory_gb < min_gb,
         reason=f"Need at least {memory_gb}GB GPU memory to run the test.",
     )
 
+
+def large_gpu_test(*, min_gb: int):
+    """
+    Decorate a test to be skipped if no GPU is available or it does not have
+    sufficient memory.
+
+    Currently, the CI machine uses L4 GPU which has 24 GB VRAM.
+    """
+    test_skipif = large_gpu_mark(min_gb)
+
     def wrapper(f: Callable[_P, None]) -> Callable[_P, None]:
-        return test_skipif(fork_new_process_for_each_test(f))
+        return test_skipif(f)
 
     return wrapper
 

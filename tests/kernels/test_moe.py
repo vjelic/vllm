@@ -10,19 +10,18 @@ from transformers import MixtralConfig
 from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
 
 import vllm.envs as envs
+import vllm.model_executor.layers.fused_moe  # noqa
 from tests.kernels.utils import (compute_max_diff, opcheck, stack_and_dev,
                                  torch_moe, torch_moe_single)
 from vllm import _custom_ops as ops
 from vllm.model_executor.layers.fused_moe import fused_moe
-from vllm.model_executor.layers.fused_moe.fused_marlin_moe import (
-    fused_marlin_moe, single_marlin_moe)
 from vllm.model_executor.layers.fused_moe.fused_moe import (
     fused_topk, moe_align_block_size)
 from vllm.model_executor.layers.quantization.utils.marlin_utils_test import (
     marlin_quantize)
 from vllm.model_executor.models.mixtral import MixtralMoE
+from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
-from vllm.utils import is_hip, seed_everything
 
 
 @pytest.mark.parametrize("m", [1024 * 128, 512, 222, 33, 1])
@@ -115,7 +114,7 @@ def test_mixtral_moe(dtype: torch.dtype):
                                atol=mixtral_moe_tol[dtype])
 
 
-@pytest.mark.skipif(is_hip(),
+@pytest.mark.skipif(current_platform.is_rocm(),
                     reason="Make this test work with MoE padding on HIP")
 @pytest.mark.parametrize("m", [64, 512, 222, 33, 1])
 @pytest.mark.parametrize("n", [128, 2048, 256, 1024])
@@ -126,6 +125,7 @@ def test_mixtral_moe(dtype: torch.dtype):
 @pytest.mark.parametrize("act_order", [True, False])
 @pytest.mark.parametrize("num_bits", [4, 8])
 @pytest.mark.parametrize("is_k_full", [True, False])
+@pytest.mark.skipif(current_platform.is_rocm(), reason="Skip for rocm")
 def test_fused_marlin_moe(
     m: int,
     n: int,
@@ -137,7 +137,7 @@ def test_fused_marlin_moe(
     num_bits: int,
     is_k_full: bool,
 ):
-    seed_everything(7)
+    current_platform.seed_everything(7)
 
     # Filter act_order
     if act_order:
@@ -214,7 +214,7 @@ def test_fused_marlin_moe(
         topk,
         renormalize=False,
     )
-    marlin_output = fused_marlin_moe(
+    marlin_output = torch.ops.vllm.fused_marlin_moe(
         a,
         qweight1,
         qweight2,
@@ -263,8 +263,8 @@ def test_fused_marlin_moe(
                          requires_grad=False)
         opcheck(torch.ops._moe_C.marlin_gemm_moe,
                 (a, qweight1, sorted_token_ids, topk_weights, topk_ids,
-                 scales1, zp, g_idx1, sort_indices1, workspace, quant_type, m,
-                 2 * n, k, True, e, topk, block_size_m, True, False))
+                 scales1, zp, g_idx1, sort_indices1, workspace, quant_type.id,
+                 m, 2 * n, k, True, e, topk, block_size_m, True, False))
 
 
 @pytest.mark.skip("This test is here for the sake of debugging, "
@@ -278,6 +278,7 @@ def test_fused_marlin_moe(
 @pytest.mark.parametrize("act_order", [True, False])
 @pytest.mark.parametrize("num_bits", [4, 8])
 @pytest.mark.parametrize("is_k_full", [True, False])
+@pytest.mark.skipif(current_platform.is_rocm(), reason="Skip for rocm")
 def test_single_marlin_moe_multiply(
     m: int,
     n: int,
@@ -329,7 +330,7 @@ def test_single_marlin_moe_multiply(
     sort_indices = stack_and_dev(sort_indices_l)
 
     score = torch.randn((m, e), device="cuda", dtype=dtype)
-    marlin_output = single_marlin_moe(
+    marlin_output = torch.ops.vllm.single_marlin_moe(
         a,
         qweight,
         scales,
@@ -368,6 +369,6 @@ def test_moe_align_block_size_opcheck():
                                       dtype=torch.int32,
                                       device=topk_ids.device)
 
-    opcheck(torch.ops._C.moe_align_block_size,
+    opcheck(torch.ops._moe_C.moe_align_block_size,
             (topk_ids, num_experts, block_size, sorted_ids, expert_ids,
              num_tokens_post_pad))
