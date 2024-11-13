@@ -1,15 +1,13 @@
 import sys
 
-import hipbsolidxgemm
 import pandas as pd
-#import gradlib
-import rocsolidxgemm
+import gradlib
 import torch
 import torch.nn.functional as F
 
 #gradlib.create_extension()
-rocsolidxgemm.rocb_create_extension()
-hipbsolidxgemm.hipb_create_extension()
+gradlib.rocb_create_extension()
+gradlib.hipb_create_extension()
 
 #m = 128; n = 192 ;k = 256
 #m = 7168; k = 4096*2; n = 256
@@ -166,10 +164,10 @@ for _ in range(10):
     inp = torch.randn((n, k), dtype=dtype, device='cuda')
     weights = torch.randn((m, k), dtype=dtype, device='cuda')
     #c = gradlib.mm(inp, weights.t())
-    c = hipbsolidxgemm.hipb_mm(inp, weights.t(), 20053)
-    c = hipbsolidxgemm.hipb_mm(inp, weights.t(), 20053)
-    c = rocsolidxgemm.rocb_mm(inp, weights.t(), 60995)
-    c = rocsolidxgemm.rocb_mm(inp, weights.t(), 60995)
+    c = gradlib.hipb_mm(inp, weights.t(), 20053)
+    c = gradlib.hipb_mm(inp, weights.t(), 20053)
+    c = gradlib.rocb_mm(inp, weights.t(), 60995)
+    c = gradlib.rocb_mm(inp, weights.t(), 60995)
 
     splitm = 2
     #padm=2

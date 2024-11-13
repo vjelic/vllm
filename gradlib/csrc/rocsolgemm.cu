@@ -9,7 +9,6 @@
 #define ROCBLAS_BETA_FEATURES_API
 
 #include <torch/torch.h>
-#include <torch/extension.h>
 #include <ATen/ATen.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -277,7 +276,7 @@ hipblasStatus_t hipblasLtMatmul_wrapper(
 }
 */
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::vector<rocblas_int> RocFindAllSolIdxBlas(
+std::vector<int64_t> RocFindAllSolIdxBlas(
     const torch::Tensor& mat1,
     const torch::Tensor& mat2
     )
@@ -366,7 +365,7 @@ std::vector<rocblas_int> RocFindAllSolIdxBlas(
       //CHECK_ROCBLAS_ERROR(
       rocblas_gemm_ex_get_solutions(GEMM_EX_ARGS, rocblas_gemm_flags_none, solutionsSolve.data(), &sizeSolve);
 
-      std::vector<rocblas_int> validSolutions;
+      std::vector<int64_t> validSolutions;
       for(auto sol : solutionsSolve) {
         auto status = rocblas_gemm_ex(r_handle, 
                         transpose_mat1 ? rocblas_operation_transpose : rocblas_operation_none,
@@ -387,7 +386,7 @@ std::vector<rocblas_int> RocFindAllSolIdxBlas(
 torch::Tensor RocSolIdxBlas(
     const torch::Tensor& mat1,
     const torch::Tensor& mat2,
-    const int32_t solution_index=0
+    const int64_t solution_index=0
     )
 {
   auto mat1_strides { mat1.strides() };
@@ -553,7 +552,7 @@ void rocb_destroy_extension()
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+/*
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
   m.def("rocb_create_extension", &rocb_create_extension, "create_extension");
@@ -561,3 +560,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
   m.def("rocb_mm", &RocSolIdxBlas, "mm");
   m.def("rocb_findallsols", &RocFindAllSolIdxBlas, "rocblas_find_all_sols");
 }
+*/

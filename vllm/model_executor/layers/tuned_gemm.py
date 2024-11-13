@@ -4,13 +4,21 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from hipbsolidxgemm import hipb_create_extension, hipb_mm
-from rocsolidxgemm import rocb_create_extension, rocb_mm
+import gradlib._gradlib_C
 
 from vllm import _custom_ops as ops
 from vllm.envs import VLLM_USE_ROCM_SKINNY_GEMM
 from vllm.platforms import current_platform
 from vllm.utils import is_navi
+
+
+def hipb_mm(inp, weights, solidx, bias=None):
+    return torch.ops._gradlib_C.hipb_mm(inp, weights, solidx, bias, None, None,
+                                        None, None)
+
+
+def rocb_mm(inp, weights, solidx):
+    return torch.ops._gradlib_C.rocb_mm(inp, weights, solidx)
 
 
 class TunedGemm:
@@ -94,8 +102,8 @@ class TunedGemm:
             inp_view = inp
             batched = False
         if self.extensions_created is False:
-            rocb_create_extension()
-            hipb_create_extension()
+            torch.ops._gradlib_C.rocb_create_extension()
+            torch.ops._gradlib_C.hipb_create_extension()
             self.extensions_created = True
         m = weights.shape[0]
         n = inp_view.shape[0]
@@ -114,7 +122,7 @@ class TunedGemm:
                 return out + bias
             return out
         elif soltype == 1:
-            out = hipb_mm(inp_view, weights.t(), solidx, bias=bias)
+            out = hipb_mm(inp_view, weights.t(), solidx, bias)
         elif soltype == 2:
             out = rocb_mm(inp_view, weights.t(), solidx)
             if bias is not None:
