@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Prepare
         run: |
-          cd .. \
+          cd .. && rm -rf ./pytorch \
           && python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/* \
           && pip uninstall -y torch torchvision \
           && git clone https://github.com/ROCm/pytorch.git pytorch \
