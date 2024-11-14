@@ -29,6 +29,8 @@ jobs:
         run: |
           pwd
           ls -l
+          cd .. 
+          ls -l
 
       - name: Extract branch info
         shell: bash
@@ -46,19 +48,23 @@ jobs:
             const script = require('.github/workflows/scripts/create_release.js')
             await script(github, context, core)
 
-  # wheel:
-  #   name: Build Wheel
-  #   runs-on: self-hosted
-  #   container:
-  #     image: rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0
-  #   needs: release
+  wheel:
+    name: Build Wheel
+    runs-on: self-hosted
+    container:
+      image: rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0
+    needs: release
 
-  #   strategy:
-  #     fail-fast: false
+    strategy:
+      fail-fast: false
 
-  #   steps:
-  #     - name: Prepare
-  #       run: |
+    steps:
+      - name: Prepare
+        run: |
+            pwd
+            ls -l
+            cd ..
+            ls -l
   #         mkdir working_dir && cd working_dir \
   #         && python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/* \
   #         && pip uninstall -y torch torchvision \
