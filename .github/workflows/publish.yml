@@ -25,6 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
 
+      - name: test
+        run: |
+          pwd
+          ls -l
+
       - name: Extract branch info
         shell: bash
         run: |
@@ -41,67 +46,67 @@ jobs:
             const script = require('.github/workflows/scripts/create_release.js')
             await script(github, context, core)
 
-  wheel:
-    name: Build Wheel
-    runs-on: self-hosted
-    container:
-      image: rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0
-    needs: release
+  # wheel:
+  #   name: Build Wheel
+  #   runs-on: self-hosted
+  #   container:
+  #     image: rocm/pytorch:rocm6.2_ubuntu20.04_py3.9_pytorch_release_2.3.0
+  #   needs: release
 
-    strategy:
-      fail-fast: false
+  #   strategy:
+  #     fail-fast: false
 
-    steps:
-      - name: Prepare
-        run: |
-          mkdir working_dir && cd working_dir \
-          && python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/* \
-          && pip uninstall -y torch torchvision \
-          && git clone https://github.com/ROCm/pytorch.git pytorch \
-          && cd pytorch && git checkout cedc116 && git submodule update --init --recursive \
-          && python3 tools/amd_build/build_amd.py \
-          && CMAKE_PREFIX_PATH=$(python3 -c 'import sys; print(sys.prefix)') python3 setup.py bdist_wheel --dist-dir=dist \
-          && pip install dist/*.whl \
-          && cd .. \
-          && git clone https://github.com/pytorch/vision.git vision \
-          && cd vision && git checkout v0.19.1 \
-          && python3 setup.py bdist_wheel --dist-dir=dist \
-          && pip install dist/*.whl \
-          && cd ..
+  #   steps:
+  #     - name: Prepare
+  #       run: |
+  #         mkdir working_dir && cd working_dir \
+  #         && python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/* \
+  #         && pip uninstall -y torch torchvision \
+  #         && git clone https://github.com/ROCm/pytorch.git pytorch \
+  #         && cd pytorch && git checkout cedc116 && git submodule update --init --recursive \
+  #         && python3 tools/amd_build/build_amd.py \
+  #         && CMAKE_PREFIX_PATH=$(python3 -c 'import sys; print(sys.prefix)') python3 setup.py bdist_wheel --dist-dir=dist \
+  #         && pip install dist/*.whl \
+  #         && cd .. \
+  #         && git clone https://github.com/pytorch/vision.git vision \
+  #         && cd vision && git checkout v0.19.1 \
+  #         && python3 setup.py bdist_wheel --dist-dir=dist \
+  #         && pip install dist/*.whl \
+  #         && cd ..
 
-      - name: Checkout
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+  #     - name: Checkout
+  #       uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
 
-      - name: Build wheel
-        shell: bash
-        env:
-          CMAKE_BUILD_TYPE: Release # do not compile with debug symbol to reduce wheel size
-        run: |
-          bash -x .github/workflows/scripts/build.sh
-          wheel_name=$(find dist -name "*whl" -print0 | xargs -0 -n 1 basename)
-          asset_name=${wheel_name//"linux"/"manylinux1"}
-          gradlib_wheel_name=$(find gradlib/dist -name "*whl" -print0 | xargs -0 -n 1 basename)
-          gradlib_asset_name=${gradlib_wheel_name//"linux"/"manylinux1"}
-          echo "wheel_name=${wheel_name}" >> "$GITHUB_ENV"
-          echo "asset_name=${asset_name}" >> "$GITHUB_ENV"
-          echo "gradlib_wheel_name=${gradlib_wheel_name}" >> "$GITHUB_ENV"
-          echo "gradlib_asset_name=${gradlib_asset_name}" >> "$GITHUB_ENV"
+  #     - name: Build wheel
+  #       shell: bash
+  #       env:
+  #         CMAKE_BUILD_TYPE: Release # do not compile with debug symbol to reduce wheel size
+  #       run: |
+  #         bash -x .github/workflows/scripts/build.sh
+  #         wheel_name=$(find dist -name "*whl" -print0 | xargs -0 -n 1 basename)
+  #         asset_name=${wheel_name//"linux"/"manylinux1"}
+  #         gradlib_wheel_name=$(find gradlib/dist -name "*whl" -print0 | xargs -0 -n 1 basename)
+  #         gradlib_asset_name=${gradlib_wheel_name//"linux"/"manylinux1"}
+  #         echo "wheel_name=${wheel_name}" >> "$GITHUB_ENV"
+  #         echo "asset_name=${asset_name}" >> "$GITHUB_ENV"
+  #         echo "gradlib_wheel_name=${gradlib_wheel_name}" >> "$GITHUB_ENV"
+  #         echo "gradlib_asset_name=${gradlib_asset_name}" >> "$GITHUB_ENV"
 
-      - name: Upload vllm Release Asset
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.upload_url }}
-          asset_path: ./dist/${{ env.wheel_name }}
-          asset_name: ${{ env.asset_name }}
-          asset_content_type: application/*
-      - name: Upload gradlib Release Asset
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.upload_url }}
-          asset_path: ./gradlib/dist/${{ env.gradlib_wheel_name }}
-          asset_name: ${{ env.gradlib_asset_name }}
-          asset_content_type: application/*
+  #     - name: Upload vllm Release Asset
+  #       uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         upload_url: ${{ needs.release.outputs.upload_url }}
+  #         asset_path: ./dist/${{ env.wheel_name }}
+  #         asset_name: ${{ env.asset_name }}
+  #         asset_content_type: application/*
+  #     - name: Upload gradlib Release Asset
+  #       uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         upload_url: ${{ needs.release.outputs.upload_url }}
+  #         asset_path: ./gradlib/dist/${{ env.gradlib_wheel_name }}
+  #         asset_name: ${{ env.gradlib_asset_name }}
+  #         asset_content_type: application/*
