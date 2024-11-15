@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 
 import torch  # isort: split
-import vllm._gradlib_C
 import pandas as pd
 
+import vllm._gradlib_C  # noqa: F401
 from gradlib.GemmTuner import GemmTuner
 
 torch.ops._gradlib_C.rocb_create_extension()

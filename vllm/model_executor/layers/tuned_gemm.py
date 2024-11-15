@@ -64,6 +64,7 @@ class TunedGemm:
                 soltype = 2
             solds[key] = (soltype, int(ds['solidx']))
         self.solids = solds
+
     def query_sol(self, m, n, k, bias, dtype):
         return self.solids.get((m, n, k, bias, str(dtype)), (0, 0))
 
