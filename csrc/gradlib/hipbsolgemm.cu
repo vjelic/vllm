@@ -308,10 +308,7 @@ torch::Tensor hipb_mm(const torch::Tensor& mat1, const torch::Tensor& mat2,
               "mat1 dim 1 must match mat2 dim 0");
 
   auto inDtype{mat1.options().dtype().toScalarType()};
-  auto outDtype{
-      out_dtype.has_value()
-          ? out_dtype.value()
-          : inDtype};
+  auto outDtype{out_dtype.has_value() ? out_dtype.value() : inDtype};
   auto options{at::TensorOptions().dtype(outDtype).device(at::kCUDA)};
   auto result{torch::empty({mat1_sizes[0], mat2_sizes[1]}, options)};
 
@@ -407,10 +404,7 @@ std::vector<int64_t> hipb_findallsols(
               "mat1 dim 1 must match mat2 dim 0");
 
   auto inType{mat1.options().dtype().toScalarType()};
-  auto outType{
-      out_dtype.has_value()
-          ? out_dtype.value()
-          : inType};
+  auto outType{out_dtype.has_value() ? out_dtype.value() : inType};
 
   auto options{at::TensorOptions().dtype(outType).device(at::kCUDA)};
   auto result{torch::empty({mat1_sizes[0], mat2_sizes[1]}, options)};
@@ -503,19 +497,3 @@ void hipb_destroy_extension() {
   // CHECK_HIP_ERROR(hipEventDestroy(start));
   // CHECK_HIP_ERROR(hipEventDestroy(stop));
 }
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-/*
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("hipb_create_extension", &hipb_create_extension, "create_extension");
-  m.def("hipb_destroy_extension", &hipb_destroy_extension, "destroy_extension");
-  m.def("hipb_mm", &hipb_mm, "hipb_mm", py::arg("mat1"), py::arg("mat2"),
-        py::arg("solution_index"), py::arg("bias") = at::nullopt,
-        py::arg("out_dtype") = at::nullopt, py::arg("scale1") = at::nullopt,
-        py::arg("scale2") = at::nullopt, py::arg("scaleOut") = at::nullopt);
-  m.def("hipb_findallsols", &hipb_findallsols, "hipb_findallsols",
-        py::arg("mat1"), py::arg("mat2"), py::arg("bias") = at::nullopt,
-        py::arg("out_dtype") = at::nullopt);
-}
-*/
