@@ -2,7 +2,7 @@ import sys
 
 import torch
 import torch.nn.functional as F
-import gradlib._gradlib_C
+import vllm._gradlib_C  # noqa: F401
 import pandas as pd
 
 torch.ops._gradlib_C.rocb_create_extension()

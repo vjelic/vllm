@@ -4,12 +4,16 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import gradlib._gradlib_C
 
 from vllm import _custom_ops as ops
 from vllm.envs import VLLM_USE_ROCM_SKINNY_GEMM
 from vllm.platforms import current_platform
 from vllm.utils import is_navi
+
+support_tuned_gemms = False
+if current_platform.is_rocm():
+    import vllm._gradlib_C  # noqa: F401
+    support_tuned_gemms = True
 
 
 def hipb_mm(inp, weights, solidx, bias=None):
@@ -24,8 +28,6 @@ def rocb_mm(inp, weights, solidx):
 class TunedGemm:
 
     def __init__(self):
-        #rocb_create_extension()
-        #hipb_create_extension()
         self.extensions_created = False
         self.save_gemm = int(os.environ.get('VLLM_TUNE_GEMM', 0))
         self.untune_path = os.environ.get('VLLM_UNTUNE_FILE',
@@ -62,7 +64,6 @@ class TunedGemm:
                 soltype = 2
             solds[key] = (soltype, int(ds['solidx']))
         self.solids = solds
-        #print('>>>',solds)
     def query_sol(self, m, n, k, bias, dtype):
         return self.solids.get((m, n, k, bias, str(dtype)), (0, 0))
 
@@ -89,6 +90,8 @@ class TunedGemm:
             return None
 
     def mm(self, inp, weights, bias=None):
+        if not support_tuned_gemms:
+            return F.linear(inp, weights, bias)
         # F.Linear can take a 3 dimensional input. vllm
         # uses this for linear units. However, sampler
         # will use torch.matmul with 2 dimensions only

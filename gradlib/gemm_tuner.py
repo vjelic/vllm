@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import torch  # isort: split
-import gradlib._gradlib_C
+import vllm._gradlib_C
 import pandas as pd
 
 from gradlib.GemmTuner import GemmTuner

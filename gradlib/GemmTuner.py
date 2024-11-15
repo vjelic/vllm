@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import gradlib._gradlib_C
+import vllm._gradlib_C  # noqa: F401
 
 #torch.ops._gradlib_C.rocb_create_extension()
 #torch.ops._gradlib_C.hipb_create_extension()
