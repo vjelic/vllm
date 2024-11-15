@@ -7,9 +7,6 @@ import torch
 import torch.nn.functional as F
 import vllm._gradlib_C  # noqa: F401
 
-#torch.ops._gradlib_C.rocb_create_extension()
-#torch.ops._gradlib_C.hipb_create_extension()
-
 rtol = 1e-5
 atol = 1
 
