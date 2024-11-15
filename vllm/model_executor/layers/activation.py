@@ -58,7 +58,9 @@ class SiluAndMul(CustomOp):
         return: (num_tokens, d) or (batch_size, seq_len, d)
     """
 
-    def forward_native(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_native(self,
+                       x: torch.Tensor,
+                       scale: Optional[torch.Tensor] = None) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         d = x.shape[-1] // 2
         return F.silu(x[..., :d]) * x[..., d:]

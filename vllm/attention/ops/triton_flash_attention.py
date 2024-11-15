@@ -350,6 +350,7 @@ def attn_fwd(
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    waves_per_eu: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
@@ -803,6 +804,7 @@ class _attention(torch.autograd.Function):
             BIAS_TYPE=0 if bias is None else 1,
             ENABLE_DROPOUT=False,
             RETURN_ENCODED_SOFTMAX=False,
+            waves_per_eu=4,
         )
 
         ctx.grid = grid

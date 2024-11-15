@@ -81,7 +81,7 @@ def empty_bf16(*args, **kwargs):
 
 
 def empty_fp8(*args, **kwargs):
-    fp8 = torch.float8_e4m3fn
+    fp8 = torch.float8_e4m3fnuz
     return torch.empty(*args, **kwargs, dtype=fp8, device="cuda")
 
 
