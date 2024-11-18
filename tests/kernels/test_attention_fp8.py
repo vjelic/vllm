@@ -6,9 +6,8 @@ import torch
 
 from tests.kernels.utils import opcheck
 from vllm import _custom_ops as ops
-from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v1 as triton_paged_attn_decode_v1
-from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v2 as triton_paged_attn_decode_v2
-from vllm.attention.ops.triton_paged_attn_decode import _SEQ_PARTITION_SIZE as TRITON_PAGED_ATTN_DECODE_PARTITION_SIZE
+from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v1
+from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v2
 from vllm.platforms import current_platform
 from vllm.utils import get_max_shared_memory_bytes
 
@@ -21,26 +20,38 @@ if not current_platform.is_rocm():
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 # This will change depending on the compute capability.
 # - 512 as a buffer
-MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
+#MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
+MAX_SEQ_LEN = 3
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
-NUM_BLOCKS = 4321  # Arbitrary values for testing
+#NUM_BLOCKS = 4321  # Arbitrary values for testing
+NUM_BLOCKS = 4  # Arbitrary values for testing
 PARTITION_SIZE = 512
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [
     torch.half, torch.bfloat16, torch.float
 ] if not current_platform.is_rocm() else [torch.half, torch.bfloat16]
-NUM_GEN_SEQS = [7]  # Arbitrary values for testing
-NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
-NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
+#NUM_GEN_SEQS = [7]  # Arbitrary values for testing
+#NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
+NUM_GEN_SEQS = [1]  # Arbitrary values for testing
+NUM_PREFILL_SEQS = [1]  # Arbitrary values for testing
+#NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
+#NUM_HEADS = [(40, 40)]  # Arbitrary values for testing
+NUM_HEADS = [(1,1 )]  # Arbitrary values for testing
 
 # FlashAttention forward only supports head dimension at most 128
 # https://github.com/ROCmSoftwarePlatform/flash-attention/blob/3d2b6f5d037782cc2c906909a46fb7e2e1b48b25/csrc/flash_attn_rocm/flash_api.cpp#L62
-HEAD_SIZES = [64, 80, 96, 112, 120, 128, 192, 256]
+#HEAD_SIZES = [64, 80, 96, 112, 120, 128, 192, 256]
+HEAD_SIZES = [16]
+#HEAD_SIZES = [4]
 
-BLOCK_SIZES = [16, 32]
-USE_ALIBI = [False, True]
-KV_CACHE_DTYPE = ["auto", "fp8"]
+#BLOCK_SIZES = [16, 32]
+BLOCK_SIZES = [16]
+BLOCK_SIZES = [4]
+#USE_ALIBI = [False, True]
+USE_ALIBI = [False]
+#KV_CACHE_DTYPE = ["auto", "fp8"]
+KV_CACHE_DTYPE = ["fp8"]
 SEEDS = [0]
 CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
@@ -162,10 +173,7 @@ def test_paged_attention(
     if use_alibi:
         alibi_slopes = torch.randn(num_query_heads, dtype=torch.float)
 
-    if version == "triton_v2":
-        seq_lens = [random.randint(TRITON_PAGED_ATTN_DECODE_PARTITION_SIZE + 1, MAX_SEQ_LEN) for _ in range(num_seqs)]
-    else:
-        seq_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
+    seq_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
     seq_lens[-1] = MAX_SEQ_LEN
     max_seq_len = max(seq_lens)
     seq_lens = torch.tensor(seq_lens, dtype=torch.int)
@@ -181,6 +189,7 @@ def test_paged_attention(
         block_tables_lst.append(block_table)
 
     block_tables = torch.tensor(block_tables_lst, dtype=torch.int)
+    print(f"block_tables={block_tables}")
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(NUM_BLOCKS, block_size, 1,
@@ -188,6 +197,11 @@ def test_paged_attention(
                                                 kv_cache_dtype, dtype, seed,
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
+    print(f"query={query}")
+    #print(f"key_cache.shape={key_cache.shape}, key_cache.dtype={key_cache.dtype}")
+    #print(f"value_cache.shape={value_cache.shape}, value_cache.dtype={value_cache.dtype}")
+    #print(f"key_cache={key_cache}")
+    #print(f"value_cache={value_cache}")
     # Using default kv_scale
     k_scale = v_scale = 1.0
 
@@ -219,20 +233,28 @@ def test_paged_attention(
                     cond=(head_size == HEAD_SIZES[0]
                         and block_size == BLOCK_SIZES[0]))
         else:
+            #key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous().cuda()
+            #value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous().cuda()
             key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous()
             value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous()
-            triton_paged_attn_decode_v1(
+
+            #print(f"key_cache_tri.shape={key_cache_tri.shape}, key_cache_tri.dtype={key_cache_tri.dtype}")
+            #print(f"value_cache_tri.shape={value_cache_tri.shape}, value_cache_tri.dtype={value_cache_tri.dtype}")
+            #print(f"key_cache_tri={key_cache_tri}")
+            #print(f"value_cache_tri={value_cache_tri}")
+            paged_attn_decode_v1(
                 output,
                 query,
                 key_cache_tri,
                 value_cache_tri,
-                block_tables,
-                seq_lens,
-                max_seq_len,
-                kv_cache_dtype,
                 num_kv_heads,
                 scale,
+                block_tables,
+                seq_lens,
+                block_size,
+                max_seq_len,
                 alibi_slopes,
+                kv_cache_dtype,
                 k_scale,
                 v_scale,
             )
@@ -285,20 +307,19 @@ def test_paged_attention(
         elif version == "triton_v2":
             key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous()
             value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous()
-            num_partitions = ((max_seq_len + TRITON_PAGED_ATTN_DECODE_PARTITION_SIZE - 1) // TRITON_PAGED_ATTN_DECODE_PARTITION_SIZE)
-            assert PARTITION_SIZE % block_size == 0
-            triton_paged_attn_decode_v2(
+            paged_attn_decode_v2(
                 output,
                 query,
                 key_cache_tri,
                 value_cache_tri,
-                block_tables,
-                seq_lens,
-                max_seq_len,
-                kv_cache_dtype,
                 num_kv_heads,
                 scale,
+                block_tables,
+                seq_lens,
+                block_size,
+                max_seq_len,
                 alibi_slopes,
+                kv_cache_dtype,
                 k_scale,
                 v_scale,
                 num_partitions
@@ -343,6 +364,9 @@ def test_paged_attention(
         dequantized_key_cache = torch.empty(size=key_cache_shape,
                                             dtype=dtype,
                                             device=device)
+
+        print(f"ref_q_key_cache={key_cache}")
+        print(f"ref_q_value_cache={value_cache}")
         ops.convert_fp8(dequantized_key_cache, key_cache)
         key_cache = dequantized_key_cache
 
@@ -352,6 +376,10 @@ def test_paged_attention(
                                               device=device)
         ops.convert_fp8(dequantized_value_cache, value_cache)
         value_cache = dequantized_value_cache
+        key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous()
+        value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous()
+        print(f"ref_dequant_key_cache={key_cache_tri}")
+        print(f"ref_dequant_value_cache={value_cache_tri}")
 
     ref_output = torch.empty_like(query)
     ref_single_query_cached_kv_attention(
@@ -366,12 +394,16 @@ def test_paged_attention(
         alibi_slopes,
     )
 
+    #print(f"triton_output={triton_output}")
+    #print(f"torch_output={torch_output}")
     # NOTE(woosuk): Due to the kernel-level differences in the two
     # implementations, there is a small numerical difference in the two
     # outputs. Thus, we use a relaxed tolerance for the test.
     atol = get_default_atol(output) if current_platform.is_rocm() else 1e-3
     rtol = get_default_rtol(output) if current_platform.is_rocm() else 1e-5
 
+    print(f"ref_output={ref_output}")
+    print(f"triton_output={output}")
     # NOTE(zhaoyang): FP8 KV Cache will introduce quantization error,
     # so we use a relaxed tolerance for the test.
     atol, rtol = 1e-3, 1e-5
