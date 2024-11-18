@@ -6,6 +6,8 @@ import torch
 
 from tests.kernels.utils import opcheck
 from vllm import _custom_ops as ops
+from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v1
+from vllm.attention.ops.triton_paged_attn_decode import paged_attn_decode_v2
 from vllm.platforms import current_platform
 from vllm.utils import get_max_shared_memory_bytes
 
@@ -117,7 +119,7 @@ def ref_single_query_cached_kv_attention(
 
 @pytest.mark.parametrize(
     "version",
-    ["v1", "v2"] if not current_platform.is_rocm() else ["v1", "v2", "rocm"])
+    ["v1", "v2", "triton_v1", "triton_v2"] if not current_platform.is_rocm() else ["v1", "v2", "rocm", "triton_v1", "triton_v2"])
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -140,12 +142,14 @@ def test_paged_attention(
     seed: int,
     device: str,
 ) -> None:
+    print(f"num_seqs={num_seqs}, num_heads={num_heads}, head_size={head_size}, use_alibi={use_alibi}, block_size={block_size} dtype={dtype}, kv_cache_dtype={kv_cache_dtype}, seed={seed}, device={device}")
     if ((kv_cache_dtype == "fp8" and head_size % 16)
             or (version == "rocm" and head_size not in (64, 128))):
         pytest.skip()
 
     current_platform.seed_everything(seed)
     torch.set_default_device(device)
+    torch.cuda.set_device(device)
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
     query = torch.empty(num_seqs, num_query_heads, head_size, dtype=dtype)
@@ -173,6 +177,7 @@ def test_paged_attention(
         block_tables_lst.append(block_table)
 
     block_tables = torch.tensor(block_tables_lst, dtype=torch.int)
+    print(f"block_tables={block_tables}")
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(NUM_BLOCKS, block_size, 1,
@@ -180,38 +185,61 @@ def test_paged_attention(
                                                 kv_cache_dtype, dtype, seed,
                                                 device)
     key_cache, value_cache = key_caches[0], value_caches[0]
-
+    print(f"key_cache.shape={key_cache.shape}")
+    print(f"value_cache.shape={value_cache.shape}")
     # Using default kv_scale
     k_scale = v_scale = 1.0
 
     # Call the paged attention kernel.
     output = torch.empty_like(query)
-    if version == "v1":
-        ops.paged_attention_v1(
-            output,
-            query,
-            key_cache,
-            value_cache,
-            num_kv_heads,
-            scale,
-            block_tables,
-            seq_lens,
-            block_size,
-            max_seq_len,
-            alibi_slopes,
-            kv_cache_dtype,
-            k_scale,
-            v_scale,
-        )
+    if version in ("v1", "triton_v1"):
+        if version == "v1":
+            ops.paged_attention_v1(
+                output,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                seq_lens,
+                block_size,
+                max_seq_len,
+                alibi_slopes,
+                kv_cache_dtype,
+                k_scale,
+                v_scale,
+            )
 
-        opcheck(torch.ops._C.paged_attention_v1,
-                (output, query, key_cache, value_cache, num_kv_heads, scale,
-                 block_tables, seq_lens, block_size, max_seq_len, alibi_slopes,
-                 kv_cache_dtype, k_scale, v_scale, 0, 0, 0, 64, 0),
-                cond=(head_size == HEAD_SIZES[0]
-                      and block_size == BLOCK_SIZES[0]))
+            opcheck(torch.ops._C.paged_attention_v1,
+                    (output, query, key_cache, value_cache, num_kv_heads, scale,
+                    block_tables, seq_lens, block_size, max_seq_len, alibi_slopes,
+                    kv_cache_dtype, k_scale, v_scale, 0, 0, 0, 64, 0, 1024),
+                    cond=(head_size == HEAD_SIZES[0]
+                        and block_size == BLOCK_SIZES[0]))
+        else:
+            #key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous().cuda()
+            #value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous().cuda()
+            key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous()
+            value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous()
+            paged_attn_decode_v1(
+                output,
+                query,
+                key_cache_tri,
+                value_cache_tri,
+                num_kv_heads,
+                scale,
+                block_tables,
+                seq_lens,
+                block_size,
+                max_seq_len,
+                alibi_slopes,
+                kv_cache_dtype,
+                k_scale,
+                v_scale,
+            )
 
-    elif version in ("v2", "rocm"):
+    elif version in ("v2", "rocm", "triton_v2"):
         if current_platform.is_rocm():
             PARTITION_SIZE = 1024 if version == "v2" else 512
         num_partitions = ((max_seq_len + PARTITION_SIZE - 1) // PARTITION_SIZE)
@@ -256,6 +284,26 @@ def test_paged_attention(
                     cond=(head_size == HEAD_SIZES[0]
                           and block_size == BLOCK_SIZES[0]))
 
+        elif version == "triton_v2":
+            key_cache_tri = key_cache.permute(0, 1, 3, 2, 4).flatten(3, 4).contiguous()
+            value_cache_tri = value_cache.permute(0, 1, 3, 2).contiguous()
+            paged_attn_decode_v2(
+                output,
+                query,
+                key_cache_tri,
+                value_cache_tri,
+                num_kv_heads,
+                scale,
+                block_tables,
+                seq_lens,
+                block_size,
+                max_seq_len,
+                alibi_slopes,
+                kv_cache_dtype,
+                k_scale,
+                v_scale,
+                num_partitions
+            )
         else:
             ops.paged_attention_rocm(
                 output,
@@ -284,7 +332,6 @@ def test_paged_attention(
                      kv_cache_dtype, k_scale, v_scale),
                     cond=(head_size == HEAD_SIZES[0]
                           and block_size == BLOCK_SIZES[0]))
-
     else:
         raise AssertionError(f"Unknown version: {version}")
 
@@ -320,6 +367,8 @@ def test_paged_attention(
         alibi_slopes,
     )
 
+    #print(f"triton_output={triton_output}")
+    #print(f"torch_output={torch_output}")
     # NOTE(woosuk): Due to the kernel-level differences in the two
     # implementations, there is a small numerical difference in the two
     # outputs. Thus, we use a relaxed tolerance for the test.
