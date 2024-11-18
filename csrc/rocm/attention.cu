@@ -148,12 +148,22 @@ __device__ __forceinline__ _B16x4 from_floatx4(const floatx4& inp) {
     return ret;
 #else
   if constexpr (std::is_same<T, _Float16>::value) {
+#if 0
   #pragma unroll
     for (int i = 0; i < 4; i++) {
       t16.f = (_Float16)inp[i];
       ret[i] = t16.u;
     }
     return ret;
+#else
+    union h2cvt {
+        __half2 h2[2];
+        _B16x4 b16x4;
+    } u;
+    u.h2[0] = __float22half2_rn(make_float2(inp[0],inp[1]));
+    u.h2[1] = __float22half2_rn(make_float2(inp[2],inp[3]));
+    return u.b16x4;
+#endif
   } else if constexpr (std::is_same<T, __hip_bfloat16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
@@ -193,6 +203,7 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
     return ret;
 #else
   if constexpr (std::is_same<T, _Float16>::value) {
+#if 0
   #pragma unroll
     for (int i = 0; i < 4; i++) {
       t1.u = inp1[i];
@@ -201,6 +212,17 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
       ret[i] = res.u;
     }
     return ret;
+#else
+    union h2cvt {
+        _B16x4 b16x4;
+        __half2 h2[2];
+    } u1,u2,s;
+    u1.b16x4 = inp1; 
+    u2.b16x4 = inp2; 
+    s.h2[0] = u1.h2[0] + u2.h2[0];
+    s.h2[1] = u1.h2[1] + u2.h2[1];
+    return s.b16x4;
+#endif
   } else if constexpr (std::is_same<T, __hip_bfloat16>::value) {
   #pragma unroll
     for (int i = 0; i < 4; i++) {
@@ -340,6 +362,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   _B8x8 Vlocalb8[VHELOOP][VTLOOP];
   floatx4 dout[QHLOOP];
   float qk_max[QHLOOP];
+  __shared__ _B16x4 vout_shared[QHLOOP][VHELOOP][WARP_SIZE][NWARPS + 1];
   #pragma unroll
   for (int h = 0; h < QHLOOP; h++) {
     dout[h] = {0};
@@ -434,6 +457,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       }
     }
 
+#if 1
     float alibi_slope[QHLOOP];
     if (alibi_slopes != nullptr) {
   #pragma unroll
@@ -444,6 +468,26 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
                              : 0.f;
       }
     }
+#endif
+#if 0
+    float alibi_slope;
+    const int lane16id = laneid % 16;
+    if (alibi_slopes != nullptr) {
+            alibi_slope = (lane16id < GQA_RATIO)
+                             ? alibi_slopes[wg_start_head_idx + lane16id]
+                             : 0.f;
+  //#pragma unroll
+   //   for (int h = 0; h < QHLOOP; h++) {
+     //     for (int i=0; i<4; i++) {
+      //      const int qhead_idx = h * 4 + i;
+      //      alibi_slope[qhead_idx] = (qhead_idx < GQA_RATIO)
+      //                       ? alibi_slopes[wg_start_head_idx + qhead_idx]
+      //                       : 0.f;
+      //    }
+       //}
+      //}
+    }
+#endif
 
     // fetch vphysical block numbers up front
     if constexpr (GQA_RATIO >= 12) {
@@ -641,10 +685,38 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       dout[h] *= scale;
     }
 #endif
+
+#if 0
+    if (alibi_slopes != nullptr) {
+      float alibi_slope_local[GQA_RATIO];
+#define DPP_BCAST_ASM(id) asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:id " : "=v"(alibi_slope_local[id]) : "v"(alibi_slope));
+      //for (int head=0; head < 16; head++) {
+        //DPP_BCAST_ASM(0);
+        if constexpr(GQA_RATIO>0) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:0 " : "=v"(alibi_slope_local[0]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>1) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:1 " : "=v"(alibi_slope_local[1]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>2) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:2 " : "=v"(alibi_slope_local[2]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>3) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:3 " : "=v"(alibi_slope_local[3]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>4) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:4 " : "=v"(alibi_slope_local[4]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>5) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:5 " : "=v"(alibi_slope_local[5]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>6) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:6 " : "=v"(alibi_slope_local[6]) : "v"(alibi_slope));}
+        if constexpr(GQA_RATIO>7) { asm("s_nop 0\n\tv_mov_b32_dpp %0, %1 row_newbcast:7 " : "=v"(alibi_slope_local[7]) : "v"(alibi_slope));}
+      //}
+
+      const int alibi_offset = global_token_idx - context_len + 1;
+  #pragma unroll
+      for (int h = 0; h < QHLOOP; h++) {
+  #pragma unroll
+        for (int i = 0; i < 4; i++) {
+          dout[h][i] += alibi_slope_local[4*h+i] * alibi_offset;
+        }
+      }
+    }
+#endif
   // transpose dout so that 4 token ids are in each lane, and 4 heads are across
   // 4 lanes
   #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
+#if 1
       floatx4 tmp = {0};
   #pragma unroll
       for (int i = 0; i < 4; i++) {
@@ -654,9 +726,38 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         // tmp = __builtin_amdgcn_mfma_f32_4x4x1f32(A, B, tmp, 0, 0, 0);
       }
       dout[h] = tmp;
+#endif
+#if 0
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[1,0,3,2] " : "=v"(dout[h][1]) : "v"(dout[h][1]) );
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[2,3,0,1] " : "=v"(dout[h][2]) : "v"(dout[h][2]) );
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[3,2,1,0] " : "=v"(dout[h][3]) : "v"(dout[h][3]) );
+
+      bool mask = (lane4id % 2) == 1;
+      float tmp = dout[h][1];
+      dout[h][1] = mask ? dout[h][0] : dout[h][1];
+      dout[h][0] = mask ? tmp : dout[h][0];
+      tmp = dout[h][3];
+      dout[h][3] = mask ? dout[h][2] : dout[h][3];
+      dout[h][2] = mask ? tmp : dout[h][2];
+
+      mask = (lane4id>>1) == 1;
+      tmp = dout[h][2];
+      dout[h][2] = mask ? dout[h][0] : dout[h][2];
+      dout[h][0] = mask ? tmp : dout[h][0];
+      tmp = dout[h][3];
+      dout[h][3] = mask ? dout[h][1] : dout[h][3];
+      dout[h][1] = mask ? tmp : dout[h][1];
+
+
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[1,0,3,2] " : "=v"(dout[h][1]) : "v"(dout[h][1]) );
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[2,3,0,1] " : "=v"(dout[h][2]) : "v"(dout[h][2]) );
+      asm("s_nop 0\n\t v_mov_b32_dpp %0, %1 quad_perm:[3,2,1,0] " : "=v"(dout[h][3]) : "v"(dout[h][3]) );
+
+#endif
     }
 
     const int lane4_token_idx = 4 * (global_token_idx >> 2);
+#if 1 //alibi after transpose
     const int alibi_offset = lane4_token_idx - context_len + 1;
     if (alibi_slopes != nullptr) {
   #pragma unroll
@@ -667,6 +768,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         }
       }
     }
+#endif
+
+    const int bpermute_mask = 4*(16*((laneid>>2)%4) + lane4id);
 
   #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
@@ -678,10 +782,21 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
                         : qk_max[h];
       }
   #pragma unroll
-      for (int mask = WARP_SIZE / 2; mask >= 4; mask /= 2) {
+      for (int mask = WARP_SIZE / 2; mask >= 64; mask /= 2) {
         qk_max[h] = fmaxf(qk_max[h], __shfl_xor(qk_max[h], mask));
       }
+      asm("v_nop\n v_nop\n v_max_f32_dpp %0, %1, %2 row_ror:4" : "=v"(qk_max[h]) : "v"(qk_max[h]), "v"(qk_max[h]) );
+      asm("v_nop\n v_nop\n v_max_f32_dpp %0, %1, %2 row_ror:8" : "=v"(qk_max[h]) : "v"(qk_max[h]), "v"(qk_max[h]) );
+
+      //asm("v_nop\n v_nop\n ds_bpermute_b32 %0, %1, %2 \n s_waitcnt lgkmcnt(0)" : "=v"(qk_max[h]) : "v"(bpermute_mask), "v"(qk_max[h]) );
+      
+      //qk_max[h] = __builtin_amdgcn_ds_bpermute(bpermute_mask, qk_max[h]);
+      auto tmp = __builtin_amdgcn_ds_bpermute(bpermute_mask, *reinterpret_cast<int*>(&qk_max[h]));
+      qk_max[h] = *reinterpret_cast<float*>(&tmp);
+      asm("v_nop\n v_nop\n v_max_f32_dpp %0, %1, %2 row_ror:4" : "=v"(qk_max[h]) : "v"(qk_max[h]), "v"(qk_max[h]) );
+      asm("v_nop\n v_nop\n v_max_f32_dpp %0, %1, %2 row_ror:8" : "=v"(qk_max[h]) : "v"(qk_max[h]), "v"(qk_max[h]) );
     }
+
 
     float exp_sum[QHLOOP];
   #pragma unroll
@@ -695,16 +810,27 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         exp_sum[h] += dout[h][i];
       }
   #pragma unroll
-      for (int mask = WARP_SIZE / 2; mask >= 4; mask /= 2) {
+      for (int mask = WARP_SIZE / 2; mask >= 64; mask /= 2) {
         exp_sum[h] += __shfl_xor(exp_sum[h], mask);
       }
+      asm("v_nop\n v_nop\n v_add_f32_dpp %0, %1, %2 row_ror:4" : "=v"(exp_sum[h]) : "v"(exp_sum[h]), "v"(exp_sum[h]) );
+      asm("v_nop\n v_nop\n v_add_f32_dpp %0, %1, %2 row_ror:8" : "=v"(exp_sum[h]) : "v"(exp_sum[h]), "v"(exp_sum[h]) );
+
+      //asm("v_nop\n v_nop\n ds_bpermute_b32 %0, %1, %2 \n s_waitcnt lgkmcnt(0)" : "=v"(exp_sum[h]) : "v"(bpermute_mask), "v"(exp_sum[h]) );
+      //exp_sum[h] = __builtin_amdgcn_ds_bpermute(bpermute_mask, exp_sum[h]);
+      auto tmp = __builtin_amdgcn_ds_bpermute(bpermute_mask, *reinterpret_cast<int*>(&exp_sum[h]));
+      exp_sum[h] = *reinterpret_cast<float*>(&tmp);
+      asm("v_nop\n v_nop\n v_add_f32_dpp %0, %1, %2 row_ror:4" : "=v"(exp_sum[h]) : "v"(exp_sum[h]), "v"(exp_sum[h]) );
+      asm("v_nop\n v_nop\n v_add_f32_dpp %0, %1, %2 row_ror:8" : "=v"(exp_sum[h]) : "v"(exp_sum[h]), "v"(exp_sum[h]) );
     }
 
+    if (laneid<4) {
   #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
       const int head_idx = 4 * h + lane4id;
       shared_qk_max[warpid][head_idx] = qk_max[h];
       shared_exp_sum[warpid][head_idx] = exp_sum[h];
+    }
     }
   }  // warp within context
 
@@ -749,7 +875,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     logits[h] = from_floatx4<scalar_t>(dout[h]);
   }
 
-  __shared__ _B16x4 vout_shared[QHLOOP][VHELOOP][WARP_SIZE][NWARPS + 1];
 
   if (warp_start_token_idx >= context_len) {  // warp out of context
   #pragma unroll
@@ -1450,14 +1575,14 @@ void paged_attention_custom_launcher(
     case 256:                                                                 \
       CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 256); \
       break;                                                                  \
+    case 512:                                                                 \
+      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 512); \
+      break;                                                                  \
     default:                                                                  \
       TORCH_CHECK(false, "Unsupported partition size: ", partition_size);     \
       break;                                                                  \
   }
 /*
-    case 512:                                                                 \
-      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 512); \
-      break;                                                                  \
 */
 #if defined(__HIPCC__) && defined(__gfx90a__)
   #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \

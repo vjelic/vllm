@@ -26,8 +26,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
   // Compute the attention between an input query and the cached
   // keys/values using PagedAttention.
   rocm_ops.def(
-      "paged_attention(Tensor! out, Tensor exp_sums,"
-      "                Tensor max_logits, Tensor tmp_out,"
+      "paged_attention(Tensor! out, Tensor! exp_sums,"
+      "                Tensor! max_logits, Tensor! tmp_out,"
       "                Tensor query, Tensor key_cache,"
       "                Tensor value_cache, int num_kv_heads,"
       "                float scale, Tensor block_tables,"
