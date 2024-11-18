@@ -20,6 +20,7 @@ steps:
           limit: 5
     agents:
       queue: docker-build
+      tags: ["cluster=ROCm-vLLM-build-only"]
 
 {% for step in steps %}
 {% if step.mirror_hardwares and "amd" in step.mirror_hardwares %}
