@@ -35,15 +35,14 @@ inline __device__ void apply_token_rotary_embedding(
     // GPT-NeoX style rotary embedding.
     x_index = rot_offset;
     y_index = embed_dim + rot_offset;
-    cos = VLLM_LDG(cos_ptr + x_index);
-    sin = VLLM_LDG(sin_ptr + x_index);
   } else {
     // GPT-J style rotary embedding.
     x_index = 2 * rot_offset;
     y_index = 2 * rot_offset + 1;
-    cos = VLLM_LDG(cos_ptr + x_index / 2);
-    sin = VLLM_LDG(sin_ptr + x_index / 2);
   }
+
+  cos = VLLM_LDG(cos_ptr + rot_offset);
+  sin = VLLM_LDG(sin_ptr + rot_offset);
 
   x = arr[x_index] * cos - arr[y_index] * sin;
   y = arr[y_index] * cos + arr[x_index] * sin;

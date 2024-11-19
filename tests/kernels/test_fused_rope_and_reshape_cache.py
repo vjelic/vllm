@@ -28,10 +28,10 @@ NUM_HEADS = [32] # Arbitrary values for testing
 NUM_KV_HEADS = [8] # Arbitrary values for testing
 ROTARY_DIMS = [None]  # None means rotary dim == head size FIXME: 32
 BATCH_SIZES = [8]  # Arbitrary values for testing
-SEQ_LENS = [16]  # Arbitrary values for testing
+SEQ_LENS = [1024]  # Arbitrary values for testing
 IS_NEOX_STYLE = [True, False]
 SEEDS = [0]
-CUDA_DEVICES = [5] # FIXME
+CUDA_DEVICES = [0] # FIXME
 
 
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
@@ -156,10 +156,12 @@ def test_fused_rotary_embedding_with_reshape_cache(
     _ROPE_DICT.clear()
     cache_config = CacheConfig(block_size, 1.0, 1, kv_cache_dtype)
     rope = get_rope(head_size, rotary_dim, max_position, base, 
-                    is_neox_style, rope_scaling={"type": "llama3", 
-                                                "low_freq_factor": 1.0, 
-                                                "high_freq_factor": 2.0,
-                                                "original_max_position_embeddings": 1024},
+                    is_neox_style, 
+                    rope_scaling={"rope_type": "llama3", 
+                                "factor": 1.0,
+                                "low_freq_factor": 1.0, 
+                                "high_freq_factor": 2.0,
+                                "original_max_position_embeddings": 1024},
                     fused_with_kv_cache_op=True,
                     cache_config = cache_config)
     rope = rope.to(dtype=dtype)
