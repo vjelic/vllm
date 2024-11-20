@@ -347,8 +347,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
 
   constexpr int GQA_RATIO4 = DIVIDE_ROUND_UP(GQA_RATIO,4);
 
-  __shared__ float shared_qk_max[NWARPS][GQA_RATIO4 + 1];
-  __shared__ float shared_exp_sum[NWARPS][GQA_RATIO4 + 1];
+  __shared__ float shared_qk_max[NWARPS][16 + 1];
+  __shared__ float shared_exp_sum[NWARPS][16 + 1];
     
   //for QK mfma16x16, layout is QHead/Tokenx16 across every 16 lanes, 16 Bytes HeadElements in each lane, 4x16B HeadElements across warp
   constexpr int ROWS_PER_WARP = WARP_SIZE / 16; //rows refers to 16 lanes; refer dpp terminology
@@ -478,8 +478,38 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
             dout[token_depth] = __builtin_amdgcn_mfma_f32_4x4x4f16(Klocal[token_depth][qkhe_depth].xy[i], Qlocal[qkhe_depth].xy[i], dout[token_depth], 0, 0, 0); 
           }
       }
-      //shared_tokens[warpid][token_depth][lane16id][rowid] = from_floatx4<scalar_t>(dout[token_depth]);
     }
+
+    float qk_max = -FLT_MAX;
+
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        for (int i=0; i<4; i++) {
+            qk_max = fmaxf(qk_max, dout[token_depth][i]);
+        }
+    }
+
+    for (int mask = WARP_SIZE/2; mask >= 16; mask/=2) {
+        qk_max = fmaxf(qk_max, __shfl_xor(qk_max,mask));
+    }
+
+    float exp_sum = 0.0f;
+
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        for (int i=0; i<4; i++) {
+            dout[token_depth][i] = __expf(dout[token_depth][i] - qk_max);
+            exp_sum += dout[token_depth][i];
+        }
+    }
+
+    for (int mask = WARP_SIZE/2; mask >= 16; mask/=2) {
+        exp_sum += __shfl_xor(exp_sum,mask);
+    }
+
+    if (laneid < 16) {
+        shared_qk_max[warpid][lane16id] = qk_max;
+        shared_exp_sum[warpid][lane16id] = exp_sum;
+    }
+
 #if 1
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
         shared_tokens[warpid][token_depth][lane16id][rowid] = from_floatx4<scalar_t>(dout[token_depth]);
@@ -505,8 +535,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         }
     }
 
-
-
     if (laneid < GQA_RATIO) {
         auto* exp_sums_ptr = exp_sums + seq_idx * 8 * max_num_partitions +  partition_idx;
         floatx4 tmp = {0};
@@ -516,6 +544,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         for (int h=0; h<VHELOOP; h++) {
             tmp += vout[h];
         }
+        tmp *= shared_qk_max[warpid][lane16id];
+        tmp *= shared_exp_sum[warpid][lane16id];
         auto tmp16 = addx4<scalar_t>(from_floatx4<scalar_t>(tmp), shared_tokens[warpid][lane4id][lane16id][rowid]);
         
         float2 tmpf = *reinterpret_cast<float2*>(&tmp16);
