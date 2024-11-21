@@ -5,6 +5,7 @@ import datetime
 import enum
 import gc
 import getpass
+import importlib.util
 import inspect
 import ipaddress
 import os
@@ -1642,6 +1643,16 @@ def is_navi() -> bool:
     return archName is not None and "gfx1" in archName
 
 
+@lru_cache(maxsize=None)
+def is_navi3() -> bool:
+    if not current_platform.is_rocm() or not torch.cuda.is_available():
+        return False
+    # All (visible) GPUs must be of the same type,
+    # otherwise FP8 results can't be guaranteed.
+    archName = torch.cuda.get_device_properties('cuda').gcnArchName
+    return archName is not None and "gfx11" in archName
+
+
 def weak_ref_tensors(
     tensors: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]
 ) -> Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]:
@@ -1664,6 +1675,25 @@ def is_in_doc_build() -> bool:
         return isinstance(torch, _MockModule)
     except ModuleNotFoundError:
         return False
+
+
+def import_from_path(module_name: str, file_path: Union[str, os.PathLike]):
+    """
+    Import a Python file according to its file path.
+
+    Based on the official recipe:
+    https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+    """
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{module_name}'")
+
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 # create a library to hold the custom op
@@ -1707,3 +1737,12 @@ def direct_register_custom_op(
     my_lib.impl(op_name, op_func, "CUDA")
     if fake_impl is not None:
         my_lib._register_fake(op_name, fake_impl)
+
+
+def resolve_obj_by_qualname(qualname: str) -> Any:
+    """
+    Resolve an object by its fully qualified name.
+    """
+    module_name, obj_name = qualname.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, obj_name)
