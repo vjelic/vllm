@@ -499,8 +499,22 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 layer.w13_weight.data = permute_weight_fp8(layer.w13_weight.data)
                 layer.w2_weight.data = permute_weight_fp8(layer.w2_weight.data)
 
-            return
+            if envs.VLLM_MOE_PADDING:
+                pad_size = 256
+                layer.w13_weight = torch.nn.Parameter(
+                    F.pad(layer.w13_weight.data, (0, pad_size), "constant",
+                          0)[..., :-pad_size],
+                    requires_grad=False,
+                )
+                torch.cuda.empty_cache()
+                layer.w2_weight = torch.nn.Parameter(
+                    F.pad(layer.w2_weight.data, (0, pad_size), "constant",
+                          0)[..., :-pad_size],
+                    requires_grad=False,
+                )
+                torch.cuda.empty_cache()
 
+            return
     def apply(
         self,
         layer: torch.nn.Module,

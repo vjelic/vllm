@@ -62,9 +62,9 @@ def test_fused_moe(
 
     # Pad the input if use padding
     if envs.VLLM_MOE_PADDING:
-        w1 = F.pad(w1, (0, 128), "constant", 0)
+        w1 = F.pad(w1, (0, 128), "constant", 0)[..., :-128]
         torch.cuda.empty_cache()
-        w2 = F.pad(w2, (0, 128), "constant", 0)
+        w2 = F.pad(w2, (0, 128), "constant", 0)[..., :-128]
         torch.cuda.empty_cache()
     triton_output = fused_moe(a, w1, w2, score, topk, renormalize=False)
     torch.testing.assert_close(triton_output, torch_output, atol=1e-2, rtol=0)
@@ -162,11 +162,11 @@ def test_mixtral_moe(dtype: torch.dtype):
     if envs.VLLM_MOE_PADDING:
         vllm_moe.experts.w13_weight = Parameter(F.pad(
             vllm_moe.experts.w13_weight, (0, 128), "constant", 0),
-                                                requires_grad=False)
+                                                requires_grad=False)[..., :-128]
         torch.cuda.empty_cache()
         vllm_moe.experts.w2_weight = Parameter(F.pad(
             vllm_moe.experts.w2_weight, (0, 128), "constant", 0),
-                                               requires_grad=False)
+                                               requires_grad=False)[..., :-128]
         torch.cuda.empty_cache()
 
     # Run forward passes for both MoE blocks

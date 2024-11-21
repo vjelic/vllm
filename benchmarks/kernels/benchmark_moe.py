@@ -66,7 +66,7 @@ def benchmark_config(
         w1 = torch.randn(num_experts,
                          shard_intermediate_size,
                          hidden_size + padding_size,
-                         dtype=init_dtype)
+                         dtype=init_dtype)[..., :-padding_size]
         w2 = torch.randn(num_experts,
                          hidden_size,
                          shard_intermediate_size // 2,

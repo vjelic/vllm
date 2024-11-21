@@ -173,12 +173,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(
-                layer.w13_weight.data, (0, 128), "constant", 0),
+                layer.w13_weight.data, (0, 128), "constant", 0)[..., :-128],
                                                   requires_grad=False)
             torch.cuda.empty_cache()
             layer.w2_weight = torch.nn.Parameter(F.pad(layer.w2_weight.data,
                                                        (0, 128), "constant",
-                                                       0),
+                                                       0)[..., :-128],
                                                  requires_grad=False)
             torch.cuda.empty_cache()
 

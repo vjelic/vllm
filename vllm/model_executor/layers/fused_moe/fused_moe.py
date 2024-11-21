@@ -15,8 +15,6 @@ from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
 logger = init_logger(__name__)
-padding_size = 128 if envs.VLLM_MOE_PADDING else 0
-
 
 @triton.jit
 def fused_moe_kernel(
@@ -447,7 +445,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             expert_ids,
             num_tokens_post_padded,
             B.shape[1],
-            B.shape[2] - padding_size,
+            B.shape[2],
             sorted_token_ids.shape[0],
             topk_ids.numel(),
             A.stride(0),
@@ -486,7 +484,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             expert_ids,
             num_tokens_post_padded,
             B.shape[1],
-            B.shape[2] - padding_size,
+            B.shape[2],
             sorted_token_ids.shape[0],
             topk_ids.numel(),
             A.stride(0),
@@ -816,11 +814,11 @@ def fused_experts_impl(hidden_states: torch.Tensor,
                        a1_scale: Optional[torch.Tensor] = None,
                        a2_scale: Optional[torch.Tensor] = None):
     # Check constraints.
-    assert hidden_states.shape[1] == w1.shape[2] - padding_size, "Hidden size mismatch"
+    assert hidden_states.shape[1] == w1.shape[2], "Hidden size mismatch"
     assert topk_weights.shape == topk_ids.shape, "topk shape mismatch"
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
-    assert w1.is_contiguous(), "Expert weights1 must be contiguous"
-    assert w2.is_contiguous(), "Expert weights2 must be contiguous"
+    # assert w1.is_contiguous(), "Expert weights1 must be contiguous"
+    # assert w2.is_contiguous(), "Expert weights2 must be contiguous"
     assert hidden_states.dtype in [
         torch.float32, torch.float16, torch.bfloat16
     ]
@@ -838,7 +836,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
     get_config_func = functools.partial(
         try_get_optimal_moe_config,
         w1.shape,
-        (w2.shape[0], w2.shape[1], w2.shape[2] - padding_size),
+        (w2.shape[0], w2.shape[1], w2.shape[2]),
         topk_ids.shape[1],
         config_dtype,
     )
