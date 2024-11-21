@@ -43,10 +43,13 @@ def permute_weight(x: torch.Tensor) -> torch.Tensor:
     ## Hardcode BLOCK_K and BLOCK_N
     BK = 128
     BN = 128
+    mfma_nonk_threads = 16
+    mfma_k_threads = 4
+    k_width = 8
     x_ = x
     x_ = x_.view(x.shape[0],
-                 x.shape[1]//BN, BN//16, 16,
-                 x.shape[2]//BK, BK//32, 4, 8)
+                 x.shape[1]//BN, BN//mfma_nonk_threads, mfma_nonk_threads,
+                 x.shape[2]//BK, BK//(mfma_k_threads * k_width), mfma_k_threads, k_width)
     x_ = x_.permute(0,1,5,2,6,4,3,7)
     x_ = x_.contiguous()
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
@@ -166,6 +169,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         if envs.VLLM_MOE_SHUFFLE:
             layer.w13_weight.data = permute_weight(layer.w13_weight.data)
             layer.w2_weight.data = permute_weight(layer.w2_weight.data)
+            torch.cuda.empty_cache()
             
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(

@@ -462,7 +462,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             use_fp8_w8a8=use_fp8_w8a8,
             use_int8_w8a16=use_int8_w8a16,
             **config,
-            enable_moe_lds_bypass=True
+            enable_moe_lds_bypass=envs.VLLM_MOE_SHUFFLE
         )
     else:
         NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
@@ -499,7 +499,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
             compute_type=compute_type,
             use_fp8=use_fp8_w8a8,
             **config,
-            enable_moe_lds_bypass=True
+            enable_moe_lds_bypass=envs.VLLM_MOE_SHUFFLE
         )
 
 
@@ -581,6 +581,20 @@ def try_get_optimal_moe_config(w1_shape: Tuple[int, ...],
             # Else use the default config
             config = get_default_config(M, E, N, w1_shape[2], top_k, dtype,
                                         is_marlin)
+    # Ensure these parameters are in sync with permute_weight in
+    # vllm.model_executor.layers.fused_moe.layer.py
+    if current_platform.is_rocm() and envs.VLLM_MOE_SHUFFLE:
+        shuffle_params = {'num_warps': 8, 'matrix_instr_nonkdim': 16,
+                          'kpack': 2}
+        for name, correct_val in shuffle_params.items():
+            if (val := config.get(name, correct_val)) != correct_val:
+                logger.warning(
+                    "Fused MoE bypass LDS enabled. Triton kernel config "
+                    f"containing `{name}={val}` appears to be incompatible"
+                    "with weight shuffling method. Overriding to "
+                    f"`{name}={correct_val}`"
+                )
+            config[name] = correct_val
     return config
 
 
