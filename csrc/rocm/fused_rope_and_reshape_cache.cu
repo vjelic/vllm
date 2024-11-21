@@ -84,8 +84,10 @@ inline __device__ void store_value_into_cache(
   }
 }
 
+
+
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
-__global__ void fused_rotary_embedding_and_reshape_cache_kernel(
+__global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache_kernel(
         scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
                                              // [num_tokens, num_heads, head_size]
         scalar_t* __restrict__ key,          // [num_tokens, num_heads, head_size]
