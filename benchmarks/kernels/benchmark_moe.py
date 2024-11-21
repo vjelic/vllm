@@ -153,19 +153,20 @@ def benchmark_config(
 
 def get_rocm_tuning_space(use_fp16):
     # small search space, no pruning required
+    # bypassLDS: block_n/num_warps=16 for perf
     block_m_range = [16, 32, 64, 128, 256]
-    block_n_range = [128] if use_fp16 else [256]
+    block_n_range = [128] if use_fp16 else [64]
     block_k_range = [128] if use_fp16 else [256]
 
-    num_warps_range = [8]
+    num_warps_range = [8] if use_fp16 else [4]
     group_m_range = [1]
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
     num_stage_range = [0]
     waves_per_eu_range = [0]
-    matrix_instr_nonkdim_range = [16] if use_fp16 else []
-    kpack_range = [2] if use_fp16 else []
+    matrix_instr_nonkdim_range = [16]
+    kpack_range = [2]
 
     param_ranges = {
         "BLOCK_SIZE_M": block_m_range,
@@ -175,10 +176,9 @@ def get_rocm_tuning_space(use_fp16):
         "num_warps": num_warps_range,
         "num_stages": num_stage_range,
         "waves_per_eu": waves_per_eu_range,
+        "matrix_instr_nonkdim": matrix_instr_nonkdim_range,
+        "kpack": kpack_range,
     }
-    if use_fp16:
-        param_ranges["matrix_instr_nonkdim"] = matrix_instr_nonkdim_range
-        param_ranges["kpack"] = kpack_range
 
     return param_ranges
 

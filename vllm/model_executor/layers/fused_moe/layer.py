@@ -48,7 +48,7 @@ class FusedMoEMethodBase(QuantizeMethodBase):
               use_grouped_topk: bool) -> torch.Tensor:
         raise NotImplementedError
 
-def permute_weight(x: torch.Tensor) -> torch.Tensor:
+def permute_weight_fp16(x: torch.Tensor) -> torch.Tensor:
     ## Hardcode BLOCK_K and BLOCK_N
     BK = 128
     BN = 128
@@ -168,8 +168,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
     def process_weights_after_loading(self, layer: Module) -> None:
         if envs.VLLM_MOE_SHUFFLE:
-            layer.w13_weight.data = permute_weight(layer.w13_weight.data)
-            layer.w2_weight.data = permute_weight(layer.w2_weight.data)
+            layer.w13_weight.data = permute_weight_fp16(layer.w13_weight.data)
+            layer.w2_weight.data = permute_weight_fp16(layer.w2_weight.data)
             
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(
