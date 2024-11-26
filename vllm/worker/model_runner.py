@@ -49,7 +49,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (DeviceMemoryProfiler, PyObjectCache, async_tensor_h2d,
-                        flatten_2d_lists, is_pin_memory_available, rpd_mark,
+                        flatten_2d_lists, is_pin_memory_available, rpd_mark, rpd_user_marker,
                         supports_dynamo, weak_ref_tensor)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
@@ -1623,40 +1623,74 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         else:
             model_executable = self.model
 
-        multi_modal_kwargs = model_input.multi_modal_kwargs or {}
-        seqlen_agnostic_kwargs = {
-            "finished_requests_ids": model_input.finished_requests_ids,
-            "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
-        } if self.has_inner_state else {}
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time):
-            model_forward_start = torch.cuda.Event(enable_timing=True)
-            model_forward_end = torch.cuda.Event(enable_timing=True)
-            model_forward_start.record()
+        if prefill_meta:
+            marker_instance = rpd_user_marker(name="Prefill")
+        else:
+            marker_instance = rpd_user_marker(name="Decode")
 
-        with set_forward_context(model_input.attn_metadata):
-            hidden_or_intermediate_states = model_executable(
-                input_ids=model_input.input_tokens,
-                positions=model_input.input_positions,
-                kv_caches=kv_caches,
-                attn_metadata=model_input.attn_metadata,
-                intermediate_tensors=intermediate_tensors,
-                **MultiModalInputs.as_kwargs(multi_modal_kwargs,
-                                             device=self.device),
-                **seqlen_agnostic_kwargs)
-
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time):
-            model_forward_end.record()
-
-        # Compute the logits in the last pipeline stage.
-        if not get_pp_group().is_last_rank:
-            if (self.is_driver_worker
-                    and hidden_or_intermediate_states is not None
-                    and isinstance(hidden_or_intermediate_states,
-                                   IntermediateTensors)
-                    and self.observability_config is not None
+        with marker_instance:
+            multi_modal_kwargs = model_input.multi_modal_kwargs or {}
+            seqlen_agnostic_kwargs = {
+                "finished_requests_ids": model_input.finished_requests_ids,
+                "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
+            } if self.has_inner_state else {}
+            if (self.observability_config is not None
                     and self.observability_config.collect_model_forward_time):
+                model_forward_start = torch.cuda.Event(enable_timing=True)
+                model_forward_end = torch.cuda.Event(enable_timing=True)
+                model_forward_start.record()
+
+            with set_forward_context(model_input.attn_metadata):
+                hidden_or_intermediate_states = model_executable(
+                    input_ids=model_input.input_tokens,
+                    positions=model_input.input_positions,
+                    kv_caches=kv_caches,
+                    attn_metadata=model_input.attn_metadata,
+                    intermediate_tensors=intermediate_tensors,
+                    **MultiModalInputs.as_kwargs(multi_modal_kwargs,
+                                                device=self.device),
+                    **seqlen_agnostic_kwargs)
+
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_forward_time):
+                model_forward_end.record()
+
+            # Compute the logits in the last pipeline stage.
+            if not get_pp_group().is_last_rank:
+                if (self.is_driver_worker
+                        and hidden_or_intermediate_states is not None
+                        and isinstance(hidden_or_intermediate_states,
+                                    IntermediateTensors)
+                        and self.observability_config is not None
+                        and self.observability_config.collect_model_forward_time):
+                    model_forward_end.synchronize()
+                    model_forward_time = model_forward_start.elapsed_time(
+                        model_forward_end)
+                    orig_model_forward_time = 0.0
+                    if intermediate_tensors is not None:
+                        orig_model_forward_time = intermediate_tensors.tensors.get(
+                            "model_forward_time", torch.tensor(0.0)).item()
+                    hidden_or_intermediate_states.tensors["model_forward_time"] = (
+                        torch.tensor(model_forward_time + orig_model_forward_time))
+                return hidden_or_intermediate_states
+
+            logits = self.model.compute_logits(hidden_or_intermediate_states,
+                                            model_input.sampling_metadata)
+
+            if not self.is_driver_worker:
+                return []
+
+            if model_input.async_callback is not None:
+                model_input.async_callback()
+
+            # Sample the next token.
+            output: SamplerOutput = self.model.sample(
+                logits=logits,
+                sampling_metadata=model_input.sampling_metadata,
+            )
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_forward_time
+                    and output is not None):
                 model_forward_end.synchronize()
                 model_forward_time = model_forward_start.elapsed_time(
                     model_forward_end)
@@ -1664,57 +1698,29 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 if intermediate_tensors is not None:
                     orig_model_forward_time = intermediate_tensors.tensors.get(
                         "model_forward_time", torch.tensor(0.0)).item()
-                hidden_or_intermediate_states.tensors["model_forward_time"] = (
-                    torch.tensor(model_forward_time + orig_model_forward_time))
-            return hidden_or_intermediate_states
+                # If there are multiple workers, we are still tracking the latency
+                # from the start time of the driver worker to the end time of the
+                # driver worker. The model forward time will then end up covering
+                # the communication time as well.
+                output.model_forward_time = (orig_model_forward_time +
+                                            model_forward_time)
 
-        logits = self.model.compute_logits(hidden_or_intermediate_states,
-                                           model_input.sampling_metadata)
+            if self.return_hidden_states:
+                # we only need to pass hidden states of most recent token
+                assert model_input.sampling_metadata is not None
+                indices = model_input.sampling_metadata.selected_token_indices
+                if model_input.is_prompt:
+                    hidden_states = hidden_or_intermediate_states.index_select(
+                        0, indices)
+                    output.prefill_hidden_states = hidden_or_intermediate_states
+                elif decode_meta.use_cuda_graph:
+                    hidden_states = hidden_or_intermediate_states[:len(indices)]
+                else:
+                    hidden_states = hidden_or_intermediate_states
 
-        if not self.is_driver_worker:
-            return []
+                output.hidden_states = hidden_states
 
-        if model_input.async_callback is not None:
-            model_input.async_callback()
-
-        # Sample the next token.
-        output: SamplerOutput = self.model.sample(
-            logits=logits,
-            sampling_metadata=model_input.sampling_metadata,
-        )
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time
-                and output is not None):
-            model_forward_end.synchronize()
-            model_forward_time = model_forward_start.elapsed_time(
-                model_forward_end)
-            orig_model_forward_time = 0.0
-            if intermediate_tensors is not None:
-                orig_model_forward_time = intermediate_tensors.tensors.get(
-                    "model_forward_time", torch.tensor(0.0)).item()
-            # If there are multiple workers, we are still tracking the latency
-            # from the start time of the driver worker to the end time of the
-            # driver worker. The model forward time will then end up covering
-            # the communication time as well.
-            output.model_forward_time = (orig_model_forward_time +
-                                         model_forward_time)
-
-        if self.return_hidden_states:
-            # we only need to pass hidden states of most recent token
-            assert model_input.sampling_metadata is not None
-            indices = model_input.sampling_metadata.selected_token_indices
-            if model_input.is_prompt:
-                hidden_states = hidden_or_intermediate_states.index_select(
-                    0, indices)
-                output.prefill_hidden_states = hidden_or_intermediate_states
-            elif decode_meta.use_cuda_graph:
-                hidden_states = hidden_or_intermediate_states[:len(indices)]
-            else:
-                hidden_states = hidden_or_intermediate_states
-
-            output.hidden_states = hidden_states
-
-        return [output]
+            return [output]
 
 
 # NOTE: this is nn.Module so the profiler can properly capture/group
