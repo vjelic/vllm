@@ -543,7 +543,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     for (int mask = WARP_SIZE/2; mask >= 16; mask/=2) {
         exp_sum += __shfl_xor(exp_sum,mask);
     }
-
+    
     if (laneid < 16) {
         shared_qk_max[warpid][lane16id] = qk_max;
         shared_exp_sum[warpid][lane16id] = exp_sum;
@@ -626,20 +626,59 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                 const int offset2 = offset / 4;
 
                 //if output format is 16 head elems across 16 lanes, 16 qheads spread across 4 rows
-                tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(shared_logits[vtoken_depth][offset2][lane16id][offset1],
-                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i], tmp_out);
+                //tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(shared_logits[vtoken_depth][offset2][lane16id][offset1],
+                //        Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i], tmp_out);
 
                 //if output format is 16 qheads across 16 lanes, 16 head elems spread across 4 rows
-                //partition_out[vhe_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
-                //        shared_tokens[vtoken_depth][offset2][lane16id][offset1],
-                //        partition_out[vhe_depth]);
+                tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
+                        shared_logits[vtoken_depth][offset2][lane16id][offset1],
+                        tmp_out);
               }
           }
         }
         outelems[vhe_depth] = from_floatx4<scalar_t>(tmp_out);
     }
 
-#if 1
+    __syncthreads();
+    
+    for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+        shared_logits[warpid][vhe_depth][lane16id][rowid] = outelems[vhe_depth]; //lane16 id head dimension; rowid head element dimension
+    }
+
+    __syncthreads();
+
+    if (warpid == 0) {
+        _B16x8 vout[GQA_RATIO4];
+        for (int h = 0; h < GQA_RATIO4; h++) {
+            const int local_head_idx = 4 * h + rowid;
+            const int head_elem_idx = lane16id * 8;
+            const int offset1 = (head_elem_idx / 16)%4;
+            const int offset2 = head_elem_idx / 16 / NWARPS;
+            const int offset3 = (head_elem_idx / 4)%4;
+            for (int i=0; i<2; i++) {
+                vout[h].xy[i] = shared_logits[offset1][offset2][local_head_idx][offset3+i];
+            }
+        }
+
+        const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
+        scalar_t* out_ptr = out +
+                          seq_idx * total_num_heads * hsz_maxp_mult + partition_idx * HEAD_SIZE;
+        for (int h = 0; h < GQA_RATIO4; h++) {
+            const int local_head_idx = 4 * h + rowid;
+            if (local_head_idx < GQA_RATIO) {
+                const int out_head_idx = wg_start_head_idx + local_head_idx;
+                scalar_t* out_ptr2 = out_ptr + out_head_idx * hsz_maxp_mult;
+                const int head_elem_idx = lane16id * 8;
+                scalar_t* out_ptr3 = out_ptr2 + head_elem_idx;
+                _B16x8* out_ptr_B16x8 = reinterpret_cast<_B16x8*>(out_ptr3);
+                *out_ptr_B16x8 = vout[h];
+            }
+        }
+
+    }
+
+
+#if 0
     //if output format is 16 he across 16 lanes, 16 qheads spread across 4 rows
     const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
     scalar_t* out_ptr = out +
@@ -661,7 +700,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
             }
         }
     }
-#else
+#endif
+#if 0
     //if output format is 16 qheads across 16 lanes, 16 he spread across 4 rows
     if (lane16id < GQA_RATIO) {
         const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
