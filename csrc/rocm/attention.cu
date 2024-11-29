@@ -420,10 +420,17 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const int64_t seq_idx64 = static_cast<int64_t>(seq_idx);
     const scalar_t* q_ptr = q + seq_idx64 * q_stride + global_qhead_idx * HEAD_SIZE + rowid * CONTIGUOUS_KV_ELEMS_16B_LOAD;
 
-    for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
-        const scalar_t* q_fetch_ptr = q_ptr + qkhe_depth * QKHE_PER_FETCH; 
-        const _B16x8* q_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(q_fetch_ptr);
-        Qlocal[qkhe_depth] = *q_fetch_ptr_16B; 
+    if (lane16id < GQA_RATIO) {
+        for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
+            const scalar_t* q_fetch_ptr = q_ptr + qkhe_depth * QKHE_PER_FETCH; 
+            const _B16x8* q_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(q_fetch_ptr);
+            Qlocal[qkhe_depth] = *q_fetch_ptr_16B; 
+        }
+    } else {
+        for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
+            Qlocal[qkhe_depth].xy[0] = {0}; 
+            Qlocal[qkhe_depth].xy[1] = {0}; 
+        }
     }
 
     constexpr int KX = 16 / sizeof(cache_t);
@@ -511,9 +518,13 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
 
     float qk_max = -FLT_MAX;
 
+    const int qkout_token_idx = partition_start_token_idx + TOKENS_PER_WARP * warpid + rowid * 4;
+
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        const int local_token_idx = qkout_token_idx + token_depth * 16;
         for (int i=0; i<4; i++) {
-            qk_max = fmaxf(qk_max, dout[token_depth][i]);
+            const float tmp = (local_token_idx + i < context_len) ? dout[token_depth][i] : -FLT_MAX;
+            qk_max = fmaxf(qk_max, tmp);
         }
     }
 
@@ -524,9 +535,11 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     float exp_sum = 0.0f;
 
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        const int local_token_idx = qkout_token_idx + token_depth * 16;
         for (int i=0; i<4; i++) {
-            dout[token_depth][i] = __expf(dout[token_depth][i] - qk_max);
-            exp_sum += dout[token_depth][i];
+            const float tmp = (local_token_idx + i < context_len) ? __expf(dout[token_depth][i] - qk_max) : 0.0f;
+            dout[token_depth][i] = tmp;
+            exp_sum += tmp;
         }
     }
 
@@ -595,14 +608,14 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     }
 #endif
 
-    floatx4 partition_out[VHELOOP];
+    //floatx4 partition_out[VHELOOP];
     _B16x4 outelems[VHELOOP];
     //floatx4 vout[VHELOOP][VTLOOP]; //this could be B8x16 too
     //16he across lanes x 16 tokens per lane
     //const int total_num_heads = gridDim.z * GQA_RATIO;
 
     for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-        partition_out[vhe_depth] = {0};
+        floatx4 tmp_out = {0};
 
         for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
 
@@ -614,20 +627,25 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                 //partition_out[vhe_depth] = __builtin_amdgcn_mfma_f32_16x16x16f16(shared_tokens[vtoken_depth][offset2][lane16id][offset1],
                 //        Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i], 
                 //        partition_out[vhe_depth], 0, 0, 0); 
-                partition_out[vhe_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(shared_tokens[vtoken_depth][offset2][lane16id][offset1],
-                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i], partition_out[vhe_depth]);
+
+                //output format is 16 head elems across 16 lanes, 16 qheads spread across 4 rows
+                tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(shared_tokens[vtoken_depth][offset2][lane16id][offset1],
+                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i], tmp_out);
+
+                //output format is 16 qheads across 16 lanes, 16 head elems spread across 4 rows
+                //partition_out[vhe_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
+                //        shared_tokens[vtoken_depth][offset2][lane16id][offset1],
+                //        partition_out[vhe_depth]);
               }
           }
-          //vout *= inv_sum_scale[vtoken_depth];  
-          //partition_out[vhe_depth] += vout;
         }//sub partition loop
-        outelems[vhe_depth] = from_floatx4<scalar_t>(partition_out[vhe_depth]);
-        //output format is 16 he across 16 lanes, 16 qheads spread across 4 rows
+        outelems[vhe_depth] = from_floatx4<scalar_t>(tmp_out);
     }
 
     //scalar_t* out_ptr = final_out +
     //                      seq_idx * total_num_heads * HEAD_SIZE;
-
+#if 1
+    //if output format is 16 he across 16 lanes, 16 qheads spread across 4 rows
     const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
     scalar_t* out_ptr = out +
                           seq_idx * total_num_heads * hsz_maxp_mult + partition_idx * HEAD_SIZE;
@@ -648,8 +666,25 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
             }
         }
     }
-
-
+#endif
+#if 0
+    //if output format is 16 qheads across 16 lanes, 16 he spread across 4 rows
+    if (lane16id < GQA_RATIO) {
+        const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
+        scalar_t* out_ptr = out +
+                          seq_idx * total_num_heads * hsz_maxp_mult + partition_idx * HEAD_SIZE;
+        const int local_head_idx = lane16id;
+        const int out_head_idx = wg_start_head_idx + local_head_idx;
+        scalar_t* out_ptr2 = out_ptr + out_head_idx * hsz_maxp_mult;
+        const int vhe_offset = warpid * 16 + rowid * 4;
+        for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+            const int vhead_elem = vhe_depth * NWARPS * 16 + vhe_offset;
+            scalar_t* out_ptr3 = out_ptr2 + vhead_elem;
+            _B16x4* out_ptr_B16x4 = reinterpret_cast<_B16x4*>(out_ptr3);
+            *out_ptr_B16x4 = outelems[vhe_depth];
+        }
+    }
+#endif
 #if 0 
     floatx4 partition_out[VHELOOP];
     for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
@@ -1921,18 +1956,20 @@ void paged_attention_custom_launcher(
     //case 12:
     //  LAUNCH_CUSTOM_ATTENTION(12);
     //  break;
-    //case 13:
-    //  LAUNCH_CUSTOM_ATTENTION(13);
-    //  break;
+    case 13:
+      //LAUNCH_CUSTOM_ATTENTION(13);
+      LAUNCH_CUSTOM_ATTENTION_MFMA16(13);
+      break;
     //case 14:
     //  LAUNCH_CUSTOM_ATTENTION(14);
     //  break;
     //case 15:
     //  LAUNCH_CUSTOM_ATTENTION(15);
     //  break;
-    //case 16:
-    //  LAUNCH_CUSTOM_ATTENTION(16);
-    //  break;
+    case 16:
+      //LAUNCH_CUSTOM_ATTENTION(16);
+      LAUNCH_CUSTOM_ATTENTION_MFMA16(16);
+      break;
     default:
       TORCH_CHECK(false, "Unsupported gqa ratio: ", gqa_ratio);
       break;
