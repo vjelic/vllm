@@ -245,4 +245,4 @@ def test_fused_rotary_embedding_with_reshape_cache(
     assert torch.allclose(query, ref_query, atol=atol, rtol=rtol)
     assert torch.allclose(key, ref_key, atol=atol, rtol=rtol)
     assert torch.allclose(key_cache, cloned_key_cache, atol=atol, rtol=rtol)
-    #assert torch.allclose(value_cache, cloned_value_cache, atol=atol, rtol=rtol)
+    assert torch.allclose(value_cache, cloned_value_cache, atol=atol, rtol=rtol)

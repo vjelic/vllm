@@ -166,7 +166,7 @@ __device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
     }
 }
 
-template <typename scalar_t, int width, typename cache_t, bool isKey, vllm::Fp8KVCacheDataType kv_dt>
+template <typename scalar_t, int width, typename cache_t, vllm::Fp8KVCacheDataType kv_dt>
 __device__ void store_value_into_cache(
                           cache_t* __restrict__ cache,
                           const int head_idx, const int head_offset,
@@ -175,23 +175,14 @@ __device__ void store_value_into_cache(
                           const int64_t block_offset, const int x,
                           vec_t<scalar_t, width>& val,
                           const float kv_scale) {
-  int64_t tgt_idx;
-  if constexpr (isKey) {
-    const int x_idx = head_offset / x;
-    const int x_offset = head_offset % x;
+  const int x_idx = head_offset / x;
+  const int x_offset = head_offset % x;
 
-    tgt_idx = 
-        block_idx * num_kv_heads * (head_size / x) * block_size * x +
-        head_idx * (head_size / x) * block_size * x + 
-        x_idx * block_size * x +
-        block_offset * x + x_offset;
-  } else {
-    tgt_idx =
-        block_idx * num_kv_heads * head_size * block_size +
-        head_idx * head_size * block_size + 
-        head_offset * block_size +
-        block_offset;
-  }
+  const int64_t tgt_idx = 
+      block_idx * num_kv_heads * (head_size / x) * block_size * x +
+      head_idx * (head_size / x) * block_size * x + 
+      x_idx * block_size * x +
+      block_offset * x + x_offset;
 
   if constexpr (kv_dt == vllm::Fp8KVCacheDataType::kAuto) {
     *reinterpret_cast<vec_t<scalar_t, width> *>(cache + tgt_idx) = val;
@@ -269,12 +260,12 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
               embed_dim, IS_NEOX, out_xvec, out_yvec);
 
     if (block_size != 0) {
-      store_value_into_cache<scalar_t, width, cache_t, true, kv_dt>
+      store_value_into_cache<scalar_t, width, cache_t, kv_dt>
                             (key_cache, head_idx, rot_offset,
                             head_size, num_kv_heads,
                             block_idx, block_size, block_offset, 
                             x, out_xvec, k_scale);
-      store_value_into_cache<scalar_t, width, cache_t, true, kv_dt>
+      store_value_into_cache<scalar_t, width, cache_t, kv_dt>
                             (key_cache, head_idx, embed_dim + rot_offset,
                             head_size, num_kv_heads,
                             block_idx, block_size, block_offset, 
@@ -282,111 +273,28 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
     }
   }
 
-  // const int nv = num_kv_heads * head_size;
-  // for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
-  //   const int64_t src_value_idx = token_idx * value_stride + i;
-  //   scalar_t tgt_value = value[src_value_idx];
+  const int nv = num_kv_heads * head_size;
+  for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
+    const int head_idx = i / head_size;
+    const int head_offset = i % head_size;
 
-  //   store_value_into_cache<scalar_t, cache_t, false, kv_dt>
-  //                         (value_cache, head_size, num_kv_heads, 
-  //                           block_idx, block_size, block_offset,
-  //                           0, i, tgt_value, v_scale);
-  // }
+    const int64_t src_value_idx = token_idx * value_stride + i;
+    scalar_t tgt_value = value[src_value_idx];
+
+    const int64_t tgt_idx =
+        block_idx * num_kv_heads * head_size * block_size +
+        head_idx * head_size * block_size + 
+        head_offset * block_size +
+        block_offset;
+
+    if constexpr (kv_dt == vllm::Fp8KVCacheDataType::kAuto) {
+      value_cache[tgt_idx] = tgt_value;
+    } else {
+      value_cache[tgt_idx] =
+          vllm::fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, v_scale);
+    }
+  }
 }
-
-
-// template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
-// __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache_kernel(
-//         scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
-//                                              // [num_tokens, num_heads, head_size]
-//         scalar_t* __restrict__ key,          // [num_tokens, num_heads, head_size]
-//         const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
-//         cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
-//         cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size, block_size]
-//         const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim // 2]
-//         const int64_t* __restrict__ positions,  // [batch_size, seq_len] or [num_tokens]
-//         const int64_t* __restrict__ slot_mapping,  // [num_tokens]
-//         const int64_t query_stride, const int key_stride, const int value_stride, 
-//         const int num_heads, const int num_kv_heads, const int head_size, 
-//         const int rot_dim, const int block_size, const int x, 
-//         const float k_scale, const float v_scale) {
-    
-//     // Each thread block is responsible for one token.
-//   const int token_idx = blockIdx.x;
-//   int64_t pos = positions[token_idx];
-//   const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
-
-//   const int embed_dim = rot_dim / 2;
-//   const scalar_t* cos_ptr = cache_ptr;
-//   const scalar_t* sin_ptr = cache_ptr + embed_dim;
-
-//   const int nq = num_heads * embed_dim;
-//   for (int i = threadIdx.x; i < nq; i += blockDim.x) {
-//     const int head_idx = i / embed_dim;
-//     const int rot_offset = i % embed_dim;
-//     const int64_t token_head = token_idx * query_stride + head_idx * head_size;
-
-//     int x_index, y_index;
-//     scalar_t x_value, y_value; 
-//     apply_token_rotary_embedding<scalar_t, IS_NEOX>(
-//                                 query + token_head, cos_ptr, sin_ptr, 
-//                                 rot_offset, embed_dim,
-//                                 x_index, x_value, 
-//                                 y_index, y_value);
-//     query[token_head + x_index] = x_value;
-//     query[token_head + y_index] = y_value;
-//   }
-
-//   const int64_t slot_idx = block_size == 0 ? 0: slot_mapping[token_idx];
-//   if (slot_idx < 0) {
-//     // Padding token that should be ignored.
-//     return;
-//   }
-
-//   const int64_t block_idx = slot_idx / block_size;
-//   const int64_t block_offset = slot_idx % block_size;
-
-//   const int nk = num_kv_heads * embed_dim;
-//   for (int i = threadIdx.x; i < nk; i += blockDim.x) {
-//     const int head_idx = i / embed_dim;
-//     const int rot_offset = i % embed_dim;
-//     const int64_t token_head = token_idx * key_stride + head_idx * head_size;
-
-//     int x_index, y_index;
-//     scalar_t x_value, y_value; 
-//     apply_token_rotary_embedding<scalar_t, IS_NEOX>(
-//                                 key + token_head, cos_ptr, sin_ptr, 
-//                                 rot_offset, embed_dim, 
-//                                 x_index, x_value, 
-//                                 y_index, y_value);
-    
-//     // FIXME: probably not needed for decode path???
-//     key[token_head + x_index] = x_value;
-//     key[token_head + y_index] = y_value;
-
-//     if (block_size != 0) {
-//       store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-//                             (key_cache, head_size, num_kv_heads,
-//                               block_idx, block_size, block_offset, 
-//                               x, head_idx * head_size + x_index, x_value, k_scale);
-//       store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-//                             (key_cache, head_size, num_kv_heads,
-//                               block_idx, block_size, block_offset,
-//                               x, head_idx * head_size + y_index, y_value, k_scale);
-//     }
-//   }
-
-//   const int nv = num_kv_heads * head_size;
-//   for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
-//     const int64_t src_value_idx = token_idx * value_stride + i;
-//     scalar_t tgt_value = value[src_value_idx];
-
-//     store_value_into_cache<scalar_t, cache_t, false, kv_dt>
-//                           (value_cache, head_size, num_kv_heads, 
-//                             block_idx, block_size, block_offset,
-//                             0, i, tgt_value, v_scale);
-//   }
-// }
 
 } // namespace vllm
 
