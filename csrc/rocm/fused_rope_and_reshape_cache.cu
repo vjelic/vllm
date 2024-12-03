@@ -2,8 +2,24 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#include "cuda_compat.h"
 #include "dispatch_utils.h"
+#include "attention/attention_dtypes.h"
+#ifndef USE_ROCM
+  #include <cuda_bf16.h>
+  #include <cuda_fp16.h>
+  #include <cub/util_type.cuh>
+  #include <cub/cub.cuh>
+#else
+  #include <hip/hip_bf16.h>
+  #include <hip/hip_fp16.h>
+  #include <hipcub/util_type.hpp>
+  #include <hipcub/hipcub.hpp>
+  #include "quantization/fp8/amd/hip_float8.h"
+  #include "quantization/fp8/amd/quant_utils.cuh"
+
+using __nv_bfloat16 = __hip_bfloat16;
+using __nv_bfloat162 = __hip_bfloat162;
+#endif
 
 #ifdef USE_ROCM
   #include "quantization/fp8/amd/quant_utils.cuh"
@@ -11,53 +27,154 @@
   #include "quantization/fp8/nvidia/quant_utils.cuh"
 #endif
 
-#include <algorithm>
-#include <cassert>
-#include <map>
-#include <vector>
+namespace {
 
-#ifdef USE_ROCM
+template <typename scalar_t, int width>
+struct __align__(16) vec_t;
 
-#include <hip/hip_bf16.h>
-typedef __hip_bfloat16 __nv_bfloat16;
+template <typename scalar_t, int width>
+__device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
+                          const scalar_t* __restrict__ sin_ptr,
+                          const scalar_t* __restrict__ cos_ptr,
+                          int rot_offset, int embed_dim, 
+                          const bool IS_NEOX,
+                          vec_t<scalar_t, width>& out_xvec,
+                          vec_t<scalar_t, width>& out_yvec);
 
-#endif
+template <typename scalar_t, int width>
+struct __align__(16) vec_t {
+  scalar_t data[width];
 
-namespace vllm {
-
-template <typename scalar_t, bool IS_NEOX>
-inline __device__ void apply_token_rotary_embedding(
-    const scalar_t* __restrict__ arr, const scalar_t* __restrict__ cos_ptr,
-    const scalar_t* __restrict__ sin_ptr, int rot_offset, int embed_dim,
-    int &x_index, scalar_t &x, int &y_index, scalar_t &y) {
-  scalar_t cos, sin;
-  if (IS_NEOX) {
-    // GPT-NeoX style rotary embedding.
-    x_index = rot_offset;
-    y_index = embed_dim + rot_offset;
-  } else {
-    // GPT-J style rotary embedding.
-    x_index = 2 * rot_offset;
-    y_index = 2 * rot_offset + 1;
+  __device__ vec_t() = default;
+  __device__ vec_t(const scalar_t (& _data)[width]){
+#pragma unroll
+    for (int i = 0; i < width; ++i) data[i] = _data[i];
+  }
+  __device__ vec_t(const vec_t<scalar_t, width>& other) {
+#pragma unroll
+    for (int i = 0; i < width; ++i) data[i] = other.data[i];
   }
 
-  cos = VLLM_LDG(cos_ptr + rot_offset);
-  sin = VLLM_LDG(sin_ptr + rot_offset);
+  __device__ vec_t operator*(const vec_t& other) const {
+    vec_t<scalar_t, width> tmp{*this};
+#pragma unroll
+    for (int i = 0; i < width; ++i) tmp.data[i] *= other.data[i];
+    return tmp;
+  }
 
-  x = arr[x_index] * cos - arr[y_index] * sin;
-  y = arr[y_index] * cos + arr[x_index] * sin;
+  __device__ vec_t operator*(const float& scale) const {
+    vec_t<scalar_t, width> tmp{*this};
+#pragma unroll
+    for (int i = 0; i < width; ++i) tmp.data[i] *= scale;
+    return tmp;
+  }
+
+  __device__ vec_t operator+(const vec_t& other) const {
+    vec_t<scalar_t, width> tmp{*this};
+#pragma unroll
+    for (int i = 0; i < width; ++i) tmp.data[i] += other.data[i];
+    return tmp;
+  }
+
+  __device__ vec_t operator-(const vec_t& other) const {
+    vec_t<scalar_t, width> tmp{*this};
+#pragma unroll
+    for (int i = 0; i < width; ++i) tmp.data[i] -= other.data[i];
+    return tmp;
+  }
+
+  __device__ vec_t<scalar_t, width>& operator=(const vec_t& other) {
+#pragma unroll
+    for (int i = 0; i < width; ++i) data[i] = other.data[i];
+    return *this;
+  }
+
+  __device__ vec_t<scalar_t, width>& operator+=(const vec_t& other) {
+#pragma unroll
+    for (int i = 0; i < width; ++i) data[i] += other.data[i];
+    return *this;
+  }
+
+  __device__ scalar_t& operator [](const size_t& idx) {
+    return data[idx];
+  }
+
+  __device__ scalar_t operator [](const size_t& idx) const {
+    return data[idx];
+  }
+
+  friend
+  __device__ void apply_rope<scalar_t, width>(
+                            scalar_t* __restrict__ arr_ptr,
+                            const scalar_t* __restrict__ sin_ptr,
+                            const scalar_t* __restrict__ cos_ptr,
+                            int rot_offset, int embed_dim,
+                            const bool IS_NEOX,
+                            vec_t<scalar_t, width>& out_xvec,
+                            vec_t<scalar_t, width>& out_yvec);
+};
+
+
+template <typename scalar_t, int width>
+__device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
+                          const scalar_t* __restrict__ cos_ptr,
+                          const scalar_t* __restrict__ sin_ptr,
+                          int rot_offset, int embed_dim,
+                          const bool IS_NEOX,
+                          vec_t<scalar_t, width>& out_xvec,
+                          vec_t<scalar_t, width>& out_yvec) {
+    const vec_t<scalar_t, width> xvec = 
+          *reinterpret_cast<vec_t<scalar_t, width> *>(arr_ptr + rot_offset);
+    const vec_t<scalar_t, width> yvec = 
+          *reinterpret_cast<vec_t<scalar_t, width> *>(arr_ptr + embed_dim + rot_offset);
+
+    if (IS_NEOX) {
+      const vec_t<scalar_t, width> cos = 
+            *reinterpret_cast<const vec_t<scalar_t, width> *>(cos_ptr + rot_offset);
+      const vec_t<scalar_t, width> sin = 
+            *reinterpret_cast<const vec_t<scalar_t, width> *>(sin_ptr + rot_offset);
+#pragma unroll
+      for (int i = 0; i < width; ++i) {
+        out_xvec[i] = xvec[i] * cos[i] - yvec[i] * sin[i];
+        out_yvec[i] = yvec[i] * cos[i] + xvec[i] * sin[i];
+      }
+    } else {
+      const vec_t<scalar_t, width> xcos = 
+            *reinterpret_cast<const vec_t<scalar_t, width> *>(cos_ptr + rot_offset / 2);
+      const vec_t<scalar_t, width> xsin = 
+            *reinterpret_cast<const vec_t<scalar_t, width> *>(sin_ptr + rot_offset / 2);
+#pragma unroll
+      for (int i = 0; i < width / 2; ++i) {
+        int x_i = 2 * i;
+        int y_i = 2 * i + 1;
+        out_xvec[x_i] = xvec[x_i] * xcos[i] - xvec[y_i] * xsin[i];
+        out_xvec[y_i] = xvec[y_i] * xcos[i] + xvec[x_i] * xsin[i];
+      }
+
+      const vec_t<scalar_t, width> ycos = 
+          *reinterpret_cast<const vec_t<scalar_t, width> *>(cos_ptr + (embed_dim + rot_offset) / 2);
+      const vec_t<scalar_t, width> ysin = 
+          *reinterpret_cast<const vec_t<scalar_t, width> *>(sin_ptr + (embed_dim + rot_offset) / 2);
+
+#pragma unroll
+      for (int i = 0; i < width / 2; ++i) {
+        int x_i = 2 * i;
+        int y_i = 2 * i + 1;
+        out_yvec[x_i] = yvec[x_i] * ycos[i] - yvec[y_i] * ysin[i];
+        out_yvec[y_i] = yvec[y_i] * ycos[i] + yvec[x_i] * ysin[i];
+      }
+    }
 }
 
-template <typename scalar_t, typename cache_t, bool isKey, Fp8KVCacheDataType kv_dt>
-inline __device__ void store_value_into_cache(
-      cache_t* __restrict__ cache, 
-      const int head_size, const int num_kv_heads, 
-      const int64_t block_idx, const int block_size, const int64_t block_offset,
-      const int x, const int64_t idx, scalar_t val, const float kv_scale) {
-
-  const int head_idx = idx / head_size;
-  const int head_offset = idx % head_size;
-
+template <typename scalar_t, int width, typename cache_t, bool isKey, vllm::Fp8KVCacheDataType kv_dt>
+__device__ void store_value_into_cache(
+                          cache_t* __restrict__ cache,
+                          const int head_idx, const int head_offset,
+                          const int head_size, const int num_kv_heads,
+                          const int64_t block_idx, const int block_size,
+                          const int64_t block_offset, const int x,
+                          vec_t<scalar_t, width>& val,
+                          const float kv_scale) {
   int64_t tgt_idx;
   if constexpr (isKey) {
     const int x_idx = head_offset / x;
@@ -76,18 +193,20 @@ inline __device__ void store_value_into_cache(
         block_offset;
   }
 
-  if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
-    cache[tgt_idx] = val;
+  if constexpr (kv_dt == vllm::Fp8KVCacheDataType::kAuto) {
+    *reinterpret_cast<vec_t<scalar_t, width> *>(cache + tgt_idx) = val;
   } else {
-    cache[tgt_idx] =
-        fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
+    *reinterpret_cast<vec_t<scalar_t, width> *>(cache + tgt_idx) =
+        vllm::fp8::scaled_convert<cache_t, scalar_t, kv_dt>(val, kv_scale);
   }
 }
 
+} // anonymous namespace
 
+namespace vllm {
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
-__global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache_kernel(
+__global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache_kernel_vec(
         scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
                                              // [num_tokens, num_heads, head_size]
         scalar_t* __restrict__ key,          // [num_tokens, num_heads, head_size]
@@ -101,9 +220,12 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
         const int num_heads, const int num_kv_heads, const int head_size, 
         const int rot_dim, const int block_size, const int x, 
         const float k_scale, const float v_scale) {
-    
-    // Each thread block is responsible for one token.
-  const int token_idx = blockIdx.x;
+  
+  const int width = 16 / sizeof(scalar_t);
+  using vec_t = vec_t<scalar_t, width>;
+
+  // Each thread block is responsible for "width" tokens.
+  const int token_idx = blockIdx.x * blockDim.y + threadIdx.y;
   int64_t pos = positions[token_idx];
   const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
 
@@ -111,21 +233,17 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
   const scalar_t* cos_ptr = cache_ptr;
   const scalar_t* sin_ptr = cache_ptr + embed_dim;
 
-  const int nq = num_heads * embed_dim;
+  const int nq = num_heads * embed_dim / width;
   for (int i = threadIdx.x; i < nq; i += blockDim.x) {
-    const int head_idx = i / embed_dim;
-    const int rot_offset = i % embed_dim;
+    const int head_idx = (i * width) / embed_dim;
+    const int rot_offset = (i * width) % embed_dim;
     const int64_t token_head = token_idx * query_stride + head_idx * head_size;
 
-    int x_index, y_index;
-    scalar_t x_value, y_value; 
-    apply_token_rotary_embedding<scalar_t, IS_NEOX>(
-                                query + token_head, cos_ptr, sin_ptr, 
-                                rot_offset, embed_dim,
-                                x_index, x_value, 
-                                y_index, y_value);
-    query[token_head + x_index] = x_value;
-    query[token_head + y_index] = y_value;
+    vec_t& out_xvec = *reinterpret_cast<vec_t *>(query + token_head + rot_offset);
+    vec_t& out_yvec = *reinterpret_cast<vec_t *>(query + token_head + embed_dim + rot_offset);
+
+    apply_rope(query + token_head, cos_ptr, sin_ptr, rot_offset,
+              embed_dim, IS_NEOX, out_xvec, out_yvec);
   }
 
   const int64_t slot_idx = block_size == 0 ? 0: slot_mapping[token_idx];
@@ -137,47 +255,138 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
   const int64_t block_idx = slot_idx / block_size;
   const int64_t block_offset = slot_idx % block_size;
 
-  const int nk = num_kv_heads * embed_dim;
+  const int nk = num_kv_heads * embed_dim / width;
   for (int i = threadIdx.x; i < nk; i += blockDim.x) {
-    const int head_idx = i / embed_dim;
-    const int rot_offset = i % embed_dim;
+    const int head_idx = (i * width) / embed_dim;
+    const int rot_offset = (i * width) % embed_dim;
     const int64_t token_head = token_idx * key_stride + head_idx * head_size;
 
-    int x_index, y_index;
-    scalar_t x_value, y_value; 
-    apply_token_rotary_embedding<scalar_t, IS_NEOX>(
-                                key + token_head, cos_ptr, sin_ptr, 
-                                rot_offset, embed_dim, 
-                                x_index, x_value, 
-                                y_index, y_value);
-    
-    // FIXME: probably not needed for decode path???
-    key[token_head + x_index] = x_value;
-    key[token_head + y_index] = y_value;
+    // FIXME check why do we need to modify key
+    vec_t& out_xvec = *reinterpret_cast<vec_t *>(key + token_head + rot_offset);
+    vec_t& out_yvec = *reinterpret_cast<vec_t *>(key + token_head + embed_dim + rot_offset);
+
+    apply_rope(key + token_head, cos_ptr, sin_ptr, rot_offset,
+              embed_dim, IS_NEOX, out_xvec, out_yvec);
 
     if (block_size != 0) {
-      store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-                            (key_cache, head_size, num_kv_heads,
-                              block_idx, block_size, block_offset, 
-                              x, head_idx * head_size + x_index, x_value, k_scale);
-      store_value_into_cache<scalar_t, cache_t, true, kv_dt>
-                            (key_cache, head_size, num_kv_heads,
-                              block_idx, block_size, block_offset,
-                              x, head_idx * head_size + y_index, y_value, k_scale);
+      store_value_into_cache<scalar_t, width, cache_t, true, kv_dt>
+                            (key_cache, head_idx, rot_offset,
+                            head_size, num_kv_heads,
+                            block_idx, block_size, block_offset, 
+                            x, out_xvec, k_scale);
+      store_value_into_cache<scalar_t, width, cache_t, true, kv_dt>
+                            (key_cache, head_idx, embed_dim + rot_offset,
+                            head_size, num_kv_heads,
+                            block_idx, block_size, block_offset, 
+                            x, out_yvec, k_scale);
     }
   }
 
-  const int nv = num_kv_heads * head_size;
-  for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
-    const int64_t src_value_idx = token_idx * value_stride + i;
-    scalar_t tgt_value = value[src_value_idx];
+  // const int nv = num_kv_heads * head_size;
+  // for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
+  //   const int64_t src_value_idx = token_idx * value_stride + i;
+  //   scalar_t tgt_value = value[src_value_idx];
 
-    store_value_into_cache<scalar_t, cache_t, false, kv_dt>
-                          (value_cache, head_size, num_kv_heads, 
-                            block_idx, block_size, block_offset,
-                            0, i, tgt_value, v_scale);
-  }
+  //   store_value_into_cache<scalar_t, cache_t, false, kv_dt>
+  //                         (value_cache, head_size, num_kv_heads, 
+  //                           block_idx, block_size, block_offset,
+  //                           0, i, tgt_value, v_scale);
+  // }
 }
+
+
+// template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt, bool IS_NEOX>
+// __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache_kernel(
+//         scalar_t* __restrict__ query,        // [batch_size, seq_len, num_heads, head_size] or 
+//                                              // [num_tokens, num_heads, head_size]
+//         scalar_t* __restrict__ key,          // [num_tokens, num_heads, head_size]
+//         const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
+//         cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
+//         cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size, block_size]
+//         const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim // 2]
+//         const int64_t* __restrict__ positions,  // [batch_size, seq_len] or [num_tokens]
+//         const int64_t* __restrict__ slot_mapping,  // [num_tokens]
+//         const int64_t query_stride, const int key_stride, const int value_stride, 
+//         const int num_heads, const int num_kv_heads, const int head_size, 
+//         const int rot_dim, const int block_size, const int x, 
+//         const float k_scale, const float v_scale) {
+    
+//     // Each thread block is responsible for one token.
+//   const int token_idx = blockIdx.x;
+//   int64_t pos = positions[token_idx];
+//   const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
+
+//   const int embed_dim = rot_dim / 2;
+//   const scalar_t* cos_ptr = cache_ptr;
+//   const scalar_t* sin_ptr = cache_ptr + embed_dim;
+
+//   const int nq = num_heads * embed_dim;
+//   for (int i = threadIdx.x; i < nq; i += blockDim.x) {
+//     const int head_idx = i / embed_dim;
+//     const int rot_offset = i % embed_dim;
+//     const int64_t token_head = token_idx * query_stride + head_idx * head_size;
+
+//     int x_index, y_index;
+//     scalar_t x_value, y_value; 
+//     apply_token_rotary_embedding<scalar_t, IS_NEOX>(
+//                                 query + token_head, cos_ptr, sin_ptr, 
+//                                 rot_offset, embed_dim,
+//                                 x_index, x_value, 
+//                                 y_index, y_value);
+//     query[token_head + x_index] = x_value;
+//     query[token_head + y_index] = y_value;
+//   }
+
+//   const int64_t slot_idx = block_size == 0 ? 0: slot_mapping[token_idx];
+//   if (slot_idx < 0) {
+//     // Padding token that should be ignored.
+//     return;
+//   }
+
+//   const int64_t block_idx = slot_idx / block_size;
+//   const int64_t block_offset = slot_idx % block_size;
+
+//   const int nk = num_kv_heads * embed_dim;
+//   for (int i = threadIdx.x; i < nk; i += blockDim.x) {
+//     const int head_idx = i / embed_dim;
+//     const int rot_offset = i % embed_dim;
+//     const int64_t token_head = token_idx * key_stride + head_idx * head_size;
+
+//     int x_index, y_index;
+//     scalar_t x_value, y_value; 
+//     apply_token_rotary_embedding<scalar_t, IS_NEOX>(
+//                                 key + token_head, cos_ptr, sin_ptr, 
+//                                 rot_offset, embed_dim, 
+//                                 x_index, x_value, 
+//                                 y_index, y_value);
+    
+//     // FIXME: probably not needed for decode path???
+//     key[token_head + x_index] = x_value;
+//     key[token_head + y_index] = y_value;
+
+//     if (block_size != 0) {
+//       store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+//                             (key_cache, head_size, num_kv_heads,
+//                               block_idx, block_size, block_offset, 
+//                               x, head_idx * head_size + x_index, x_value, k_scale);
+//       store_value_into_cache<scalar_t, cache_t, true, kv_dt>
+//                             (key_cache, head_size, num_kv_heads,
+//                               block_idx, block_size, block_offset,
+//                               x, head_idx * head_size + y_index, y_value, k_scale);
+//     }
+//   }
+
+//   const int nv = num_kv_heads * head_size;
+//   for (int i = threadIdx.x; block_size && i < nv; i += blockDim.x) {
+//     const int64_t src_value_idx = token_idx * value_stride + i;
+//     scalar_t tgt_value = value[src_value_idx];
+
+//     store_value_into_cache<scalar_t, cache_t, false, kv_dt>
+//                           (value_cache, head_size, num_kv_heads, 
+//                             block_idx, block_size, block_offset,
+//                             0, i, tgt_value, v_scale);
+//   }
+// }
 
 } // namespace vllm
 
@@ -187,7 +396,7 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
  // KV_DT is actual type of data in KV cache
  // IS_NEOX flag to compute positional encodding.
  #define CALL_ROTARY_EMBEDDING_RESHAPE_AND_CACHE(QKV_T, CACHE_T, KV_DT, IS_NEOX)            \
-    vllm::fused_rotary_embedding_and_reshape_cache_kernel<QKV_T, CACHE_T, KV_DT, IS_NEOX>   \
+    vllm::fused_rotary_embedding_and_reshape_cache_kernel_vec<QKV_T, CACHE_T, KV_DT, IS_NEOX>   \
         <<<grid, block, 0, stream>>>(                                                       \
                 reinterpret_cast<QKV_T*>(query.data_ptr()),                                 \
                 reinterpret_cast<QKV_T*>(key.data_ptr()),                                   \
@@ -207,40 +416,12 @@ __global__ void __launch_bounds__ (512) fused_rotary_embedding_and_reshape_cache
   // function with template<typename SRC_DTYPE, str CACHE_T, IS_NEOX>.
   #define DISPATCH_ROPE_BY_KV_CACHE_DTYPE(SRC_DTYPE, CACHE_T, IS_NEOX, FN)            \
     if (CACHE_T == "auto") {                                                          \
-      if (SRC_DTYPE == at::ScalarType::Float) {                                       \
-        FN(float, float, vllm::Fp8KVCacheDataType::kAuto, IS_NEOX);                   \
-      } else if (SRC_DTYPE == at::ScalarType::Half) {                                 \
+      if (SRC_DTYPE == at::ScalarType::Half) {                                        \
         FN(c10::Half, c10::Half, vllm::Fp8KVCacheDataType::kAuto, IS_NEOX);           \
       } else if (SRC_DTYPE == at::ScalarType::BFloat16) {                             \
         FN(__nv_bfloat16, __nv_bfloat16, vllm::Fp8KVCacheDataType::kAuto, IS_NEOX);   \
       } else {                                                                        \
         TORCH_CHECK(false, "Unsupported input type of kv cache: ", SRC_DTYPE);        \
-      }                                                                               \
-    } else {                                                                          \
-      if (CACHE_T == "fp8" || CACHE_T == "fp8_e4m3") {                                \
-        if (SRC_DTYPE == at::ScalarType::Float) {                                     \
-          FN(float, uint8_t, vllm::Fp8KVCacheDataType::kFp8E4M3, IS_NEOX);            \
-        } else if (SRC_DTYPE == at::ScalarType::Half) {                               \
-          FN(uint16_t, uint8_t, vllm::Fp8KVCacheDataType::kFp8E4M3, IS_NEOX);         \
-        } else if (SRC_DTYPE == at::ScalarType::BFloat16) {                           \
-          FN(__nv_bfloat16, uint8_t, vllm::Fp8KVCacheDataType::kFp8E4M3, IS_NEOX);    \
-        } else {                                                                      \
-          TORCH_CHECK(false,                                                          \
-                      "Unsupported input type of kv cache: ", SRC_DTYPE);             \
-        }                                                                             \
-      } else if (CACHE_T == "fp8_e5m2") {                                             \
-        if (SRC_DTYPE == at::ScalarType::Float) {                                     \
-          FN(float, uint8_t, vllm::Fp8KVCacheDataType::kFp8E5M2, IS_NEOX);            \
-        } else if (SRC_DTYPE == at::ScalarType::Half) {                               \
-          FN(uint16_t, uint8_t, vllm::Fp8KVCacheDataType::kFp8E5M2, IS_NEOX);         \
-        } else if (SRC_DTYPE == at::ScalarType::BFloat16) {                           \
-          FN(__nv_bfloat16, uint8_t, vllm::Fp8KVCacheDataType::kFp8E5M2, IS_NEOX);    \
-        } else {                                                                      \
-          TORCH_CHECK(false,                                                          \
-                      "Unsupported input type of kv cache: ", SRC_DTYPE);             \
-        }                                                                             \
-      } else {                                                                        \
-        TORCH_CHECK(false, "Unsupported data type of kv cache: ", CACHE_T);           \
       }                                                                               \
     }
 
@@ -276,8 +457,9 @@ void fused_rotary_embedding_and_reshape_cache(
   int block_size = key_cache.size(3);
   int x = key_cache.size(4);
 
-  dim3 grid(num_tokens);
-  dim3 block(std::min<int64_t>(num_heads * rot_dim / 2, 512));
+  auto width = 16 / key.element_size();
+  dim3 grid(num_tokens / width);
+  dim3 block(std::min<int64_t>(num_heads * rot_dim / 2, 512) / width, width);
   const at::cuda::OptionalCUDAGuard device_guard(device_of(query));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 

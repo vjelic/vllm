@@ -750,6 +750,9 @@ class FusedLlama3RotaryEmbedding(Llama3RotaryEmbedding):
         key_scale: float,
         value_scale: float,
     ) -> None:
+        # print(f"{self.cos_sin_cache[1, 0:64].view(-1, 8)=}")
+        # print(f"{self.cos_sin_cache[1, 64:128].view(-1, 8)=}")
+        # print(f"{query[0, 0, :].view(-1, 128)[0, :].view(-1, 8)=}")
         torch.ops._rocm_C.fused_rotary_embedding_and_reshape_cache(
             positions, query, key,  value, key_cache, value_cache,
             self.kv_cache_dtype, self.cos_sin_cache, slot_mapping,
