@@ -32,6 +32,7 @@ from vllm.sequence import ExecuteModelRequest
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import deprecate_kwargs, weak_bind
+from vllm.utils import rpd_trace_lei, async_rpd_trace_lei
 
 logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
@@ -124,7 +125,8 @@ class AsyncStream:
 
 class RequestTracker:
     """Synchronous abstraction for tracking requests."""
-
+    
+    @rpd_trace_lei()
     def __init__(self) -> None:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._aborted_requests: asyncio.Queue[str] = asyncio.Queue()
@@ -137,7 +139,8 @@ class RequestTracker:
 
     def __len__(self) -> int:
         return len(self._request_streams)
-
+    
+    @rpd_trace_lei()
     def propagate_exception(self,
                             exc: Exception,
                             request_id: Optional[str] = None) -> None:
@@ -150,7 +153,8 @@ class RequestTracker:
             # out of self._request_streams, so we can't iterate on it directly
             for rid in tuple(self._request_streams.keys()):
                 self.abort_request(rid, exception=exc)
-
+                
+    @rpd_trace_lei()
     def process_request_output(self,
                                request_output: Union[RequestOutput,
                                                      EmbeddingRequestOutput],
@@ -173,7 +177,8 @@ class RequestTracker:
 
         if verbose and finished:
             logger.info("Finished request %s.", request_id)
-
+            
+    @rpd_trace_lei()
     def process_exception(self,
                           request_id: str,
                           exception: BaseException,
@@ -183,7 +188,8 @@ class RequestTracker:
         if verbose:
             logger.info("Finished request %s.", request_id)
         self.abort_request(request_id, exception=exception)
-
+        
+    @rpd_trace_lei()
     def add_request(self,
                     request_id: str,
                     *,
@@ -208,6 +214,7 @@ class RequestTracker:
 
         return stream
 
+    @rpd_trace_lei()
     def abort_request(self,
                       request_id: str,
                       *,
@@ -224,6 +231,7 @@ class RequestTracker:
         if stream is not None:
             stream.finish(exception=exception)
 
+    @rpd_trace_lei()
     def get_new_and_aborted_requests(self) -> Tuple[List[Dict], Set[str]]:
         """Get the new requests and finished requests to be
         sent to the engine."""
@@ -247,11 +255,13 @@ class RequestTracker:
 
         return new_requests, finished_requests
 
+    @async_rpd_trace_lei()
     async def wait_for_new_requests(self):
         if not self.has_new_requests():
             await self.new_requests_event.wait()
         self.new_requests_event.clear()
 
+    @rpd_trace_lei()
     def has_new_requests(self):
         return not self._new_requests.empty()
 
@@ -314,97 +324,98 @@ class _AsyncLLMEngine(LLMEngine):
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
-        if not scheduler_outputs.is_empty():
-            finished_requests_ids = self.scheduler[
-                virtual_engine].get_and_reset_finished_requests_ids()
+        with rpd_trace_lei(f"Step reqs={self.scheduler.get_num_unfinished_seq_groups()}"):
+            if not scheduler_outputs.is_empty():
+                finished_requests_ids = self.scheduler[
+                    virtual_engine].get_and_reset_finished_requests_ids()
 
-            # Check if we have a cached last_output from the previous iteration.
-            # For supporting PP this is probably the best way to pass the
-            # sampled_token_ids, as a separate broadcast over all the PP stages
-            # will cause one virtual engine's microbatch to block the pipeline.
-            last_sampled_token_ids = \
-                self._get_last_sampled_token_ids(virtual_engine)
+                # Check if we have a cached last_output from the previous iteration.
+                # For supporting PP this is probably the best way to pass the
+                # sampled_token_ids, as a separate broadcast over all the PP stages
+                # will cause one virtual engine's microbatch to block the pipeline.
+                last_sampled_token_ids = \
+                    self._get_last_sampled_token_ids(virtual_engine)
 
-            execute_model_req = ExecuteModelRequest(
-                seq_group_metadata_list=seq_group_metadata_list,
-                blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
-                blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
-                blocks_to_copy=scheduler_outputs.blocks_to_copy,
-                virtual_engine=virtual_engine,
-                num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
-                running_queue_size=scheduler_outputs.running_queue_size,
-                finished_requests_ids=finished_requests_ids,
-                # We use ExecuteModelRequest to pass the last sampled_token_ids
-                # to each of the non-last PP stages for in-place prepare_input.
-                last_sampled_token_ids=last_sampled_token_ids)
+                execute_model_req = ExecuteModelRequest(
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                    virtual_engine=virtual_engine,
+                    num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs.running_queue_size,
+                    finished_requests_ids=finished_requests_ids,
+                    # We use ExecuteModelRequest to pass the last sampled_token_ids
+                    # to each of the non-last PP stages for in-place prepare_input.
+                    last_sampled_token_ids=last_sampled_token_ids)
 
-            if allow_async_output_proc:
-                execute_model_req.async_callback = self.async_callbacks[
-                    virtual_engine]
+                if allow_async_output_proc:
+                    execute_model_req.async_callback = self.async_callbacks[
+                        virtual_engine]
 
-            # Execute the model.
-            outputs = await self.model_executor.execute_model_async(
-                execute_model_req)
+                # Execute the model.
+                outputs = await self.model_executor.execute_model_async(
+                    execute_model_req)
 
-            # we need to do this here so that last step's sampled_token_ids can
-            # be passed to the next iteration for PP.
+                # we need to do this here so that last step's sampled_token_ids can
+                # be passed to the next iteration for PP.
+                if self.scheduler_config.is_multi_step:
+                    self._update_cached_scheduler_output(virtual_engine, outputs)
+            else:
+                if len(ctx.output_queue) > 0:
+                    self._process_model_outputs(ctx=ctx)
+                outputs = []
+
+            # Finish the current step for all the sequence groups.
             if self.scheduler_config.is_multi_step:
-                self._update_cached_scheduler_output(virtual_engine, outputs)
-        else:
-            if len(ctx.output_queue) > 0:
-                self._process_model_outputs(ctx=ctx)
-            outputs = []
+                for seq_group in seq_group_metadata_list:
+                    seq_group.finish_step()
 
-        # Finish the current step for all the sequence groups.
-        if self.scheduler_config.is_multi_step:
-            for seq_group in seq_group_metadata_list:
-                seq_group.finish_step()
+            if not self._has_remaining_steps(seq_group_metadata_list):
+                # Clear the cache if we have finished all the steps
+                if self.scheduler_config.is_multi_step:
+                    self.cached_scheduler_outputs[
+                        virtual_engine] = SchedulerOutputState()
 
-        if not self._has_remaining_steps(seq_group_metadata_list):
-            # Clear the cache if we have finished all the steps
-            if self.scheduler_config.is_multi_step:
-                self.cached_scheduler_outputs[
-                    virtual_engine] = SchedulerOutputState()
+                # is_first_step_output is True only when the num_steps of all
+                # the sequences are 1. When the num_steps > 1,
+                # multi_step_model_runner does the first-step output append.
+                is_first_step_output: bool = False if not seq_group_metadata_list \
+                    else seq_group_metadata_list[0].state.num_steps == 1
 
-            # is_first_step_output is True only when the num_steps of all
-            # the sequences are 1. When the num_steps > 1,
-            # multi_step_model_runner does the first-step output append.
-            is_first_step_output: bool = False if not seq_group_metadata_list \
-                else seq_group_metadata_list[0].state.num_steps == 1
+                ctx.append_output(outputs=outputs,
+                                seq_group_metadata_list=seq_group_metadata_list,
+                                scheduler_outputs=scheduler_outputs,
+                                is_async=allow_async_output_proc,
+                                is_last_step=True,
+                                is_first_step_output=is_first_step_output)
 
-            ctx.append_output(outputs=outputs,
-                              seq_group_metadata_list=seq_group_metadata_list,
-                              scheduler_outputs=scheduler_outputs,
-                              is_async=allow_async_output_proc,
-                              is_last_step=True,
-                              is_first_step_output=is_first_step_output)
+                if outputs and allow_async_output_proc:
+                    assert len(
+                        outputs
+                    ) == 1, "Async postprocessor expects only a single output set"
+                    self._advance_to_next_step(
+                        outputs[0], seq_group_metadata_list,
+                        scheduler_outputs.scheduled_seq_groups)
 
-            if outputs and allow_async_output_proc:
-                assert len(
-                    outputs
-                ) == 1, "Async postprocessor expects only a single output set"
-                self._advance_to_next_step(
-                    outputs[0], seq_group_metadata_list,
-                    scheduler_outputs.scheduled_seq_groups)
+                if not allow_async_output_proc:
+                    self._process_model_outputs(ctx=ctx)
 
-            if not allow_async_output_proc:
-                self._process_model_outputs(ctx=ctx)
+                    # Log stats.
+                    self.do_log_stats(scheduler_outputs, outputs)
 
-                # Log stats.
-                self.do_log_stats(scheduler_outputs, outputs)
+                    # Tracing
+                    self.do_tracing(scheduler_outputs)
 
-                # Tracing
-                self.do_tracing(scheduler_outputs)
+            else:
+                # Multi-step case
+                return ctx.request_outputs
 
-        else:
-            # Multi-step case
-            return ctx.request_outputs
-
-        if not self.has_unfinished_requests():
-            # Drain async postprocessor (if exists)
-            if len(ctx.output_queue) > 0:
-                self._process_model_outputs(ctx=ctx)
-            assert len(ctx.output_queue) == 0
+            if not self.has_unfinished_requests():
+                # Drain async postprocessor (if exists)
+                if len(ctx.output_queue) > 0:
+                    self._process_model_outputs(ctx=ctx)
+                assert len(ctx.output_queue) == 0
 
         return ctx.request_outputs
 
@@ -419,6 +430,7 @@ class _AsyncLLMEngine(LLMEngine):
             self.get_tokenizer_group().get_lora_tokenizer_async(lora_request))
 
     @overload  # DEPRECATED
+    @async_rpd_trace_lei()
     async def add_request_async(
         self,
         request_id: str,
@@ -512,7 +524,8 @@ class _AsyncLLMEngine(LLMEngine):
             trace_headers=trace_headers,
             priority=priority,
         )
-
+        
+    @async_rpd_trace_lei()
     async def check_health_async(self) -> None:
         if self.tokenizer:
             self.tokenizer.check_health()
@@ -568,6 +581,7 @@ class AsyncLLMEngine(EngineClient):
 
     _engine_class: Type[_AsyncLLMEngine] = _AsyncLLMEngine
 
+    @rpd_trace_lei()
     def __init__(self,
                  *args,
                  log_requests: bool = True,
@@ -727,6 +741,7 @@ class AsyncLLMEngine(EngineClient):
     ) -> AnyTokenizer:
         return await self.engine.get_tokenizer_async(lora_request)
 
+    @rpd_trace_lei()
     def start_background_loop(self) -> None:
         """Start the background loop."""
         if self.errored:
@@ -757,6 +772,7 @@ class AsyncLLMEngine(EngineClient):
             self._background_loop_unshielded = None
         self.background_loop = None
 
+    @async_rpd_trace()
     async def engine_step(self, virtual_engine: int) -> bool:
         """Kick the engine to process the waiting requests.
 
@@ -805,10 +821,12 @@ class AsyncLLMEngine(EngineClient):
 
         return all_finished
 
+    @async_rpd_trace_lei()
     async def _engine_abort(self, request_ids: Iterable[str]):
         self.engine.abort_request(request_ids)
 
     @staticmethod
+    @async_rpd_trace_lei()
     async def run_engine_loop(engine_ref: ReferenceType):
         """We use a weakref to the engine so that the running loop
         doesn't prevent the engine being garbage collected."""
@@ -914,6 +932,8 @@ class AsyncLLMEngine(EngineClient):
         "inputs",
         additional_message="Please use the 'prompt' parameter instead.",
     )
+    
+    @async_rpd_trace_lei()
     async def add_request(
         self,
         request_id: str,
@@ -1036,6 +1056,7 @@ class AsyncLLMEngine(EngineClient):
             >>> # Process and return the final output
             >>> ...
         """
+        idx = 0
         async for output in await self.add_request(
                 request_id,
                 prompt,
@@ -1045,7 +1066,9 @@ class AsyncLLMEngine(EngineClient):
                 prompt_adapter_request=prompt_adapter_request,
                 priority=priority,
         ):
-            yield LLMEngine.validate_output(output, RequestOutput)
+            async with async_rpd_trace_lei(name=f"generate|add_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, RequestOutput)
+            idx += 1
 
     async def encode(
         self,
@@ -1118,6 +1141,8 @@ class AsyncLLMEngine(EngineClient):
             >>> # Process and return the final output
             >>> ...
         """
+        
+        idx = 0
         async for output in await self.add_request(
                 request_id,
                 prompt,
@@ -1126,8 +1151,11 @@ class AsyncLLMEngine(EngineClient):
                 trace_headers=trace_headers,
                 priority=priority,
         ):
-            yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            async with async_rpd_trace_lei(name=f"encode|add_request {idx}", args=idx, is_iterator=True):
+                yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            idx += 1
 
+    @async_rpd_trace_lei()
     async def abort(self, request_id: str) -> None:
         """Abort a request.
 
@@ -1146,6 +1174,7 @@ class AsyncLLMEngine(EngineClient):
 
         return self._abort(request_id)
 
+    @rpd_trace_lei()
     def _abort(self, request_id: str) -> None:
         """Abort a request.
 
@@ -1159,14 +1188,17 @@ class AsyncLLMEngine(EngineClient):
                                             exception=asyncio.CancelledError,
                                             verbose=self.log_requests)
 
+    @async_rpd_trace_lei()
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the vLLM engine."""
         return self.engine.get_model_config()
 
+    @async_rpd_trace_lei()
     async def get_parallel_config(self) -> ParallelConfig:
         """Get the parallel configuration of the vLLM engine."""
         return self.engine.get_parallel_config()
 
+    @async_rpd_trace_lei()
     async def get_decoding_config(self) -> DecodingConfig:
         """Get the decoding configuration of the vLLM engine."""
         return self.engine.get_decoding_config()
@@ -1179,12 +1211,14 @@ class AsyncLLMEngine(EngineClient):
         """Get the lora configuration of the vLLM engine."""
         return self.engine.get_lora_config()
 
+    @async_rpd_trace_lei()
     async def do_log_stats(
             self,
             scheduler_outputs: Optional[SchedulerOutputs] = None,
             model_output: Optional[List[SamplerOutput]] = None) -> None:
         self.engine.do_log_stats()
 
+    @async_rpd_trace_lei()
     async def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
         t = time.perf_counter()

@@ -30,6 +30,7 @@ from vllm.transformers_utils.tokenizer import (AnyTokenizer, MistralTokenizer,
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import Counter, deprecate_args, deprecate_kwargs, is_list_of
+from vllm.utils import rpd_trace_lei
 
 if envs.VLLM_USE_V1:
     from vllm.v1.engine.llm_engine import LLMEngine  # type: ignore
@@ -821,6 +822,7 @@ class LLM:
 
         return parsed_prompts
 
+    @rpd_trace_lei()
     def _validate_and_add_requests(
         self,
         prompts: Union[PromptType, Sequence[PromptType]],
@@ -870,6 +872,7 @@ class LLM:
                 priority=priority[i] if priority else 0,
             )
 
+    @rpd_trace_lei()
     def _add_request(
         self,
         prompt: PromptType,
@@ -909,6 +912,7 @@ class LLM:
             whitespace_pattern=guided_options.guided_whitespace_pattern)
         return params
 
+    @rpd_trace_lei()
     def _run_engine(
             self, *, use_tqdm: bool
     ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
@@ -928,24 +932,25 @@ class LLM:
         total_in_toks = 0
         total_out_toks = 0
         while self.llm_engine.has_unfinished_requests():
-            step_outputs = self.llm_engine.step()
-            for output in step_outputs:
-                if output.finished:
-                    outputs.append(output)
-                    if use_tqdm:
-                        if isinstance(output, RequestOutput):
-                            # Calculate tokens only for RequestOutput
-                            assert output.prompt_token_ids is not None
-                            total_in_toks += len(output.prompt_token_ids)
-                            in_spd = total_in_toks / pbar.format_dict["elapsed"]
-                            total_out_toks += sum(
-                                len(stp.token_ids) for stp in output.outputs)
-                            out_spd = (total_out_toks /
-                                       pbar.format_dict["elapsed"])
-                            pbar.postfix = (
-                                f"est. speed input: {in_spd:.2f} toks/s, "
-                                f"output: {out_spd:.2f} toks/s")
-                        pbar.update(1)
+            with rpd_trace_lei(f"Step reqs={self.llm_engine.get_num_unfinished_requests()}"):
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if output.finished:
+                        outputs.append(output)
+                        if use_tqdm:
+                            if isinstance(output, RequestOutput):
+                                # Calculate tokens only for RequestOutput
+                                assert output.prompt_token_ids is not None
+                                total_in_toks += len(output.prompt_token_ids)
+                                in_spd = total_in_toks / pbar.format_dict["elapsed"]
+                                total_out_toks += sum(
+                                    len(stp.token_ids) for stp in output.outputs)
+                                out_spd = (total_out_toks /
+                                        pbar.format_dict["elapsed"])
+                                pbar.postfix = (
+                                    f"est. speed input: {in_spd:.2f} toks/s, "
+                                    f"output: {out_spd:.2f} toks/s")
+                            pbar.update(1)
 
         if use_tqdm:
             pbar.close()

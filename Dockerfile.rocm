@@ -24,7 +24,7 @@ USER root
 ARG BASE_IMAGE
 ARG COMMON_WORKDIR
 # Used as ARCHes for all components
-ARG ARG_PYTORCH_ROCM_ARCH="gfx90a;gfx942"
+ARG ARG_PYTORCH_ROCM_ARCH="gfx942"
 ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH}
 
 # Install some basic utilities

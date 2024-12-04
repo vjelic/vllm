@@ -51,6 +51,7 @@ from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (DeviceMemoryProfiler, PyObjectCache, async_tensor_h2d,
                         flatten_2d_lists, is_pin_memory_available, rpd_mark,
                         supports_dynamo, weak_ref_tensor)
+from vllm.utils import rpd_trace_lei
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
     _add_attn_metadata_broadcastable_dict,
@@ -950,7 +951,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     """
     _model_input_cls: Type[TModelInputForGPU]
     _builder_cls: Type[ModelInputForGPUBuilder]
-
+    
+    @rpd_trace_lei()
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -1048,6 +1050,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
               SamplingMetadataCache() \
                 if self.parallel_config.pipeline_parallel_size == 1 else None
 
+    @rpd_trace_lei()
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
         with DeviceMemoryProfiler() as m:
@@ -1130,6 +1133,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 fullgraph=envs.VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE,
                 backend=backend)
 
+    @rpd_trace_lei()
     def save_sharded_state(
         self,
         path: str,
@@ -1158,6 +1162,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         block_size = self.block_size
         return (self.max_seq_len_to_capture + block_size - 1) // block_size
 
+    @rpd_trace_lei()
     def _prepare_model_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1186,6 +1191,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         return builder.build()  # type: ignore
 
     @torch.inference_mode()
+    @rpd_trace_lei()
     def profile_run(self) -> None:
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
@@ -1369,6 +1375,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         return uses_mrope(self.model_config.hf_config)
 
     @torch.inference_mode()
+    @rpd_trace_lei()
     def capture_model(self, kv_caches: List[List[torch.Tensor]]) -> None:
         """Cuda graph capture a model.
 
@@ -1580,6 +1587,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
 
+    @rpd_trace_lei()
     @rpd_mark()
     @torch.inference_mode()
     @dump_input_when_exception(exclude_args=[0], exclude_kwargs=["self"])
@@ -1590,73 +1598,104 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        if num_steps > 1:
-            raise ValueError("num_steps > 1 is not supported in ModelRunner")
+        with rpd_trace_lei("execute_model:prepare"):
+            if num_steps > 1:
+                raise ValueError("num_steps > 1 is not supported in ModelRunner")
 
-        if self.lora_config:
-            assert model_input.lora_requests is not None
-            assert model_input.lora_mapping is not None
-            self.set_active_loras(model_input.lora_requests,
-                                  model_input.lora_mapping)
+            if self.lora_config:
+                assert model_input.lora_requests is not None
+                assert model_input.lora_mapping is not None
+                self.set_active_loras(model_input.lora_requests,
+                                    model_input.lora_mapping)
 
-        if self.prompt_adapter_config:
-            assert model_input.prompt_adapter_requests is not None
-            assert model_input.prompt_adapter_mapping is not None
-            self.set_active_prompt_adapters(
-                model_input.prompt_adapter_requests,
-                model_input.prompt_adapter_mapping)
+            if self.prompt_adapter_config:
+                assert model_input.prompt_adapter_requests is not None
+                assert model_input.prompt_adapter_mapping is not None
+                self.set_active_prompt_adapters(
+                    model_input.prompt_adapter_requests,
+                    model_input.prompt_adapter_mapping)
 
-        self.attn_state.begin_forward(model_input)
+            self.attn_state.begin_forward(model_input)
 
-        # Currently cuda graph is only supported by the decode phase.
-        assert model_input.attn_metadata is not None
-        prefill_meta = model_input.attn_metadata.prefill_metadata
-        decode_meta = model_input.attn_metadata.decode_metadata
-        # TODO(andoorve): We can remove this once all
-        # virtual engines share the same kv cache.
-        virtual_engine = model_input.virtual_engine
-        if prefill_meta is None and decode_meta.use_cuda_graph:
-            assert model_input.input_tokens is not None
-            graph_batch_size = model_input.input_tokens.shape[0]
-            model_executable = self.graph_runners[virtual_engine][
-                graph_batch_size]
-        else:
-            model_executable = self.model
+        with rpd_trace_lei(f"execute_model:set args prefill={attn_metadata.prefill_metadata is not None} decode={attn_metadata.decode_metadata is not None}"):
+            # Currently cuda graph is only supported by the decode phase.
+            assert model_input.attn_metadata is not None
+            prefill_meta = model_input.attn_metadata.prefill_metadata
+            decode_meta = model_input.attn_metadata.decode_metadata
+            # TODO(andoorve): We can remove this once all
+            # virtual engines share the same kv cache.
+            virtual_engine = model_input.virtual_engine
+            if prefill_meta is None and decode_meta.use_cuda_graph:
+                assert model_input.input_tokens is not None
+                graph_batch_size = model_input.input_tokens.shape[0]
+                model_executable = self.graph_runners[virtual_engine][
+                    graph_batch_size]
+            else:
+                model_executable = self.model
 
-        multi_modal_kwargs = model_input.multi_modal_kwargs or {}
-        seqlen_agnostic_kwargs = {
-            "finished_requests_ids": model_input.finished_requests_ids,
-            "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
-        } if self.has_inner_state else {}
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time):
-            model_forward_start = torch.cuda.Event(enable_timing=True)
-            model_forward_end = torch.cuda.Event(enable_timing=True)
-            model_forward_start.record()
-
-        with set_forward_context(model_input.attn_metadata):
-            hidden_or_intermediate_states = model_executable(
-                input_ids=model_input.input_tokens,
-                positions=model_input.input_positions,
-                kv_caches=kv_caches,
-                attn_metadata=model_input.attn_metadata,
-                intermediate_tensors=intermediate_tensors,
-                **MultiModalInputs.as_kwargs(multi_modal_kwargs,
-                                             device=self.device),
-                **seqlen_agnostic_kwargs)
-
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time):
-            model_forward_end.record()
-
-        # Compute the logits in the last pipeline stage.
-        if not get_pp_group().is_last_rank:
-            if (self.is_driver_worker
-                    and hidden_or_intermediate_states is not None
-                    and isinstance(hidden_or_intermediate_states,
-                                   IntermediateTensors)
-                    and self.observability_config is not None
+            multi_modal_kwargs = model_input.multi_modal_kwargs or {}
+            seqlen_agnostic_kwargs = {
+                "finished_requests_ids": model_input.finished_requests_ids,
+                "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
+            } if self.has_inner_state else {}
+            if (self.observability_config is not None
                     and self.observability_config.collect_model_forward_time):
+                model_forward_start = torch.cuda.Event(enable_timing=True)
+                model_forward_end = torch.cuda.Event(enable_timing=True)
+                model_forward_start.record()
+
+        with rpd_trace_lei(f"EXEC {'P' if prefill_meta is not None else ''} ids_len={input_tokens.shape[0]}"):
+            with set_forward_context(model_input.attn_metadata):
+                hidden_or_intermediate_states = model_executable(
+                    input_ids=model_input.input_tokens,
+                    positions=model_input.input_positions,
+                    kv_caches=kv_caches,
+                    attn_metadata=model_input.attn_metadata,
+                    intermediate_tensors=intermediate_tensors,
+                    **MultiModalInputs.as_kwargs(multi_modal_kwargs,
+                                                device=self.device),
+                    **seqlen_agnostic_kwargs)
+
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_forward_time):
+                model_forward_end.record()
+
+            # Compute the logits in the last pipeline stage.
+            if not get_pp_group().is_last_rank:
+                if (self.is_driver_worker
+                        and hidden_or_intermediate_states is not None
+                        and isinstance(hidden_or_intermediate_states,
+                                    IntermediateTensors)
+                        and self.observability_config is not None
+                        and self.observability_config.collect_model_forward_time):
+                    model_forward_end.synchronize()
+                    model_forward_time = model_forward_start.elapsed_time(
+                        model_forward_end)
+                    orig_model_forward_time = 0.0
+                    if intermediate_tensors is not None:
+                        orig_model_forward_time = intermediate_tensors.tensors.get(
+                            "model_forward_time", torch.tensor(0.0)).item()
+                    hidden_or_intermediate_states.tensors["model_forward_time"] = (
+                        torch.tensor(model_forward_time + orig_model_forward_time))
+                return hidden_or_intermediate_states
+
+            logits = self.model.compute_logits(hidden_or_intermediate_states,
+                                            model_input.sampling_metadata)
+
+            if not self.is_driver_worker:
+                return []
+
+            if model_input.async_callback is not None:
+                model_input.async_callback()
+
+            # Sample the next token.
+            output: SamplerOutput = self.model.sample(
+                logits=logits,
+                sampling_metadata=model_input.sampling_metadata,
+            )
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_forward_time
+                    and output is not None):
                 model_forward_end.synchronize()
                 model_forward_time = model_forward_start.elapsed_time(
                     model_forward_end)
@@ -1664,55 +1703,27 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 if intermediate_tensors is not None:
                     orig_model_forward_time = intermediate_tensors.tensors.get(
                         "model_forward_time", torch.tensor(0.0)).item()
-                hidden_or_intermediate_states.tensors["model_forward_time"] = (
-                    torch.tensor(model_forward_time + orig_model_forward_time))
-            return hidden_or_intermediate_states
+                # If there are multiple workers, we are still tracking the latency
+                # from the start time of the driver worker to the end time of the
+                # driver worker. The model forward time will then end up covering
+                # the communication time as well.
+                output.model_forward_time = (orig_model_forward_time +
+                                            model_forward_time)
 
-        logits = self.model.compute_logits(hidden_or_intermediate_states,
-                                           model_input.sampling_metadata)
+            if self.return_hidden_states:
+                # we only need to pass hidden states of most recent token
+                assert model_input.sampling_metadata is not None
+                indices = model_input.sampling_metadata.selected_token_indices
+                if model_input.is_prompt:
+                    hidden_states = hidden_or_intermediate_states.index_select(
+                        0, indices)
+                    output.prefill_hidden_states = hidden_or_intermediate_states
+                elif decode_meta.use_cuda_graph:
+                    hidden_states = hidden_or_intermediate_states[:len(indices)]
+                else:
+                    hidden_states = hidden_or_intermediate_states
 
-        if not self.is_driver_worker:
-            return []
-
-        if model_input.async_callback is not None:
-            model_input.async_callback()
-
-        # Sample the next token.
-        output: SamplerOutput = self.model.sample(
-            logits=logits,
-            sampling_metadata=model_input.sampling_metadata,
-        )
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_forward_time
-                and output is not None):
-            model_forward_end.synchronize()
-            model_forward_time = model_forward_start.elapsed_time(
-                model_forward_end)
-            orig_model_forward_time = 0.0
-            if intermediate_tensors is not None:
-                orig_model_forward_time = intermediate_tensors.tensors.get(
-                    "model_forward_time", torch.tensor(0.0)).item()
-            # If there are multiple workers, we are still tracking the latency
-            # from the start time of the driver worker to the end time of the
-            # driver worker. The model forward time will then end up covering
-            # the communication time as well.
-            output.model_forward_time = (orig_model_forward_time +
-                                         model_forward_time)
-
-        if self.return_hidden_states:
-            # we only need to pass hidden states of most recent token
-            assert model_input.sampling_metadata is not None
-            indices = model_input.sampling_metadata.selected_token_indices
-            if model_input.is_prompt:
-                hidden_states = hidden_or_intermediate_states.index_select(
-                    0, indices)
-                output.prefill_hidden_states = hidden_or_intermediate_states
-            elif decode_meta.use_cuda_graph:
-                hidden_states = hidden_or_intermediate_states[:len(indices)]
-            else:
-                hidden_states = hidden_or_intermediate_states
-
-            output.hidden_states = hidden_states
+                output.hidden_states = hidden_states
 
         return [output]
 
@@ -1721,6 +1732,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 #  kernels calls made within the graph
 class CUDAGraphRunner(nn.Module):
 
+    @rpd_trace_lei()
     def __init__(self, model: nn.Module, backend_name: str,
                  attn_state: AttentionState, is_encoder_decoder_model: bool):
         super().__init__()
@@ -1818,6 +1830,7 @@ class CUDAGraphRunner(nn.Module):
         else:
             self.output_buffers = hidden_or_intermediate_states
 
+    @rpd_trace_lei()
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -1827,44 +1840,49 @@ class CUDAGraphRunner(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         **kwargs,
     ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them.
-        del kv_caches
+        with rpd_trace_lei("del kv_caches"):
+            # KV caches are fixed tensors, so we don't need to copy them.
+            del kv_caches
 
-        # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
-        self.input_buffers["positions"].copy_(positions, non_blocking=True)
+        with rpd_trace_lei("copy input"):
+            # Copy the input tensors to the input buffers.
+            self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
+            self.input_buffers["positions"].copy_(positions, non_blocking=True)
 
-        if self.backend_name != "NO_ATTENTION":
-            self.input_buffers["slot_mapping"].copy_(
-                attn_metadata.slot_mapping, non_blocking=True)
+            if self.backend_name != "NO_ATTENTION":
+                self.input_buffers["slot_mapping"].copy_(
+                    attn_metadata.slot_mapping, non_blocking=True)
 
-        self.attn_state.prepare_graph_input_buffers(
-            self.input_buffers, attn_metadata, self._is_encoder_decoder_model)
+            self.attn_state.prepare_graph_input_buffers(
+                self.input_buffers, attn_metadata, self._is_encoder_decoder_model)
 
-        if "seqlen_agnostic_capture_inputs" in self.input_buffers:
-            self.model.copy_inputs_before_cuda_graphs(self.input_buffers,
-                                                      **kwargs)
+            if "seqlen_agnostic_capture_inputs" in self.input_buffers:
+                self.model.copy_inputs_before_cuda_graphs(self.input_buffers,
+                                                        **kwargs)
 
-        if "previous_hidden_states" in self.input_buffers:
-            self.input_buffers["previous_hidden_states"].copy_(
-                kwargs["previous_hidden_states"], non_blocking=True)
+            if "previous_hidden_states" in self.input_buffers:
+                self.input_buffers["previous_hidden_states"].copy_(
+                    kwargs["previous_hidden_states"], non_blocking=True)
 
-        if intermediate_tensors is not None:
-            for key in intermediate_tensors.tensors:
-                if key != "model_execute_time" and key != "model_forward_time":
-                    self.input_buffers[key].copy_(intermediate_tensors[key],
-                                                  non_blocking=True)
-        if self._is_encoder_decoder_model:
-            self.input_buffers["encoder_input_ids"].copy_(
-                kwargs['encoder_input_ids'], non_blocking=True)
-            self.input_buffers["encoder_positions"].copy_(
-                kwargs['encoder_positions'], non_blocking=True)
+            if intermediate_tensors is not None:
+                for key in intermediate_tensors.tensors:
+                    if key != "model_execute_time" and key != "model_forward_time":
+                        self.input_buffers[key].copy_(intermediate_tensors[key],
+                                                    non_blocking=True)
+            if self._is_encoder_decoder_model:
+                self.input_buffers["encoder_input_ids"].copy_(
+                    kwargs['encoder_input_ids'], non_blocking=True)
+                self.input_buffers["encoder_positions"].copy_(
+                    kwargs['encoder_positions'], non_blocking=True)
 
-        # Run the graph.
-        self.graph.replay()
-        # Return the output tensor.
-        if get_pp_group().is_last_rank:
-            return self.output_buffers["hidden_states"]
+        with rpd_trace_lei("replay")
+            # Run the graph.
+            self.graph.replay()
+        
+        with rpd_trace_lei("copy output")
+            # Return the output tensor.
+            if get_pp_group().is_last_rank:
+                return self.output_buffers["hidden_states"]
 
         return self.output_buffers
 
