@@ -12,6 +12,7 @@
 #else
   #include <hip/hip_bf16.h>
   #include <hip/hip_fp16.h>
+  #include <hip/hip_vector_types.h>
   #include <hipcub/util_type.hpp>
   #include <hipcub/hipcub.hpp>
   #include "quantization/fp8/amd/hip_float8.h"
@@ -25,6 +26,12 @@ using __nv_bfloat162 = __hip_bfloat162;
   #include "quantization/fp8/amd/quant_utils.cuh"
 #else
   #include "quantization/fp8/nvidia/quant_utils.cuh"
+#endif
+
+#if __cplusplus
+#if defined(_MSC_VER)
+static_assert(false);
+#endif
 #endif
 
 namespace {
@@ -43,64 +50,67 @@ __device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
 
 template <typename scalar_t, int width>
 struct __align__(16) vec_t {
-  scalar_t data[width];
+  union {
+    float4 fdata[2];
+    scalar_t data[width];
+  } uvec;
 
   __device__ vec_t() = default;
   __device__ vec_t(const scalar_t (& _data)[width]){
-#pragma unroll
-    for (int i = 0; i < width; ++i) data[i] = _data[i];
+    uvec.fdata[0] = *reinterpret_cast<float4 *>(&_data);
+    uvec.fdata[1] = *reinterpret_cast<float4 *>(&_data + width / 2);
   }
   __device__ vec_t(const vec_t<scalar_t, width>& other) {
-#pragma unroll
-    for (int i = 0; i < width; ++i) data[i] = other.data[i];
+    uvec.fdata[0] = other.uvec.fdata[0];
+    uvec.fdata[1] = other.uvec.fdata[2];
   }
 
   __device__ vec_t operator*(const vec_t& other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.data[i] *= other.data[i];
+    for (int i = 0; i < width; ++i) tmp.uvec.data[i] *= other.uvec.data[i];
     return tmp;
   }
 
   __device__ vec_t operator*(const float& scale) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.data[i] *= scale;
+    for (int i = 0; i < width; ++i) tmp.uvec.data[i] *= scale;
     return tmp;
   }
 
   __device__ vec_t operator+(const vec_t& other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.data[i] += other.data[i];
+    for (int i = 0; i < width; ++i) tmp.uvec.data[i] += other.uvec.data[i];
     return tmp;
   }
 
   __device__ vec_t operator-(const vec_t& other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.data[i] -= other.data[i];
+    for (int i = 0; i < width; ++i) tmp.uvec.data[i] -= other.uvec.data[i];
     return tmp;
   }
 
   __device__ vec_t<scalar_t, width>& operator=(const vec_t& other) {
 #pragma unroll
-    for (int i = 0; i < width; ++i) data[i] = other.data[i];
+    for (int i = 0; i < width; ++i) uvec.data[i] = other.uvec.data[i];
     return *this;
   }
 
   __device__ vec_t<scalar_t, width>& operator+=(const vec_t& other) {
 #pragma unroll
-    for (int i = 0; i < width; ++i) data[i] += other.data[i];
+    for (int i = 0; i < width; ++i) uvec.data[i] += other.uvec.data[i];
     return *this;
   }
 
   __device__ scalar_t& operator [](const size_t& idx) {
-    return data[idx];
+    return uvec.data[idx];
   }
 
   __device__ scalar_t operator [](const size_t& idx) const {
-    return data[idx];
+    return uvec.data[idx];
   }
 
   friend
