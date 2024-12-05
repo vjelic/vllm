@@ -64,6 +64,7 @@ typedef struct _B16x8 {
 } _B16x8;
 
 using _B8x8 = uint2;
+using _B8x4 = int32_t;
 using bit8_t = uint8_t;
 
 typedef struct _B8x16 {
@@ -156,6 +157,21 @@ __device__ __forceinline__ T from_float(const float& inp) {
   } else {
     static_assert(false, "unsupported 16b dtype");
   }
+}
+
+__device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
+    //floatx2 val[2];
+    //asm("v_cvt_pk_f32_fp8_sdwa %0, %1 src0_sel:WORD_0 \n v_nop " : "=v"(val[0]) : "v"(inp) );
+    //asm("v_cvt_pk_f32_fp8_sdwa %0, %1 src0_sel:WORD_1 \n v_nop " : "=v"(val[1]) : "v"(inp) );
+    const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
+    const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
+    floatx4 ret;
+    ret[0] = f0[0];
+    ret[1] = f0[1];
+    ret[2] = f1[0];
+    ret[3] = f1[1];
+    return ret;
+    //return *reinterpret_cast<floatx4*>(&val);
 }
 
 template <typename T>
@@ -609,16 +625,18 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
             for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
               _B8x8 Ktmp8x8 = Ktmp8x16.xy[qkratio];
 
-              union {
-                floatx4 f32x4[2];
-                vllm::Float8_ f32x8;
-              } tmpfx8;
+               union {
+                 _B8x8 b8x8;
+                 _B8x4 b8x4[2];
+               } tmpb8;
+               tmpb8.b8x8 = Ktmp8x8; 
 
-              tmpfx8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&Ktmp8x8));
+              //tmpfx8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&Ktmp8x8));
               //_B16x8 Klocaltmp = convert_b8x8_custom<scalar_t>(Ktmp8x8);
               for (int i=0; i<2; i++) {
                 floatx4 Afragmentf32, Bfragmentf32;
-                Afragmentf32 = tmpfx8.f32x4[i];
+                floatx4 tmpf = to_float_fp8x4(tmpb8.b8x4[i]);
+                Afragmentf32 = tmpf; //tmpfx8.f32x4[i];
                 //Bfragmentf32 = shared_logits[qkhe_depth][rowid][lane16id % GQA_RATIO][2*qkratio + i];
                 //Bfragmentf32 = Qlocal[qkhe_depth][qkratio][i];
                 _B16x4 Bfragment = Qlocal[qkhe_depth][qkratio].xy[i];
@@ -839,18 +857,21 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                _B8x8 Vtmp8x8 = Vtmp8x16.xy[j]; 
                //_B16x8 Vlocaltmp = convert_b8x8_custom<scalar_t>(Vtmp8x8);
                union {
-                 floatx4 f32x4[2];
-                 vllm::Float8_ f32x8;
-               } tmpfx8;
+                 _B8x8 b8x8;
+                 _B8x4 b8x4[2];
+               } tmpb8;
+               tmpb8.b8x8 = Vtmp8x8; 
 
-               tmpfx8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&Vtmp8x8));
+               //tmpfx8.f32x8 = vllm::fp8::vec_conversion<vllm::Float8_,uint2>(*reinterpret_cast<const uint2*>(&Vtmp8x8));
                for (int i=0; i<2; i++) {
+                //tmpfx8.f32x4[i] = *reinterpret_cast<floatx4*>(&Vtmp8x8);
+                floatx4 tmpf = to_float_fp8x4(tmpb8.b8x4[i]);
                 const int offset = 4*rowid + 2*j + i; 
                 const int offset1 = offset % 4;
                 const int offset2 = offset / 4;
 
                 floatx4 Afragmentf32, Bfragmentf32;
-                Afragmentf32 = tmpfx8.f32x4[i];
+                Afragmentf32 = tmpf; //tmpfx8.f32x4[i];
                 Bfragmentf32 = shared_logits[vtoken_depth][offset2][lane16id][offset1];
                 //for (int l=0; l<4; l++) {
                 //    Afragmentf32[l] = to_float_b16<scalar_t>(Afragment[l]);
