@@ -12,7 +12,6 @@
 #else
   #include <hip/hip_bf16.h>
   #include <hip/hip_fp16.h>
-  #include <hip/hip_vector_types.h>
   #include <hipcub/util_type.hpp>
   #include <hipcub/hipcub.hpp>
   #include "quantization/fp8/amd/hip_float8.h"
@@ -28,12 +27,6 @@ using __nv_bfloat162 = __hip_bfloat162;
   #include "quantization/fp8/nvidia/quant_utils.cuh"
 #endif
 
-#if __cplusplus
-#if defined(_MSC_VER)
-static_assert(false);
-#endif
-#endif
-
 namespace {
 
 template <typename scalar_t, int width>
@@ -45,94 +38,87 @@ __device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
                           const scalar_t* __restrict__ cos_ptr,
                           int rot_offset, int embed_dim, 
                           const bool IS_NEOX,
-                          vec_t<scalar_t, width>& out_xvec,
-                          vec_t<scalar_t, width>& out_yvec);
+                          vec_t<scalar_t, width>& __restrict__ out_xvec,
+                          vec_t<scalar_t, width>& __restrict__ out_yvec);
 
 template <typename scalar_t, int width>
 struct __align__(16) vec_t {
-  union {
-    float4 fdata[2];
-    scalar_t data[width];
-  } uvec;
+  scalar_t data[width];
 
   __device__ vec_t() = default;
-  __device__ vec_t(const scalar_t (& _data)[width]){
-    uvec.fdata[0] = *reinterpret_cast<float4 *>(&_data);
-    uvec.fdata[1] = *reinterpret_cast<float4 *>(&_data + width / 2);
-  }
-  __device__ vec_t(const vec_t<scalar_t, width>& other) {
-    uvec.fdata[0] = other.uvec.fdata[0];
-    uvec.fdata[1] = other.uvec.fdata[2];
+  __device__ vec_t(const vec_t<scalar_t, width>& __restrict__ other) {
+#pragma unroll
+    for (int i = 0; i < width; ++i) data[i] = other.data[i];
   }
 
-  __device__ vec_t operator*(const vec_t& other) const {
+  __device__ vec_t operator*(const vec_t& __restrict__ other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.uvec.data[i] *= other.uvec.data[i];
+    for (int i = 0; i < width; ++i) tmp.data[i] *= other.data[i];
     return tmp;
   }
 
   __device__ vec_t operator*(const float& scale) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.uvec.data[i] *= scale;
+    for (int i = 0; i < width; ++i) tmp.data[i] *= scale;
     return tmp;
   }
 
-  __device__ vec_t operator+(const vec_t& other) const {
+  __device__ vec_t operator+(const vec_t& __restrict__ other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.uvec.data[i] += other.uvec.data[i];
+    for (int i = 0; i < width; ++i) tmp.data[i] += other.data[i];
     return tmp;
   }
 
-  __device__ vec_t operator-(const vec_t& other) const {
+  __device__ vec_t operator-(const vec_t& __restrict__ other) const {
     vec_t<scalar_t, width> tmp{*this};
 #pragma unroll
-    for (int i = 0; i < width; ++i) tmp.uvec.data[i] -= other.uvec.data[i];
+    for (int i = 0; i < width; ++i) tmp.data[i] -= other.data[i];
     return tmp;
   }
 
-  __device__ vec_t<scalar_t, width>& operator=(const vec_t& other) {
+  __device__ vec_t<scalar_t, width>& operator=(const vec_t& __restrict__ other) {
 #pragma unroll
-    for (int i = 0; i < width; ++i) uvec.data[i] = other.uvec.data[i];
+    for (int i = 0; i < width; ++i) data[i] = other.data[i];
     return *this;
   }
 
-  __device__ vec_t<scalar_t, width>& operator+=(const vec_t& other) {
+  __device__ vec_t<scalar_t, width>& operator+=(const vec_t& __restrict__ other) {
 #pragma unroll
-    for (int i = 0; i < width; ++i) uvec.data[i] += other.uvec.data[i];
+    for (int i = 0; i < width; ++i) data[i] += other.data[i];
     return *this;
   }
 
   __device__ scalar_t& operator [](const size_t& idx) {
-    return uvec.data[idx];
+    return data[idx];
   }
 
   __device__ scalar_t operator [](const size_t& idx) const {
-    return uvec.data[idx];
+    return data[idx];
   }
 
   friend
-  __device__ void apply_rope<scalar_t, width>(
-                            scalar_t* __restrict__ arr_ptr,
-                            const scalar_t* __restrict__ sin_ptr,
-                            const scalar_t* __restrict__ cos_ptr,
-                            int rot_offset, int embed_dim,
-                            const bool IS_NEOX,
-                            vec_t<scalar_t, width>& out_xvec,
-                            vec_t<scalar_t, width>& out_yvec);
+  __device__ inline void apply_rope<scalar_t, width>(
+                                    scalar_t* __restrict__ arr_ptr,
+                                    const scalar_t* __restrict__ sin_ptr,
+                                    const scalar_t* __restrict__ cos_ptr,
+                                    int rot_offset, int embed_dim,
+                                    const bool IS_NEOX,
+                                    vec_t<scalar_t, width>& __restrict__ out_xvec,
+                                    vec_t<scalar_t, width>& __restrict__ out_yvec);
 };
 
 
 template <typename scalar_t, int width>
-__device__ void apply_rope(scalar_t* __restrict__ arr_ptr,
-                          const scalar_t* __restrict__ cos_ptr,
-                          const scalar_t* __restrict__ sin_ptr,
-                          int rot_offset, int embed_dim,
-                          const bool IS_NEOX,
-                          vec_t<scalar_t, width>& out_xvec,
-                          vec_t<scalar_t, width>& out_yvec) {
+__device__ inline void apply_rope(scalar_t* __restrict__ arr_ptr,
+                                  const scalar_t* __restrict__ cos_ptr,
+                                  const scalar_t* __restrict__ sin_ptr,
+                                  int rot_offset, int embed_dim,
+                                  const bool IS_NEOX,
+                                  vec_t<scalar_t, width>& __restrict__ out_xvec,
+                                  vec_t<scalar_t, width>& __restrict__ out_yvec) {
     const vec_t<scalar_t, width> xvec = 
           *reinterpret_cast<vec_t<scalar_t, width> *>(arr_ptr + rot_offset);
     const vec_t<scalar_t, width> yvec = 
