@@ -27,6 +27,9 @@ ENABLE_ARTIFICIAL_PREEMPT = bool(
 ARTIFICIAL_PREEMPTION_PROB = 0.5
 ARTIFICIAL_PREEMPTION_MAX_CNT = 500
 
+VLLM_SCHED_PREFILL_COUNT = int(
+    os.getenv("VLLM_SCHED_PREFILL_COUNT", 0))  # noqa
+
 
 class PreemptionMode(enum.Enum):
     """Preemption modes.
@@ -326,7 +329,15 @@ class Scheduler:
         # simple and NOT fair. It can lead to starvation of some
         # LoRAs. This should be improved in the future.
         self.lora_config = lora_config
+        self.prefill_timeout = 0
 
+        # slightly hackey, but if you specify prefill batch count, the delay factor
+        # needs to exist, otherwise we will always skip.  Default will be equal to
+        # VLLM_SCHED_PREFILL_COUNT, as they should be roughly the same.
+        # Recommend setting with --scheduler-delay-factor and experimenting
+        # On command line
+        if VLLM_SCHED_PREFILL_COUNT > 0 and self.scheduler_config.delay_factor == 0:
+            self.scheduler_config.delay_factor = VLLM_SCHED_PREFILL_COUNT
         version = "selfattn"
         if (self.scheduler_config.task == "embedding"
                 or self.cache_config.is_attention_free):
@@ -913,7 +924,8 @@ class Scheduler:
         waiting_queue = self.waiting
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
-        while self._passed_delay(time.time()) and waiting_queue:
+
+        while (VLLM_SCHED_PREFILL_COUNT <= len(waiting_queue) or self._passed_delay(time.time())) and waiting_queue:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)

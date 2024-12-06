@@ -48,6 +48,18 @@ class FusedMoEMethodBase(QuantizeMethodBase):
               use_grouped_topk: bool) -> torch.Tensor:
         raise NotImplementedError
 
+def permute_weight_fp16(x: torch.Tensor) -> torch.Tensor:
+    ## Hardcode BLOCK_K and BLOCK_N
+    BK = 128
+    BN = 128
+    x_ = x
+    x_ = x_.view(x.shape[0],
+                 x.shape[1]//BN, BN//16, 16,
+                 x.shape[2]//BK, BK//32, 4, 8)
+    x_ = x_.permute(0,1,5,2,6,4,3,7)
+    x_ = x_.contiguous()
+    x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
+    return x_
 
 @CustomOp.register("unquantized_fused_moe")
 class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
@@ -155,14 +167,18 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     forward_native = forward_cuda
 
     def process_weights_after_loading(self, layer: Module) -> None:
+        if envs.VLLM_MOE_SHUFFLE:
+            layer.w13_weight.data = permute_weight_fp16(layer.w13_weight.data)
+            layer.w2_weight.data = permute_weight_fp16(layer.w2_weight.data)
+            
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(
-                layer.w13_weight.data, (0, 128), "constant", 0),
+                layer.w13_weight.data, (0, 128), "constant", 0)[..., :-128],
                                                   requires_grad=False)
             torch.cuda.empty_cache()
             layer.w2_weight = torch.nn.Parameter(F.pad(layer.w2_weight.data,
                                                        (0, 128), "constant",
-                                                       0),
+                                                       0)[..., :-128],
                                                  requires_grad=False)
             torch.cuda.empty_cache()
 

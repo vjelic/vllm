@@ -79,8 +79,10 @@ if TYPE_CHECKING:
     VLLM_USE_V1: bool = False
     VLLM_SYNC_SERVER_ACCUM_REQUESTS: int = 1
     VLLM_SYNC_SERVER_ENGINE_STEPS_BETWEEN_POLLS: int = 1
-    VLLM_MOE_PADDING: bool = False
+    VLLM_MOE_PADDING: bool = True
     VLLM_FP8_PADDING: bool = True
+    VLLM_MOE_SHUFFLE: bool = False
+    FUSED_MOE_PERSISTENT: bool = False
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = False
 
 
@@ -523,6 +525,14 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Pad the weight for moe kernel or not
     "VLLM_FP8_PADDING":
     lambda: bool(int(os.getenv("VLLM_FP8_PADDING", "1"))),
+        
+    # shuffle the weight for moe kernel or not
+    "VLLM_MOE_SHUFFLE":
+    lambda: bool(int(os.getenv("VLLM_MOE_SHUFFLE", "0"))),
+
+    # User persistent version of fused_moe Triton kernel
+    "FUSED_MOE_PERSISTENT":
+    lambda: bool(int(os.getenv("FUSED_MOE_PERSISTENT", "0"))),
 
     # If set, enable multiprocessing in LLM for the V1 code path.
     "VLLM_ENABLE_V1_MULTIPROCESSING":
