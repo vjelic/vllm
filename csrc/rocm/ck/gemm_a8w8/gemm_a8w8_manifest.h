@@ -6,6 +6,7 @@
 
 #include <cstdlib>
 
+#include <torch/all.h>
 #include <torch/extension.h>
 
 template <typename DEDataType>

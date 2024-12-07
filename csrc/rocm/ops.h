@@ -23,3 +23,9 @@ void paged_attention(torch::Tensor& out, torch::Tensor& exp_sums,
                      torch::Tensor& v_scale,
                      const c10::optional<torch::Tensor>& fp8_out_scale,
                      int64_t partition_size);
+void gemm_a8w8(
+    torch::Tensor& XQ,
+    torch::Tensor& WQ,
+    torch::Tensor& x_scale,
+    torch::Tensor& w_scale,
+    torch::Tensor& Y);

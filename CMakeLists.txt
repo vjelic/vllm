@@ -538,7 +538,14 @@ if(VLLM_GPU_LANG STREQUAL "HIP")
     "csrc/rocm/attention.cu"
     "csrc/rocm/custom_kernels.cu"
     "csrc/rocm/fused_kernels.cu"
+    "csrc/rocm/ck/gemm_a8w8/gemm_a8w8.cu"
     "csrc/rocm/custom.cu")
+
+  #file(GLOB INT8_IMPL_SRCS "csrc/rocm/ck/gemm_a8w8/impl/*.cu")
+  #set(INT8_SRCS "csrc/rocm/ck/gemm_a8w8/gemm_a8w8.cu")
+  #message(STATUS "INT8_IMPL_SRCS=${INT8_IMPL_SRCS}")
+  #list(APPEND VLLM_ROCM_EXT_SRC ${INT8_SRCS})
+  #list(APPEND VLLM_ROCM_EXT_SRC ${INT8_IMPL_SRCS})
 
   define_gpu_extension_target(
     _rocm_C
