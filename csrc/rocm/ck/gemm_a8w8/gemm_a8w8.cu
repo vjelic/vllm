@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "gemm_a8w8_common.cuh"
+#include <torch/all.h>
+#include <c10/cuda/CUDAGuard.h>
+
+#if 0
 #include "gemm_a8w8_manifest.h"
 #include "gemm_a8w8_lookup.h"
+#endif 
+
+#include "gemm_a8w8_common.cuh"
 
 using RowwiseKernel = std::function<
     torch::Tensor(torch::Tensor&, torch::Tensor&,
@@ -28,6 +34,9 @@ using RowwiseKernelMap = std::unordered_map<
 
 template <typename DEDataType>
 RowwiseKernel rowwise_heuristic_dispatch(int M, int N, int K) {
+  RowwiseKernel rk;
+  return rk;
+#if 0
   // Apply shape heuristics to find a suitable kernel implementation.
   if (M < 64 && N < 2048 && K < 2048) {
     // Kernel that generally works well on small shapes.
@@ -62,6 +71,7 @@ RowwiseKernel rowwise_heuristic_dispatch(int M, int N, int K) {
     // Fallback large kernel.
     return a8w8_rowwise_256x256x256x64_32x32_4x4_4x64x1_4x64x1_1x32x1x8_8x8x1_1x1_intrawave_v4<DEDataType>;
   }
+#endif
 }
 
 // Helper function to return the next largest power of 2
@@ -75,6 +85,9 @@ RowwiseKernel rowwise_dispatch(int M, int N, int K) {
   // For a given shape, either find the best kernel via lookup or heuristic.
   // For many small M shapes, we bucket them to the next largest kernel.
   // This is fine since kernels are padded anyway.
+  RowwiseKernel rk;
+  return rk;
+#if 0
   int padded_m = M;
   if (M >= 1 && M <= 16) {
     padded_m = 16;
@@ -100,18 +113,19 @@ RowwiseKernel rowwise_dispatch(int M, int N, int K) {
   }
   // Otherwise, use heuristics.
   return rowwise_heuristic_dispatch<DEDataType>(M, N, K);
+#endif
 }
 
 
-namespace blade_llm {
 
-torch::Tensor gemm_a8w8(
+void gemm_a8w8(
     torch::Tensor& XQ,
     torch::Tensor& WQ,
     torch::Tensor& x_scale,
     torch::Tensor& w_scale,
     torch::Tensor& Y)
 {
+#if 0
     TORCH_CHECK(XQ.dtype() == at::ScalarType::Char && XQ.dtype() == WQ.dtype(),
                 "Weights and activations should both be int8!");
     TORCH_CHECK(x_scale.dtype() == Y.dtype() && w_scale.dtype() == Y.dtype(),
@@ -128,7 +142,6 @@ torch::Tensor gemm_a8w8(
     } else {
         TORCH_CHECK(false, "Unsupported scales/output dtype!");
     }
-    return Y;
+#endif
 }
 
-} // namespace blade_llm

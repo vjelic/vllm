@@ -20,3 +20,11 @@ void paged_attention(
     const c10::optional<torch::Tensor>& alibi_slopes,
     const std::string& kv_cache_dtype, double k_scale, double v_scale,
     const c10::optional<torch::Tensor>& fp8_out_scale, int64_t partition_size);
+
+void gemm_a8w8(
+    torch::Tensor& XQ,
+    torch::Tensor& WQ,
+    torch::Tensor& x_scale,
+    torch::Tensor& w_scale,
+    torch::Tensor& Y);
+

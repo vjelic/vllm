@@ -7,19 +7,23 @@
 #undef __HIP_NO_HALF_OPERATORS__
 #undef __HIP_NO_HALF_CONVERSIONS__
 
+
 #include <iostream>
 #include <numeric>
 #include <initializer_list>
 #include <cstdlib>
 
+
+#if 0
 #include <ATen/ATen.h>
-#include <torch/extension.h>
+//#include <torch/extension.h>
+#include <torch/all.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
-
 #include "ck/ck.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
-#include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+//#include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck/tensor_operation/gpu/element/unary_element_wise_operation.hpp"
 
@@ -285,6 +289,5 @@ __forceinline__ torch::Tensor gemm_a8w8_rowwise_impl(
     
     invoker.Run(argument, StreamConfig{at::cuda::getCurrentCUDAStream().stream()});
     return Y;
-}
-
+#endif
 #endif // USE_ROCM

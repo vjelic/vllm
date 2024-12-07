@@ -38,8 +38,8 @@ a8w8_rowwise_128x128x16x128_16x16_4x1_8x16x1_8x16x1_1x16x1x8_8x8x1_1x1_interwave
       ck::BlockGemmPipelineScheduler::Interwave,
       ck::BlockGemmPipelineVersion::v2,
         ck::tensor_operation::device::GemmSpecialization::KPadding>;
-  // Run kernel instance.
-  return gemm_a8w8_rowwise_impl<DEDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y);
+    // Run kernel instance.
+    return gemm_a8w8_rowwise_impl<DEDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y);
   }
   else{
     using DeviceGemmInstance = DeviceGemmHelper<
@@ -60,8 +60,8 @@ a8w8_rowwise_128x128x16x128_16x16_4x1_8x16x1_8x16x1_1x16x1x8_8x8x1_1x1_interwave
       1,
       ck::BlockGemmPipelineScheduler::Interwave,
       ck::BlockGemmPipelineVersion::v2>;
-  // Run kernel instance.
-  return gemm_a8w8_rowwise_impl<DEDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y);
+    // Run kernel instance.
+    return gemm_a8w8_rowwise_impl<DEDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y);
   }
 }
 
