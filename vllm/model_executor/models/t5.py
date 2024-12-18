@@ -139,8 +139,8 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
                 continue
             elif scope_names[0] == "logits":
                 pointer = getattr(pointer, "lm_head", None)
-            elif scope_names[0] == "wi" and 
-              len(scope_names) > 1 and 
+            elif scope_names[0] == "wi" and \
+              len(scope_names) > 1 and \
               scope_names[1].isdigit():
                 pointer = getattr(pointer, f"wi_{scope_names[1]}")
                 continue
@@ -148,7 +148,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
                 try:
                     pointer = getattr(pointer, scope_names[0])
                 except AttributeError:
-                  log_name = '/'.join(name)
+                    log_name = '/'.join(name)
                     logger.info("Skipping %s", log_name)
                     continue
             if len(scope_names) >= 2:
