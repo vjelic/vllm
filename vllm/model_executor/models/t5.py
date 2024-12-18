@@ -750,29 +750,35 @@ class T5ForConditionalGeneration(nn.Module):
         for name, _ in weights_tuple_list:
             
             if 'decoder' in name and 'layer_norm' not in name:
-                if 'layer.0' in name and \
-                  'SelfAttention' not in name:
+                if ('layer.0' in name and \
+                  'SelfAttention' not in name) \
+                  or ('layer.1' in name and \
+                  'EncDecAttention' not in name) \
+                  or ('layer.2' in name and \
+                  'DenseReluDense' not in name):
                     print(name)
                     out.add(False)
-                elif 'layer.1' in name and \
-                  'EncDecAttention' not in name:
-                    print(name)
-                    out.add(False)
-                elif 'layer.2' in name and \
-                  'DenseReluDense' not in name:
-                    print(name)
-                    out.add(False)
+                # elif 'layer.1' in name and \
+                #   'EncDecAttention' not in name:
+                #     print(name)
+                #     out.add(False)
+                # elif 'layer.2' in name and \
+                #   'DenseReluDense' not in name:
+                #     print(name)
+                #     out.add(False)
                 else:
                     out.add(True)
             elif 'encoder' in name and 'layer_norm' not in name:
-                if 'layer.0' in name and \
-                  'SelfAttention' not in name:
+                if ('layer.0' in name and \
+                  'SelfAttention' not in name) \
+                  or ('layer.1' in name and \
+                  'DenseReluDense' not in name):
                     print(name)
                     out.add(False)
-                elif 'layer.1' in name and \
-                  'DenseReluDense' not in name:
-                    print(name)
-                    out.add(False)
+                # elif 'layer.1' in name and \
+                #   'DenseReluDense' not in name:
+                #     print(name)
+                #     out.add(False)
                 else:
                     out.add(True)
             elif 'decoder' not in name and 'encoder' not in name:
