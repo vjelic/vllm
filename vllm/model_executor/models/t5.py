@@ -73,7 +73,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         import tensorflow as tf
     except ImportError:
         logger.error(
-            "Loading a TensorFlow model in PyTorch, requires TensorFlow to be installed. Please see "
+            "TensorFlow is to be installed. Please see "
             "https://www.tensorflow.org/install/ for installation instructions."
         )
         raise
@@ -91,17 +91,18 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
 
     for txt_name in names:
         name = txt_name.split("/")
-        # adam_v and adam_m are variables used in AdamWeightDecayOptimizer to calculated m and v
-        # which are not required for using pretrained model
         if any(
-            n in ["adam_v", "adam_m", "AdamWeightDecayOptimizer", "AdamWeightDecayOptimizer_1", "global_step"]
+            n in ["adam_v", "adam_m", "AdamWeightDecayOptimizer", 
+                  "AdamWeightDecayOptimizer_1", "global_step"]
             for n in name
         ):
-            logger.info(f"Skipping {'/'.join(name)}")
+            log_name = '/'.join(name)
+            logger.info("Skipping %s", log_name)
             tf_weights.pop(txt_name, None)
             continue
         if "_slot_" in name[-1]:
-            logger.info(f"Skipping {'/'.join(name)}")
+            log_name = '/'.join(name)
+            logger.info("Skipping %s", log_name)
             tf_weights.pop(txt_name, None)
             continue
         pointer = model
@@ -113,19 +114,19 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
             else:
                 scope_names = [m_name]
             if scope_names[0] in ["kernel", "scale", "embedding"]:
-                pointer = getattr(pointer, "weight")
+                pointer = getattr(pointer, "weight", None)
             elif scope_names[0] == "self_attention":
-                pointer = getattr(pointer, "layer")
+                pointer = getattr(pointer, "layer", None)
                 pointer = pointer[0]
             elif scope_names[0] == "enc_dec_attention":
-                pointer = getattr(pointer, "layer")
+                pointer = getattr(pointer, "layer", None)
                 pointer = pointer[1]
             elif scope_names[0] == "dense_relu_dense":
-                pointer = getattr(pointer, "layer")
+                pointer = getattr(pointer, "layer", None)
                 pointer = pointer[2]
             elif scope_names[0] == "rms_norm":
                 if hasattr(pointer, "layer_norm"):
-                    pointer = getattr(pointer, "layer_norm")
+                    pointer = getattr(pointer, "layer_norm", None)
                 elif hasattr(pointer, "final_layer_norm"):
                     pointer = getattr(pointer, "final_layer_norm")
             elif scope_names[0] == "scale":
