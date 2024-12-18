@@ -157,7 +157,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         if scope_names[0] not in ["kernel", "scale", "embedding"]:
             pointer = getattr(pointer, "weight", None)
         if scope_names[0] != "embedding":
-            logger.info("Transpose weight of 
+            logger.info("Transpose weight of \
               shape %s for %s", str(array.shape), name)
             array = np.transpose(array)
         try:
@@ -170,7 +170,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         pointer.data = torch.from_numpy(array.astype(np.float32))
         tf_weights.pop(txt_name, None)
     weight_not_copied = ', '.join(tf_weights.keys())
-    logger.info("Weights not copied to PyTorch 
+    logger.info("Weights not copied to PyTorch \
         model: %s.", weight_not_copied)
     return model
 
@@ -748,28 +748,28 @@ class T5ForConditionalGeneration(nn.Module):
     def match_weight_name(self, weights_tuple_list):
         out = set()
         for name, _ in weights_tuple_list:
-            # print(name)
+            
             if 'decoder' in name and 'layer_norm' not in name:
-                if 'layer.0' in name and 
+                if 'layer.0' in name and \
                   'SelfAttention' not in name:
                     print(name)
                     out.add(False)
-                elif 'layer.1' in name and 
+                elif 'layer.1' in name and \
                   'EncDecAttention' not in name:
                     print(name)
                     out.add(False)
-                elif 'layer.2' in name and 
+                elif 'layer.2' in name and \
                   'DenseReluDense' not in name:
                     print(name)
                     out.add(False)
                 else:
                     out.add(True)
             elif 'encoder' in name and 'layer_norm' not in name:
-                if 'layer.0' in name and 
+                if 'layer.0' in name and \
                   'SelfAttention' not in name:
                     print(name)
                     out.add(False)
-                elif 'layer.1' in name and 
+                elif 'layer.1' in name and \
                   'DenseReluDense' not in name:
                     print(name)
                     out.add(False)
