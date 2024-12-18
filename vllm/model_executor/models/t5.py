@@ -35,8 +35,7 @@ from vllm.model_executor.layers.linear import (
 )
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig,
-)
+    QuantizationConfig, )
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
@@ -97,17 +96,13 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
 
     for txt_name in names:
         name = txt_name.split("/")
-        if any(
-            n
-            in [
+        if any(n in [
                 "adam_v",
                 "adam_m",
                 "AdamWeightDecayOptimizer",
                 "AdamWeightDecayOptimizer_1",
                 "global_step",
-            ]
-            for n in name
-        ):
+        ] for n in name):
             log_name = "/".join(name)
             logger.info("Skipping %s", log_name)
             tf_weights.pop(txt_name, None)
@@ -151,11 +146,8 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
                 continue
             elif scope_names[0] == "logits":
                 pointer = getattr(pointer, "lm_head", None)
-            elif (
-                scope_names[0] == "wi"
-                and len(scope_names) > 1
-                and scope_names[1].isdigit()
-            ):
+            elif (scope_names[0] == "wi" and len(scope_names) > 1
+                  and scope_names[1].isdigit()):
                 pointer = getattr(pointer, f"wi_{scope_names[1]}")
                 continue
             else:
@@ -197,6 +189,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
 
 
 class T5LayerNorm(nn.Module):
+
     def __init__(self, hidden_size, eps=1e-6):
         """
         Construct a layernorm module in the T5 style.
@@ -217,7 +210,8 @@ class T5LayerNorm(nn.Module):
         inputs is done in fp32
         """
 
-        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1,
+                                                               keepdim=True)
         adj_var = variance + self.variance_epsilon
         hidden_states = hidden_states * torch.rsqrt(adj_var)
 
@@ -229,18 +223,21 @@ class T5LayerNorm(nn.Module):
 
 
 class T5DenseActDense(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
-        self.wi = ColumnParallelLinear(
-            config.d_model, config.d_ff, bias=False, quant_config=quant_config
-        )
-        self.wo = RowParallelLinear(
-            config.d_ff, config.d_model, bias=False, quant_config=quant_config
-        )
+        self.wi = ColumnParallelLinear(config.d_model,
+                                       config.d_ff,
+                                       bias=False,
+                                       quant_config=quant_config)
+        self.wo = RowParallelLinear(config.d_ff,
+                                    config.d_model,
+                                    bias=False,
+                                    quant_config=quant_config)
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = get_act_fn(config.dense_act_fn, quant_config)
 
@@ -248,32 +245,34 @@ class T5DenseActDense(nn.Module):
         hidden_states = self.wi(hidden_states)[0]
         hidden_states = self.act(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        if (
-            isinstance(self.wo.weight, torch.Tensor)
-            and hidden_states.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
-        ):
+        if (isinstance(self.wo.weight, torch.Tensor)
+                and hidden_states.dtype != self.wo.weight.dtype
+                and self.wo.weight.dtype != torch.int8):
             hidden_states = hidden_states.to(self.wo.weight.dtype)
         hidden_states = self.wo(hidden_states)[0]
         return hidden_states
 
 
 class T5DenseGatedActDense(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
-        self.wi_0 = ColumnParallelLinear(
-            config.d_model, config.d_ff, bias=False, quant_config=quant_config
-        )
-        self.wi_1 = ColumnParallelLinear(
-            config.d_model, config.d_ff, bias=False, quant_config=quant_config
-        )
-        self.wo = RowParallelLinear(
-            config.d_ff, config.d_model, bias=False, quant_config=quant_config
-        )
+        self.wi_0 = ColumnParallelLinear(config.d_model,
+                                         config.d_ff,
+                                         bias=False,
+                                         quant_config=quant_config)
+        self.wi_1 = ColumnParallelLinear(config.d_model,
+                                         config.d_ff,
+                                         bias=False,
+                                         quant_config=quant_config)
+        self.wo = RowParallelLinear(config.d_ff,
+                                    config.d_model,
+                                    bias=False,
+                                    quant_config=quant_config)
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = get_act_fn(config.dense_act_fn, quant_config)
 
@@ -288,11 +287,9 @@ class T5DenseGatedActDense(nn.Module):
         # See https://github.com/huggingface/transformers/issues/20287
         # we also make sure the weights are not in `int8` in case users
         # will force `_keep_in_fp32_modules` to be `None``
-        if (
-            isinstance(self.wo.weight, torch.Tensor)
-            and hidden_states.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
-        ):
+        if (isinstance(self.wo.weight, torch.Tensor)
+                and hidden_states.dtype != self.wo.weight.dtype
+                and self.wo.weight.dtype != torch.int8):
             hidden_states = hidden_states.to(self.wo.weight.dtype)
 
         hidden_states = self.wo(hidden_states)
@@ -300,6 +297,7 @@ class T5DenseGatedActDense(nn.Module):
 
 
 class T5LayerFF(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
@@ -311,9 +309,8 @@ class T5LayerFF(nn.Module):
         else:
             self.DenseReluDense = T5DenseActDense(config, quant_config)
 
-        self.layer_norm = T5LayerNorm(
-            config.d_model, eps=config.layer_norm_epsilon
-        )
+        self.layer_norm = T5LayerNorm(config.d_model,
+                                      eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)
 
     def forward(self, hidden_states):
@@ -324,6 +321,7 @@ class T5LayerFF(nn.Module):
 
 
 class T5Attention(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
@@ -380,17 +378,24 @@ class T5Attention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([2048, 2048, 2048], dim=-1)
         if encoder_hidden_states is None:
-            attn_output = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0)
+            attn_output = F.scaled_dot_product_attention(q,
+                                                         k,
+                                                         v,
+                                                         dropout_p=0.0)
         else:
             qkv_enc, _ = self.qkv_proj(encoder_hidden_states)
             _, k, v = qkv.split([2048, 2048, 2048], dim=-1)
-            attn_output = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0)
+            attn_output = F.scaled_dot_product_attention(q,
+                                                         k,
+                                                         v,
+                                                         dropout_p=0.0)
         output, _ = self.out_proj(attn_output)
         present_key_value_state = (k, v) if self.is_decoder else None
         return output, present_key_value_state
 
 
 class T5LayerSelfAttention(nn.Module):
+
     def __init__(
         self,
         config,
@@ -405,9 +410,8 @@ class T5LayerSelfAttention(nn.Module):
             quant_config,
             has_relative_attention_bias=has_relative_attention_bias,
         )
-        self.layer_norm = T5LayerNorm(
-            config.d_model, eps=config.layer_norm_epsilon
-        )
+        self.layer_norm = T5LayerNorm(config.d_model,
+                                      eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)
 
     def forward(
@@ -417,15 +421,15 @@ class T5LayerSelfAttention(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.layer_norm(hidden_states)
-        attention_output = self.SelfAttention(
-            hidden_states, kv_cache, attn_metadata
-        )
+        attention_output = self.SelfAttention(hidden_states, kv_cache,
+                                              attn_metadata)
         hidden_states = hidden_states + self.dropout(attention_output[0])
-        outputs = (hidden_states,) + attention_output[1:]
+        outputs = (hidden_states, ) + attention_output[1:]
         return outputs
 
 
 class T5LayerCrossAttention(nn.Module):
+
     def __init__(
         self,
         config,
@@ -439,9 +443,8 @@ class T5LayerCrossAttention(nn.Module):
             quant_config,
             has_relative_attention_bias=False,
         )
-        self.layer_norm = T5LayerNorm(
-            config.d_model, eps=config.layer_norm_epsilon
-        )
+        self.layer_norm = T5LayerNorm(config.d_model,
+                                      eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)
 
     def forward(
@@ -459,11 +462,12 @@ class T5LayerCrossAttention(nn.Module):
             encoder_hidden_states,
         )
         layer_output = hidden_states + self.dropout(attention_output[0])
-        outputs = (layer_output,) + attention_output[1:]
+        outputs = (layer_output, ) + attention_output[1:]
         return outputs
 
 
 class T5Block(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
@@ -480,9 +484,8 @@ class T5Block(nn.Module):
             has_relative_attention_bias=has_relative_attention_bias,
         )
         if self.is_decoder:
-            self.cross_attn = T5LayerCrossAttention(
-                config, cache_config, quant_config
-            )
+            self.cross_attn = T5LayerCrossAttention(config, cache_config,
+                                                    quant_config)
         self.fc = T5LayerFF(config, quant_config)
 
     def forward(
@@ -492,9 +495,8 @@ class T5Block(nn.Module):
         attn_metadata: AttentionMetadata,
         encoder_hidden_states: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        self_attention_outputs = self.self_attn(
-            hidden_states, kv_cache, attn_metadata
-        )
+        self_attention_outputs = self.self_attn(hidden_states, kv_cache,
+                                                attn_metadata)
         hidden, _ = self_attention_outputs[:2]
         attention_outputs = self_attention_outputs[2:]
 
@@ -507,13 +509,12 @@ class T5Block(nn.Module):
             )
             hidden = torch.clamp(hidden, min=-clamp_value, max=clamp_value)
 
-        do_cross_attention = (
-            self.is_decoder and encoder_hidden_states is not None
-        )
+        do_cross_attention = (self.is_decoder
+                              and encoder_hidden_states is not None)
         if do_cross_attention:
-            cross_attention_outputs = self.cross_attn(
-                hidden, kv_cache, attn_metadata, encoder_hidden_states
-            )
+            cross_attention_outputs = self.cross_attn(hidden, kv_cache,
+                                                      attn_metadata,
+                                                      encoder_hidden_states)
             hidden = cross_attention_outputs[0]
 
             # clamp inf values to enable fp16 training
@@ -539,7 +540,7 @@ class T5Block(nn.Module):
             )
             hidden = torch.clamp(hidden, min=-clamp_value, max=clamp_value)
 
-        outputs = (hidden,) + attention_outputs
+        outputs = (hidden, ) + attention_outputs
         return outputs
 
 
@@ -562,6 +563,7 @@ class T5ClassificationHead(nn.Module):
 
 
 class T5Stack(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
@@ -574,20 +576,16 @@ class T5Stack(nn.Module):
         self.embed_tokens = embed_tokens
         self.is_decoder = config.is_decoder
 
-        self.block = nn.ModuleList(
-            [
-                T5Block(
-                    config,
-                    cache_config,
-                    quant_config,
-                    has_relative_attention_bias=bool(i == 0),
-                )
-                for i in range(config.num_layers)
-            ]
-        )
-        self.final_layer_norm = T5LayerNorm(
-            config.d_model, eps=config.layer_norm_epsilon
-        )
+        self.block = nn.ModuleList([
+            T5Block(
+                config,
+                cache_config,
+                quant_config,
+                has_relative_attention_bias=bool(i == 0),
+            ) for i in range(config.num_layers)
+        ])
+        self.final_layer_norm = T5LayerNorm(config.d_model,
+                                            eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)
 
     def forward(
@@ -634,11 +632,8 @@ class T5Model(nn.Module):
         super().__init__()
         # self.shared = nn.Embedding(config.vocab_size, config.d_model)
         self.padding_idx = config.pad_token_id
-        lora_vocab = (
-            (lora_config.lora_extra_vocab_size * (lora_config.max_loras or 1))
-            if lora_config
-            else 0
-        )
+        lora_vocab = ((lora_config.lora_extra_vocab_size *
+                       (lora_config.max_loras or 1)) if lora_config else 0)
         self.vocab_size = config.vocab_size + lora_vocab
         self.shared = VocabParallelEmbedding(
             self.vocab_size,
@@ -650,17 +645,15 @@ class T5Model(nn.Module):
         encoder_config.is_decoder = False
         encoder_config.use_cache = False
         encoder_config.is_encoder_decoder = False
-        self.encoder = T5Stack(
-            encoder_config, cache_config, quant_config, self.shared
-        )
+        self.encoder = T5Stack(encoder_config, cache_config, quant_config,
+                               self.shared)
 
         decoder_config = copy.deepcopy(config)
         decoder_config.is_decoder = True
         decoder_config.is_encoder_decoder = False
         decoder_config.num_layers = config.num_decoder_layers
-        self.decoder = T5Stack(
-            decoder_config, cache_config, quant_config, self.shared
-        )
+        self.decoder = T5Stack(decoder_config, cache_config, quant_config,
+                               self.shared)
 
     def forward(
         self,
@@ -694,6 +687,7 @@ class T5Model(nn.Module):
 
 
 class T5ForConditionalGeneration(nn.Module):
+
     def __init__(
         self,
         config: T5Config,
@@ -704,9 +698,10 @@ class T5ForConditionalGeneration(nn.Module):
         super().__init__()
         self.config = config
         self.model_dim = config.d_model
-        self.model = T5Model(
-            config, cache_config, quant_config, lora_config=lora_config
-        )
+        self.model = T5Model(config,
+                             cache_config,
+                             quant_config,
+                             lora_config=lora_config)
         print("lora_config", lora_config)
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:
@@ -718,9 +713,8 @@ class T5ForConditionalGeneration(nn.Module):
             bias=False,
         )
 
-        self.logits_processor = LogitsProcessor(
-            self.unpadded_vocab_size, config.vocab_size
-        )
+        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
+                                                config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -764,9 +758,8 @@ class T5ForConditionalGeneration(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(
-            self.lm_head, hidden_states, sampling_metadata
-        )
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
         return logits
 
     def sample(
@@ -804,7 +797,7 @@ class T5ForConditionalGeneration(nn.Module):
 
     def _rename_key(self, key: str):
         prefix = f"{self.base_model_prefix}."
-        key = key[len(prefix) :] if key.startswith(prefix) else key
+        key = key[len(prefix):] if key.startswith(prefix) else key
 
         for src, dst in self.params_mapping.items():
             key = key.replace(src, dst)
@@ -848,11 +841,9 @@ class T5ForConditionalGeneration(nn.Module):
         out = set()
         for name, _ in weights_tuple_list:
             if "decoder" in name and "layer_norm" not in name:
-                if (
-                    ("layer.0" in name and "SelfAttention" not in name)
-                    or ("layer.1" in name and "EncDecAttention" not in name)
-                    or ("layer.2" in name and "DenseReluDense" not in name)
-                ):
+                if (("layer.0" in name and "SelfAttention" not in name) or
+                    ("layer.1" in name and "EncDecAttention" not in name) or
+                    ("layer.2" in name and "DenseReluDense" not in name)):
                     print(name)
                     out.add(False)
                 # elif 'layer.1' in name and \
@@ -867,8 +858,7 @@ class T5ForConditionalGeneration(nn.Module):
                     out.add(True)
             elif "encoder" in name and "layer_norm" not in name:
                 if ("layer.0" in name and "SelfAttention" not in name) or (
-                    "layer.1" in name and "DenseReluDense" not in name
-                ):
+                        "layer.1" in name and "DenseReluDense" not in name):
                     print(name)
                     out.add(False)
                 # elif 'layer.1' in name and \
@@ -890,14 +880,11 @@ class T5ForConditionalGeneration(nn.Module):
         for name, loaded_weight in weights_tuple_list:
             name = self._rename_layer_types(name)
             name, shard_id = self._rename_stacked_param(name)
-            if (
-                "encoder.embed_tokens.weight" in name
-                or "decoder.embed_tokens.weight" in name
-                or "lm_head.weight" in name
-            ):
-                assert (
-                    shared_embedding_weight is None
-                ), "Conflicting embedding weights."
+            if ("encoder.embed_tokens.weight" in name
+                    or "decoder.embed_tokens.weight" in name
+                    or "lm_head.weight" in name):
+                assert (shared_embedding_weight is
+                        None), "Conflicting embedding weights."
                 shared_embedding_weight = loaded_weight
             else:
                 # Skip the specific downstream task weight.
@@ -913,9 +900,8 @@ class T5ForConditionalGeneration(nn.Module):
                     continue
 
                 param = model_params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
                 if shard_id:
                     weight_loader(param, loaded_weight, shard_id)
                 else:
