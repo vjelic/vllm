@@ -19,9 +19,9 @@
 import copy
 import os
 from typing import Iterable, List, Optional, Tuple
-import torch
-from torch import nn
-import torch.nn.functional as F
+import torch # type: ignore
+from torch import nn # type: ignore
+import torch.nn.functional as F # type: ignore
 from transformers import T5Config
 from transformers.utils import logging
 
@@ -39,7 +39,6 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-# from flash_attn import flash_attn_func
 
 logger = logging.get_logger(__name__)
 
@@ -68,9 +67,8 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
     """Load tf checkpoints in a pytorch model."""
     try:
         import re
-
-        import numpy as np
-        import tensorflow as tf
+        import numpy as np # type: ignore
+        import tensorflow as tf # type: ignore
     except ImportError:
         logger.error(
             "TensorFlow is to be installed. Please see "
