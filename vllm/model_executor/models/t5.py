@@ -19,9 +19,10 @@
 import copy
 import os
 from typing import Iterable, List, Optional, Tuple
-import torch # type: ignore
-from torch import nn # type: ignore
-import torch.nn.functional as F # type: ignore
+
+import torch  # type: ignore
+import torch.nn.functional as F  # type: ignore
+from torch import nn  # type: ignore
 from transformers import T5Config
 from transformers.utils import logging
 
@@ -67,8 +68,8 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
     """Load tf checkpoints in a pytorch model."""
     try:
         import re
-        import numpy as np # type: ignore
-        import tensorflow as tf # type: ignore
+        import numpy as np  # type: ignore
+        import tensorflow as tf  # type: ignore
     except ImportError:
         logger.error(
             "TensorFlow is to be installed. Please see "
