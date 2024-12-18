@@ -17,20 +17,16 @@
 
 
 import copy
-
-
-import math
+import os
 from typing import Iterable, List, Optional, Tuple
-
 import torch
 from torch import nn
 import torch.nn.functional as F
 from transformers import T5Config
 from transformers.utils import logging
 
-from vllm.attention import Attention, AttentionMetadata, AttentionType
+from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
-from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                QKVParallelLinear,
@@ -43,7 +39,6 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.sequence import IntermediateTensors
 # from flash_attn import flash_attn_func
 
 logger = logging.get_logger(__name__)
@@ -83,13 +78,13 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         )
         raise
     tf_path = os.path.abspath(tf_checkpoint_path)
-    logger.info(f"Converting TensorFlow checkpoint from {tf_path}")
+    logger.info("Converting TensorFlow checkpoint from %s", tf_path)
     # Load weights from TF model
     init_vars = tf.train.list_variables(tf_path)
     names = []
     tf_weights = {}
     for name, shape in init_vars:
-        logger.info(f"Loading TF weight {name} with shape {shape}")
+        logger.info("Loading TF weight name is %s", name)
         array = tf.train.load_variable(tf_path, name)
         names.append(name)
         tf_weights[name] = array
@@ -243,7 +238,7 @@ class T5LayerNorm(nn.Module):
 
     def forward(self, hidden_states):
         # T5 uses a layer_norm which only scales and doesn't shift, which is also known as Root Mean
-        # Square Layer Normalization https://arxiv.org/abs/1910.07467 thus varience is calculated
+        # Square Layer Normalization https://arxiv.org/abs/1910.07467 thus variance is calculated
         # w/o mean and there is no bias. Additionally we want to make sure that the accumulation for
         # half-precision inputs is done in fp32
 
