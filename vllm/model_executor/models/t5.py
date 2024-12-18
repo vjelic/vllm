@@ -1,4 +1,5 @@
-# coding=utf-8
+# Adapted from
+# https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/modeling_t5.py
 # Copyright 2018 Mesh TensorFlow authors, T5 Authors and HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
