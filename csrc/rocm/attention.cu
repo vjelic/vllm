@@ -90,6 +90,27 @@ __device__ __forceinline__ void store(T value, T* addr) {
   addr[0] = value;
 }
 
+
+template <typename T>
+__device__ __forceinline__ T loadnt(T* addr) {
+    return __builtin_nontemporal_load(addr);
+}
+
+__device__ __forceinline__ _B16x8 load_ntmprl_16Byte(const _B16x8* addr) {
+    auto addr_alias = reinterpret_cast<const float*>(addr);
+    auto dat0 = loadnt(addr_alias);
+    auto dat1 = loadnt(addr_alias + 1);
+    auto dat2 = loadnt(addr_alias + 2);
+    auto dat3 = loadnt(addr_alias + 3);
+    //auto dat0 = *(addr_alias);
+    //auto dat1 = *(addr_alias+1);
+    //auto dat2 = *(addr_alias+2);
+    //auto dat3 = *(addr_alias+3);
+    auto res = make_float4(dat0,dat1,dat2,dat3);
+    return *reinterpret_cast<_B16x8*>(&res);
+}
+
+
 template <typename T, int absz, int cbid, int blgp>
 __device__ __forceinline__ floatx4 gcn_mfma_instr(const _B16x4& inpA,
                                                   const _B16x4& inpB,
@@ -600,6 +621,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
         const cache_t* k_fetch_ptr = k_ptr3 + offset1 * BLOCK_SIZE * KX + offset2;
         const _B16x8* k_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(k_fetch_ptr);
         Klocal[token_depth][qkhe_depth] = *k_fetch_ptr_16B;
+        //Klocal[token_depth][qkhe_depth] = load_ntmprl_16Byte(k_fetch_ptr_16B);
       }
     }
 
@@ -643,6 +665,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
               const cache_t* v_fetch_ptr = v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
               const _B16x8* v_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(v_fetch_ptr);
               Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *v_fetch_ptr_16B;
+              //Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = load_ntmprl_16Byte(v_fetch_ptr_16B);
           }
       }
     }
