@@ -9,7 +9,7 @@ from vllm.platforms import current_platform
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, FlexibleArgumentParser,
                         create_kv_caches_with_random)
 
-NUM_BLOCKS = 256 * 1024
+NUM_BLOCKS = 1024 * 1024
 PARTITION_SIZE = 256
 
 
@@ -176,13 +176,13 @@ def main(
     # Warmup.
     print("Warming up...")
     run_benchmark = run_cuda_benchmark
-    run_benchmark(num_iters=3, profile=False)
+    run_benchmark(num_iters=500, profile=False)
 
     # Benchmark.
     if do_profile:
         latency = run_benchmark(num_iters=1, profile=True)
     else:
-        latency = run_benchmark(num_iters=1000, profile=False)
+        latency = run_benchmark(num_iters=10000, profile=False)
     print(f"Kernel running time: {latency * 1000000:.3f} us")
 
 

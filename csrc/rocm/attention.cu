@@ -29,6 +29,11 @@
   #define __HIP__MI300_MI250__
 #endif
 
+#if defined(__HIPCC__) && (defined(__gfx940__) || \
+                           defined(__gfx941__) || defined(__gfx942__))
+  #define __HIP__MI300__
+#endif
+
 #if defined(NDEBUG)
   #undef NDEBUG
   #include <assert.h>
@@ -84,6 +89,27 @@ template <typename T>
 __device__ __forceinline__ void store(T value, T* addr) {
   addr[0] = value;
 }
+
+
+template <typename T>
+__device__ __forceinline__ T loadnt(T* addr) {
+    return __builtin_nontemporal_load(addr);
+}
+
+__device__ __forceinline__ _B16x8 load_ntmprl_16Byte(const _B16x8* addr) {
+    auto addr_alias = reinterpret_cast<const float*>(addr);
+    auto dat0 = loadnt(addr_alias);
+    auto dat1 = loadnt(addr_alias + 1);
+    auto dat2 = loadnt(addr_alias + 2);
+    auto dat3 = loadnt(addr_alias + 3);
+    //auto dat0 = *(addr_alias);
+    //auto dat1 = *(addr_alias+1);
+    //auto dat2 = *(addr_alias+2);
+    //auto dat3 = *(addr_alias+3);
+    auto res = make_float4(dat0,dat1,dat2,dat3);
+    return *reinterpret_cast<_B16x8*>(&res);
+}
+
 
 template <typename T, int absz, int cbid, int blgp>
 __device__ __forceinline__ floatx4 gcn_mfma_instr(const _B16x4& inpA,
@@ -344,6 +370,49 @@ __device__ __forceinline__ _B16x4 from_floatx4_rtz(const floatx4& inp) {
     static_assert(false, "unsupported 16b dtype");
   }
 }
+
+template <typename T>
+__device__ __forceinline__ _B16x4 from_floatx4_trunc(const floatx4& inp) {
+      _B16x4 ret;
+        if constexpr (std::is_same<T, _Float16>::value) {
+                int32_t tmpf8;
+                    tmpf8 = __builtin_amdgcn_cvt_pk_fp8_f32(inp[0], inp[1], tmpf8, false);
+                        tmpf8 = __builtin_amdgcn_cvt_pk_fp8_f32(inp[2], inp[3], tmpf8, true);
+                            const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(tmpf8, false);
+                                const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(tmpf8, true);
+                                    union h2cvt {
+                                                _Half2 h2[2];
+                                                        _B16x4 b16x4;
+                                                            } u;
+                                        u.h2[0] = __builtin_amdgcn_cvt_pkrtz(f0[0],f0[1]);
+                                            u.h2[1] = __builtin_amdgcn_cvt_pkrtz(f1[0],f1[1]);
+                                                return u.b16x4;
+        } else if constexpr (std::is_same<T, __hip_bfloat16>::value) {
+                int32_t tmpf8;
+                    tmpf8 = __builtin_amdgcn_cvt_pk_fp8_f32(inp[0], inp[1], tmpf8, false);
+                        tmpf8 = __builtin_amdgcn_cvt_pk_fp8_f32(inp[2], inp[3], tmpf8, true);
+                            const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(tmpf8, false);
+                                const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(tmpf8, true);
+                                    floatx4 tmpf;
+                                        tmpf[0] = f0[0];
+                                            tmpf[1] = f0[1];
+                                                tmpf[2] = f1[0];
+                                                    tmpf[3] = f1[1];
+                                                        for (int i = 0; i < 4; i++) {
+                                                                  union fcvt {
+                                                                                uint32_t i32;
+                                                                                          float f32;
+                                                                                                } u;
+                                                                        u.f32 = tmpf[i];
+                                                                              ret[i] = uint16_t(u.i32 >> 16);
+                                                                                  }
+                                                            return ret;
+          } else {
+                  static_assert(false, "unsupported 16b dtype");
+                    }
+}
+
+
 
 template <typename T>
 __device__ __forceinline__ _B16x8 convert_b8x8_custom(const _B8x8 input) {
@@ -743,7 +812,11 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     //__shared__ _B16x4 shared_logits[NWARPS][TLOOP][16][VTOKENS_PER_LANE/4 + 1];
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
         dout[token_depth] *= inv_sum_scale;
-        shared_logits[warpid][token_depth][lane16id][rowid] = from_floatx4<scalar_t>(dout[token_depth]);
+        if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+            shared_logits[warpid][token_depth][lane16id][rowid] = from_floatx4_rtz<scalar_t>(dout[token_depth]);
+        } else {
+            shared_logits[warpid][token_depth][lane16id][rowid] = from_floatx4_rtz<scalar_t>(dout[token_depth]);
+        }
     }
 
     if (threadIdx.x < GQA_RATIO) {
@@ -900,8 +973,8 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
                 *out_ptr_B16x8 = vout[h];
             }
         }
-
     }
+
 #endif
 
 #if 0
@@ -942,6 +1015,15 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
             scalar_t* out_ptr3 = out_ptr2 + vhead_elem;
             _B16x4* out_ptr_B16x4 = reinterpret_cast<_B16x4*>(out_ptr3);
             *out_ptr_B16x4 = outelems[vhe_depth];
+        }
+    }
+#endif
+#if 0 //DEBUG ONLY 
+    floatx4 partition_out[VHELOOP];
+    for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+        partition_out[vhe_depth] = {0};
+        for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
+            partition_out[vhe_depth] += inv_sum_scale[vtoken_depth] * vout[vhe_depth][vtoken_depth];
         }
     }
 #endif
@@ -2256,7 +2338,7 @@ void paged_attention_custom_launcher(
   //  supported by graphing, not the actual max among all the sequences: in that
   //  case reduction kernel will still run but return immediately
 
-  //above optimization is not yet implemented in mfma16 kernel
+  //below optimization is not yet implemented in mfma16 kernel
   //if (max_context_len > PARTITION_SIZE) {
     dim3 reduce_grid(num_heads, num_seqs);
     dim3 reduce_block(head_size);
@@ -2325,16 +2407,12 @@ void paged_attention_custom_launcher(
     }
 #else
   #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
-      CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T);
-/*
-  #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
     if (fp8_out_scale) {                                                    \
       CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE,     \
                                  uint8_t);                                  \
     } else {                                                                \
       CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T); \
     }
-    */
 #endif
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)     \
   switch (block_size) {                                           \
