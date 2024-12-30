@@ -47,8 +47,6 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
 
-// clean up this line later
-#define __HIP__MI300_MI250__
 
 #if defined(__HIP__MI300_MI250__)  // TODO: Add NAVI support
 
@@ -249,7 +247,6 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
   } else {
     static_assert(false, "unsupported 16b dtype");
   }
-#endif
 }
 
 template <typename T, vllm::Fp8KVCacheDataType KV_DTYPE>
