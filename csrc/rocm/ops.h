@@ -27,4 +27,3 @@ void gemm_a8w8(
     torch::Tensor& x_scale,
     torch::Tensor& w_scale,
     torch::Tensor& Y);
-
