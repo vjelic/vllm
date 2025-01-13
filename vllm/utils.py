@@ -294,8 +294,20 @@ class rpd_user_marker:
             self.marker.__enter__()
         return self
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.marker:
-            self.marker.__exit__(exc_type, exc_val, exc_tb)
+        if is_hipScopedMarker_available():
+            if self.marker:
+                self.marker.__exit__(exc_type, exc_val, exc_tb)  
+    def start(self):
+        if is_hipScopedMarker_available():
+            from hipScopedMarker import hipScopedMarker
+            marker_name = self.name if self.name else "UserMarker Undefined"
+            self.marker = hipScopedMarker(f"{marker_name}")
+            self.marker.__enter__()
+        return self
+    def end(self, exc_type=0, exc_val=0, exc_tb=0):
+        if is_hipScopedMarker_available():
+            if self.marker:
+                self.marker.__exit__(exc_type, exc_val, exc_tb)  
 
 
 class Device(enum.Enum):
