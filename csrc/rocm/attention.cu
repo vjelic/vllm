@@ -29,11 +29,6 @@
   #define __HIP__MI300_MI250__
 #endif
 
-#if defined(__HIPCC__) && (defined(__gfx940__) || \
-                           defined(__gfx941__) || defined(__gfx942__))
-  #define __HIP__MI300__
-#endif
-
 #if defined(NDEBUG)
   #undef NDEBUG
   #include <assert.h>
@@ -335,6 +330,10 @@ __device__ __forceinline__ _B16x8 scaled_convert_b8x8_custom(const _B8x8 input,
 }
 
 __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
+#if defined(__gfx90a__)
+    float4 f32x4 = vllm::fp8::vec_conversion<float4,uint32_t>(*reinterpret_cast<const uint32_t*>(&inp));
+    return *reinterpret_cast<floatx4*>(&f32x4);
+#else //MI3xx+ optimized builtins
     const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
     const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
     floatx4 ret;
@@ -343,6 +342,7 @@ __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
     ret[2] = f1[0];
     ret[3] = f1[1];
     return ret;
+#endif
 }
 
 template <typename T>
@@ -444,7 +444,7 @@ __device__ __forceinline__ _B16x8 convert_b8x8_custom(const _B8x8 input) {
 // block (partition size)
 template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
-          int HEAD_SIZE, int NUM_THREADS,
+          int HEAD_SIZE, int NUM_THREADS, bool ALIBI_ENABLED,
           int GQA_RATIO>
 __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -625,6 +625,12 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
       }
     }
 
+    float alibi_slope;
+    if constexpr(ALIBI_ENABLED) {
+        const int alibi_head_idx = wg_start_head_idx + lane16id;
+        alibi_slope = (lane16id < GQA_RATIO) ? alibi_slopes[alibi_head_idx] : 0.f;
+    }
+
     constexpr int VTOKENS_PER_LANE = TOKENS_PER_WARP / ROWS_PER_WARP;//    16 * T_PAR_SIZE / 256;
     constexpr int VBLOCKS_PER_LANE = DIVIDE_ROUND_UP(VTOKENS_PER_LANE,BLOCK_SIZE);
     constexpr int VTLOOP = NWARPS; //was * TOKENS_PER_WARP / ROWS_PER_WARP / VTOKENS_PER_LANE; 
@@ -735,10 +741,22 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     }
 #endif
 
+    const int qkout_token_idx = partition_start_token_idx + TOKENS_PER_WARP * warpid + rowid * 4;
+
+    if constexpr(ALIBI_ENABLED) {
+        //const int alibi_head_idx = wg_start_head_idx + lane16id;
+        //const float alibi_slope = (lane16id < GQA_RATIO) ? alibi_slopes[alibi_head_idx] : 0.f;
+        for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+            const int local_token_idx = qkout_token_idx + token_depth * 16;
+            const int alibi_offset = local_token_idx - context_len + 1;
+            for (int i=0; i<4; i++) {
+                dout[token_depth][i] += alibi_slope * (alibi_offset + i);
+            }
+        }
+    }
+
     float qk_max = -FLT_MAX;
     float exp_sum = 0.0f;
-
-    const int qkout_token_idx = partition_start_token_idx + TOKENS_PER_WARP * warpid + rowid * 4;
 
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
         const int local_token_idx = qkout_token_idx + token_depth * 16;
@@ -2105,7 +2123,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
 
 template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
-          int HEAD_SIZE, int NUM_THREADS,
+          int HEAD_SIZE, int NUM_THREADS, bool ALIBI_ENABLED,
           int GQA_RATIO>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -2177,7 +2195,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
 
 #define LAUNCH_CUSTOM_ATTENTION_MFMA16(GQA_RATIO)                                    \
   paged_attention_ll4mi_QKV_mfma16_kernel<T, KVT, KV_DTYPE, OUTT, BLOCK_SIZE,        \
-                                   HEAD_SIZE, NTHR, GQA_RATIO>                \
+                                   HEAD_SIZE, NTHR, ALIBI_ENABLED, GQA_RATIO>                \
       <<<grid, block, 0, stream>>>(                                           \
           query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads, scale,     \
           block_tables_ptr, context_lens_ptr, max_num_blocks_per_seq,         \
@@ -2203,7 +2221,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
           context_lens_ptr, max_num_partitions, fp8_out_scale_ptr);
 
 template <typename T, typename KVT, vllm::Fp8KVCacheDataType KV_DTYPE,
-          int BLOCK_SIZE, int HEAD_SIZE, typename OUTT, int PARTITION_SIZE_OLD>
+          int BLOCK_SIZE, int HEAD_SIZE, typename OUTT, int PARTITION_SIZE_OLD, bool ALIBI_ENABLED>
 void paged_attention_custom_launcher(
     torch::Tensor& out, torch::Tensor& exp_sums, torch::Tensor& max_logits,
     torch::Tensor& tmp_out, torch::Tensor& query, torch::Tensor& key_cache,
@@ -2372,25 +2390,32 @@ void paged_attention_custom_launcher(
 }
 
 #define CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT,      \
-                             PSIZE)                                            \
+                             PSIZE, ALIBI_ENABLED)                                            \
   paged_attention_custom_launcher<T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, \
-                                  PSIZE>(                                      \
+                                  PSIZE, ALIBI_ENABLED>(                                      \
       out, exp_sums, max_logits, tmp_out, query, key_cache, value_cache,       \
       num_kv_heads, scale, block_tables, context_lens, max_context_len,        \
       alibi_slopes, k_scale, v_scale, fp8_out_scale);
+
+#define CALL_CUSTOM_LAUNCHER_ALIBI(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE,     \
+                                   OUTT, PSIZE)                                      \
+  if (alibi_slopes) {                                                   \
+      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE, true); \
+  } else {                                                                  \
+      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE, false); \
+  }
 
 #define CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE,     \
                                    OUTT)                                      \
   switch (partition_size) {                                                   \
     case 256:                                                                 \
-      CALL_CUSTOM_LAUNCHER(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 256); \
+      CALL_CUSTOM_LAUNCHER_ALIBI(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, 256); \
       break;                                                                  \
     default:                                                                  \
       TORCH_CHECK(false, "Unsupported partition size: ", partition_size);     \
       break;                                                                  \
   }
-/*
-*/
+
 #if defined(__HIPCC__) && defined(__gfx90a__)
   #define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)   \
     if (fp8_out_scale) {                                                    \
@@ -2412,17 +2437,19 @@ void paged_attention_custom_launcher(
     case 16:                                                      \
       CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 16, HEAD_SIZE);  \
       break;                                                      \
+    case 32:                                                      \
+      CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE);  \
+      break;                                                      \
     default:                                                      \
       TORCH_CHECK(false, "Unsupported block size: ", block_size); \
       break;                                                      \
   }
-/*
-    case 32:                                                      \
-      CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE);  \
-      break;                                                      \
-*/
+
 #define CALL_CUSTOM_LAUNCHER_BLK_HEAD(T, KVT, KV_DTYPE)         \
   switch (head_size) {                                          \
+    case 64:                                                    \
+      CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 64);           \
+      break;                                                    \
     case 128:                                                   \
       CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 128);          \
       break;                                                    \
@@ -2430,11 +2457,6 @@ void paged_attention_custom_launcher(
       TORCH_CHECK(false, "Unsupported head size: ", head_size); \
       break;                                                    \
   }
-/*
-    case 64:                                                    \
-      CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 64);           \
-      break;                                                    \
-*/
 void paged_attention(
     torch::Tensor& out,         // [num_seqs, num_heads, head_size]
     torch::Tensor& exp_sums,    // [num_seqs, num_heads, max_num_partitions]
