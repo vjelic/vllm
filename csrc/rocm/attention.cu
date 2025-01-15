@@ -633,7 +633,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     }
 
     constexpr int VTOKENS_PER_LANE = TOKENS_PER_WARP / ROWS_PER_WARP;//    16 * T_PAR_SIZE / 256;
-    constexpr int VBLOCKS_PER_LANE = DIVIDE_ROUND_UP(VTOKENS_PER_LANE,BLOCK_SIZE);
+    constexpr int VBLOCKS_PER_LANE = 1; //was DIVIDE_ROUND_UP(VTOKENS_PER_LANE,BLOCK_SIZE);
     constexpr int VTLOOP = NWARPS; //was * TOKENS_PER_WARP / ROWS_PER_WARP / VTOKENS_PER_LANE; 
     constexpr int VTLANELOOP = DIVIDE_ROUND_UP(VTOKENS_PER_LANE , CONTIGUOUS_KV_ELEMS_16B_LOAD); //optimized for 16B fetches; assumes minimum block size is 16
     constexpr int VHELOOP = HEAD_SIZE / 16 / NWARPS;
@@ -655,7 +655,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
 
     _B16x8 Vlocal[VTLOOP][VHELOOP][VTLANELOOP]; //this could be B8x16 too
     
-    const cache_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
+    const cache_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride + ((rowid * VTOKENS_PER_LANE)%BLOCK_SIZE);
 
     //v fetches are 16head elems across lanes x 16 tokens per lane
     for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
@@ -664,7 +664,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
 
       for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
           for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
-          const int vblock_depth = vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD / BLOCK_SIZE; 
+          const int vblock_depth = 0; //was vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD / BLOCK_SIZE; 
           //const int token_depth = vtoken_depth * VBLOCKS_PER_LANE + vblock_depth; 
           const int64_t vblock_number = static_cast<int64_t>(vphysical_block_number[vtoken_depth][vblock_depth]);
           const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
