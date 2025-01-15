@@ -571,10 +571,11 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     const int local_qhead_idx = 4 * warpid + rowid;
     const int global_qhead_idx = wg_start_head_idx + local_qhead_idx;
     const int64_t seq_idx64 = static_cast<int64_t>(seq_idx);
-    const scalar_t* q_ptr = q + seq_idx64 * q_stride + global_qhead_idx * HEAD_SIZE; //+ rowid * CONTIGUOUS_KV_ELEMS_16B_LOAD;
+    const scalar_t* q_ptr = q + seq_idx64 * q_stride + global_qhead_idx * HEAD_SIZE;
 
-    if (local_qhead_idx < GQA_RATIO) {
-        const scalar_t* q_fetch_ptr = q_ptr + lane16id * CONTIGUOUS_SCALAR_ELEMS_16B; //this works for head size 128 : 16 lanes x 8 elems = 128 elems
+    const int qhead_element = lane16id * CONTIGUOUS_SCALAR_ELEMS_16B;
+    if ( (local_qhead_idx < GQA_RATIO) && (qhead_element<HEAD_SIZE) ) {
+        const scalar_t* q_fetch_ptr = q_ptr + qhead_element; 
         const _B16x8* q_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(q_fetch_ptr);
         _B16x8 tmp = *q_fetch_ptr_16B; 
         if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
@@ -683,7 +684,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     }
 
     floatx4 dout[TLOOP];
-#if 1 //Q stored in registers
+
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
       dout[token_depth] = {0};
       for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
@@ -709,28 +710,6 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
       }
       dout[token_depth] *= scale2;
     }
-
-#else //Q in shared
-    _B16x4 tmpQ[QKHELOOP][2];
-    for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
-        tmpQ[qkhe_depth][0] = shared_logits[qkhe_depth][rowid][lane16id][0];
-        tmpQ[qkhe_depth][1] = shared_logits[qkhe_depth][rowid][lane16id][1];
-    }
-
-    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-      dout[token_depth] = {0};
-      for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
-        //for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
-          for (int i=0; i<2; i++) {
-            dout[token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Klocal[token_depth][qkhe_depth].xy[i],
-                    tmpQ[qkhe_depth][i], //shared_logits[qkhe_depth][rowid][lane16id][i],
-                    dout[token_depth]);
-          }
-        //}
-      }
-      dout[token_depth] *= scale;
-    }
-#endif
 
 #if 0 //DEBUG ONLY qk * scale
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
@@ -835,6 +814,8 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
         if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
             shared_logits[warpid][token_depth][lane16id][rowid] = from_floatx4_rtz<scalar_t>(dout[token_depth]);
         } else {
+            _B16x4* shared_logits_ptr = reinterpret_cast<_B16x4*>(shared_logits);
+            //shared_logits_ptr[warpid*4*16*4 + token_depth*16*4 + lane16id*4 + rowid] = from_floatx4_rtz<scalar_t>(dout[token_depth]);
             shared_logits[warpid][token_depth][lane16id][rowid] = from_floatx4_rtz<scalar_t>(dout[token_depth]);
         }
     }
@@ -883,21 +864,6 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
         }
 #endif
     _B16x4 outelems[VHELOOP];
-    _B16x4 S_local[VTLOOP][2][2];
-    if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
-        for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
-          //for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
-              for (int j=0; j<2; j++) {
-               for (int i=0; i<2; i++) {
-                const int offset = 4*rowid + 2*j + i; 
-                const int offset1 = offset % 4;
-                const int offset2 = offset / 4;
-                S_local[vtoken_depth][j][i] = shared_logits[vtoken_depth][offset2][lane16id][offset1];
-               }
-              }
-          //}
-        }
-    }
     //v layout: 16he across lanes x 16 tokens per lane
 
     for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
@@ -940,11 +906,11 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
                 const int offset = 4*rowid + 2*j + i; 
                 const int offset1 = offset % 4;
                 const int offset2 = offset / 4;
+                _B16x4* shared_logits_ptr = reinterpret_cast<_B16x4*>(shared_logits);
                 tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Vlocaltmp.xy[i],
-                          S_local[vtoken_depth][j][i], 
+                        shared_logits[vtoken_depth][offset2][lane16id][offset1],
+                        //shared_logits_ptr[vtoken_depth*4*16*4 + offset2*16*4 + lane16id*4 + offset1],
                         tmp_out);
-                        //shared_logits[vtoken_depth][offset2][lane16id][offset1],
-                        //tmp_out);
                }
               }
           }
@@ -967,10 +933,12 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
     __syncthreads();
 
     if (warpid == 0) {
-        _B16x8 vout[GQA_RATIO4];
+      _B16x8 vout[GQA_RATIO4];
+      //each lane writes out 16Bytes of tmp_out along head elem dimension
+      const int head_elem_idx = lane16id * 8;
+      if (head_elem_idx < HEAD_SIZE) {
         for (int h = 0; h < GQA_RATIO4; h++) {
             const int local_head_idx = 4 * h + rowid;
-            const int head_elem_idx = lane16id * 8;
             const int offset1 = (head_elem_idx / 16)%4;
             const int offset2 = head_elem_idx / 16 / NWARPS;
             const int offset3 = (head_elem_idx / 4)%4;
@@ -987,12 +955,12 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
             if (local_head_idx < GQA_RATIO) {
                 const int out_head_idx = wg_start_head_idx + local_head_idx;
                 scalar_t* out_ptr2 = out_ptr + out_head_idx * hsz_maxp_mult;
-                const int head_elem_idx = lane16id * 8;
                 scalar_t* out_ptr3 = out_ptr2 + head_elem_idx;
                 _B16x8* out_ptr_B16x8 = reinterpret_cast<_B16x8*>(out_ptr3);
                 *out_ptr_B16x8 = vout[h];
             }
         }
+      }
     }
 
 #endif
@@ -1071,7 +1039,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
 // block (partition size)
 template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
-          int HEAD_SIZE, int NUM_THREADS,
+          int HEAD_SIZE, int NUM_THREADS, bool ALIBI_ENABLED,
           int GQA_RATIO>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -1110,8 +1078,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     return;
   }
   constexpr int QHLOOP =
-      DIVIDE_ROUND_UP(GQA_RATIO, 4);  // each 4 lanes fetch 4 different qheads,
-                                      // total qheads =8, so qhloop is 2
+      DIVIDE_ROUND_UP(GQA_RATIO, 4);  // each 4 lanes fetch 4 different qheads
   constexpr int GQA_RATIO4 = 4 * QHLOOP;
   __shared__ float shared_qk_max[NWARPS][GQA_RATIO4 + 1];
   __shared__ float shared_exp_sum[NWARPS][GQA_RATIO4 + 1];
@@ -1172,14 +1139,11 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     // fetch vphysical block numbers up front
 
     const int warp_start_block_idx = warp_start_token_idx / BLOCK_SIZE;
-    if constexpr (GQA_RATIO < 12) {
-  #pragma unroll
-      for (int b = 0; b < VBLOCKS; b++) {
+    for (int b = 0; b < VBLOCKS; b++) {
         const int vblock_idx = warp_start_block_idx + b;
         const int vblock_idx_ctx =
             (vblock_idx <= last_ctx_block) ? vblock_idx : last_ctx_block;
         vphysical_blocks[b] = block_table[vblock_idx_ctx];
-      }
     }
 
     // each 4 lanes fetch 8 helems, so warp fetches 8*16 = 128 helems
@@ -1228,8 +1192,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
 #if 1
     float alibi_slope[QHLOOP];
-    if (alibi_slopes != nullptr) {
-  #pragma unroll
+    if constexpr(ALIBI_ENABLED) {
       for (int h = 0; h < QHLOOP; h++) {
         const int qhead_idx = h * 4 + lane4id;
         alibi_slope[h] = (qhead_idx < GQA_RATIO)
@@ -1257,17 +1220,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       //}
     }
 #endif
-
-    // fetch vphysical block numbers up front
-    if constexpr (GQA_RATIO >= 12) {
-  #pragma unroll
-      for (int b = 0; b < VBLOCKS; b++) {
-        const int vblock_idx = warp_start_block_idx + b;
-        const int vblock_idx_ctx =
-            (vblock_idx <= last_ctx_block) ? vblock_idx : last_ctx_block;
-        vphysical_blocks[b] = block_table[vblock_idx_ctx];
-      }
-    }
 
 #if 1 //fetch vcache in normal case
     const cache_t* v_ptr = v_cache + wg_start_kv_head_idx * kv_head_stride;
@@ -1349,8 +1301,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
                                                   Klocal[x].xy[1], dout[h]);\
     }
 
-  //#pragma unroll
-    //for (int h = 0; h < QHLOOP; h++) {
       QK_mfma(0);
       QK_mfma(1);
       QK_mfma(2);
@@ -1369,7 +1319,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
         QK_mfma(14);
         QK_mfma(15);
       }
-    //}
 #undef QK_mfma
     float scale2 = scale;
     if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
@@ -1378,83 +1327,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   #pragma unroll
     for (int h = 0; h < QHLOOP; h++) {
       dout[h] *= scale2;
-      //if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
-      //  dout[h] *= k_scale;
-      //}
     }
-#if 0
-  #pragma unroll
-    for (int h = 0; h < QHLOOP; h++) {
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 0, 0>(Qlocal[h].xy[0],
-                                                  Klocal[0].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 0, 0>(Qlocal[h].xy[1],
-                                                  Klocal[0].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 1, 0>(Qlocal[h].xy[0],
-                                                  Klocal[1].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 1, 0>(Qlocal[h].xy[1],
-                                                  Klocal[1].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 2, 0>(Qlocal[h].xy[0],
-                                                  Klocal[2].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 2, 0>(Qlocal[h].xy[1],
-                                                  Klocal[2].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 3, 0>(Qlocal[h].xy[0],
-                                                  Klocal[3].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 3, 0>(Qlocal[h].xy[1],
-                                                  Klocal[3].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 4, 0>(Qlocal[h].xy[0],
-                                                  Klocal[4].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 4, 0>(Qlocal[h].xy[1],
-                                                  Klocal[4].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 5, 0>(Qlocal[h].xy[0],
-                                                  Klocal[5].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 5, 0>(Qlocal[h].xy[1],
-                                                  Klocal[5].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 6, 0>(Qlocal[h].xy[0],
-                                                  Klocal[6].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 6, 0>(Qlocal[h].xy[1],
-                                                  Klocal[6].xy[1], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 7, 0>(Qlocal[h].xy[0],
-                                                  Klocal[7].xy[0], dout[h]);
-      dout[h] = gcn_mfma_instr<scalar_t, 4, 7, 0>(Qlocal[h].xy[1],
-                                                  Klocal[7].xy[1], dout[h]);
-      if constexpr (KHELOOP > 8) {
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 8, 0>(Qlocal[h].xy[0],
-                                                    Klocal[8].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 8, 0>(Qlocal[h].xy[1],
-                                                    Klocal[8].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 9, 0>(Qlocal[h].xy[0],
-                                                    Klocal[9].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 9, 0>(Qlocal[h].xy[1],
-                                                    Klocal[9].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 10, 0>(Qlocal[h].xy[0],
-                                                     Klocal[10].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 10, 0>(Qlocal[h].xy[1],
-                                                     Klocal[10].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 11, 0>(Qlocal[h].xy[0],
-                                                     Klocal[11].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 11, 0>(Qlocal[h].xy[1],
-                                                     Klocal[11].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 12, 0>(Qlocal[h].xy[0],
-                                                     Klocal[12].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 12, 0>(Qlocal[h].xy[1],
-                                                     Klocal[12].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 13, 0>(Qlocal[h].xy[0],
-                                                     Klocal[13].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 13, 0>(Qlocal[h].xy[1],
-                                                     Klocal[13].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 14, 0>(Qlocal[h].xy[0],
-                                                     Klocal[14].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 14, 0>(Qlocal[h].xy[1],
-                                                     Klocal[14].xy[1], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 15, 0>(Qlocal[h].xy[0],
-                                                     Klocal[15].xy[0], dout[h]);
-        dout[h] = gcn_mfma_instr<scalar_t, 4, 15, 0>(Qlocal[h].xy[1],
-                                                     Klocal[15].xy[1], dout[h]);
-      }  // KHELOOP>8
-      dout[h] *= scale;
-    }
-#endif
-
 #if 0
     if (alibi_slopes != nullptr) {
       float alibi_slope_local[GQA_RATIO];
@@ -1527,11 +1400,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 
     const int lane4_token_idx = 4 * (global_token_idx >> 2);
 #if 1 //alibi after transpose
-    const int alibi_offset = lane4_token_idx - context_len + 1;
-    if (alibi_slopes != nullptr) {
-  #pragma unroll
+    if constexpr(ALIBI_ENABLED) {
+      const int alibi_offset = lane4_token_idx - context_len + 1;
       for (int h = 0; h < QHLOOP; h++) {
-  #pragma unroll
         for (int i = 0; i < 4; i++) {
           dout[h][i] += alibi_slope[h] * (alibi_offset + i);
         }
@@ -1641,7 +1512,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
   _B16x4 logits[QHLOOP];
   #pragma unroll
   for (int h = 0; h < QHLOOP; h++) {
-    logits[h] = from_floatx4<scalar_t>(dout[h]);
+    logits[h] = from_floatx4_rtz<scalar_t>(dout[h]);
   }
 
 
@@ -1786,51 +1657,6 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
 #endif
 
 #undef SV_mfma
-#if 0
-  // iterate across heads
-  #pragma unroll
-    for (int qh = 0; qh < QHLOOP; qh++) {
-  // iterate over each v head elem (within head_size)
-  #pragma unroll
-      for (int vh = 0; vh < VHELOOP; vh++) {
-        floatx4 acc = {0};
-        // iterate over tokens
-        acc = gcn_mfma_instr<scalar_t, 4, 0, 0>(logits[qh], Vlocal[vh][0].xy[0],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 1, 0>(logits[qh], Vlocal[vh][0].xy[1],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 2, 0>(logits[qh], Vlocal[vh][1].xy[0],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 3, 0>(logits[qh], Vlocal[vh][1].xy[1],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 4, 0>(logits[qh], Vlocal[vh][2].xy[0],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 5, 0>(logits[qh], Vlocal[vh][2].xy[1],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 6, 0>(logits[qh], Vlocal[vh][3].xy[0],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 7, 0>(logits[qh], Vlocal[vh][3].xy[1],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 8, 0>(logits[qh], Vlocal[vh][4].xy[0],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 9, 0>(logits[qh], Vlocal[vh][4].xy[1],
-                                                acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 10, 0>(logits[qh],
-                                                 Vlocal[vh][5].xy[0], acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 11, 0>(logits[qh],
-                                                 Vlocal[vh][5].xy[1], acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 12, 0>(logits[qh],
-                                                 Vlocal[vh][6].xy[0], acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 13, 0>(logits[qh],
-                                                 Vlocal[vh][6].xy[1], acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 14, 0>(logits[qh],
-                                                 Vlocal[vh][7].xy[0], acc);
-        acc = gcn_mfma_instr<scalar_t, 4, 15, 0>(logits[qh],
-                                                 Vlocal[vh][7].xy[1], acc);
-        vout_shared[qh][vh][laneid][warpid] = from_floatx4<scalar_t>(acc);
-      }
-    }
-#endif
   }  // warp in context
 
   __syncthreads();
@@ -1856,58 +1682,20 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
       }
     }
 
-    if (context_len > partition_size) {
-      scalar_t* out_ptr = out +
-                          seq_idx * num_heads * max_num_partitions * HEAD_SIZE +
-                          partition_idx * HEAD_SIZE;
-      const int out_num_partitions = max_num_partitions;
-      bit16_t* out_ptr_b16 = reinterpret_cast<bit16_t*>(out_ptr);
-  #pragma unroll
-      for (int qh = 0; qh < QHLOOP; qh++) {
-  #pragma unroll
-        for (int vh = 0; vh < VHELOOP; vh++) {
-          const int head_size_elem = vh * WARP_SIZE + laneid;
-  #pragma unroll
-          for (int i = 0; i < 4; i++) {
-            const int head_idx = 4 * qh + i;
-            if (head_idx < GQA_RATIO) {
-              out_ptr_b16[(wg_start_head_idx + head_idx) * out_num_partitions *
-                              HEAD_SIZE +
-                          head_size_elem] = vout[qh][vh][i];
-            }
-          }
-        }
-      }
-    }  // context_len > partition_size
-    else {
-      bit8_t* final_out_ptr_b8;
-      bit16_t* final_out_ptr_b16;
-      if constexpr (std::is_same<OUTT, bit8_t>::value) {
-        final_out_ptr_b8 = final_out + seq_idx * num_heads * HEAD_SIZE;
-      } else {
-        OUTT* out_ptr = final_out + seq_idx * num_heads * HEAD_SIZE;
-        final_out_ptr_b16 = reinterpret_cast<bit16_t*>(out_ptr);
-      }
-  #pragma unroll
-      for (int qh = 0; qh < QHLOOP; qh++) {
-  #pragma unroll
-        for (int vh = 0; vh < VHELOOP; vh++) {
-          const int head_size_elem = vh * WARP_SIZE + laneid;
-  #pragma unroll
-          for (int i = 0; i < 4; i++) {
-            const int head_idx = 4 * qh + i;
-            if (head_idx < GQA_RATIO) {
-              if constexpr (std::is_same<OUTT, bit8_t>::value) {
-                const float tmpf =
-                    out_scale * to_float_b16<scalar_t>(vout[qh][vh][i]);
-                const OUTT tmp = hip_fp8(tmpf).data;
-                final_out_ptr_b8[(wg_start_head_idx + head_idx) * HEAD_SIZE +
-                                 head_size_elem] = tmp;
-              } else {
-                final_out_ptr_b16[(wg_start_head_idx + head_idx) * HEAD_SIZE +
-                                  head_size_elem] = vout[qh][vh][i];
-              }
-            }
+    scalar_t* out_ptr = out +
+                        seq_idx * num_heads * max_num_partitions * HEAD_SIZE +
+                        partition_idx * HEAD_SIZE;
+    const int out_num_partitions = max_num_partitions;
+    bit16_t* out_ptr_b16 = reinterpret_cast<bit16_t*>(out_ptr);
+    for (int qh = 0; qh < QHLOOP; qh++) {
+      for (int vh = 0; vh < VHELOOP; vh++) {
+        const int head_size_elem = vh * WARP_SIZE + laneid;
+        for (int i = 0; i < 4; i++) {
+          const int head_idx = 4 * qh + i;
+          if (head_idx < GQA_RATIO) {
+            out_ptr_b16[(wg_start_head_idx + head_idx) * out_num_partitions *
+                            HEAD_SIZE +
+                        head_size_elem] = vout[qh][vh][i];
           }
         }
       }
@@ -2150,7 +1938,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
 
 template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
-          int HEAD_SIZE, int NUM_THREADS,
+          int HEAD_SIZE, int NUM_THREADS, bool ALIBI_ENABLED,
           int GQA_RATIO>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_kernel(
     const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
@@ -2205,7 +1993,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
 
 #define LAUNCH_CUSTOM_ATTENTION(GQA_RATIO)                                    \
   paged_attention_ll4mi_QKV_kernel<T, KVT, KV_DTYPE, OUTT, BLOCK_SIZE,        \
-                                   HEAD_SIZE, NTHR, GQA_RATIO>                \
+                                   HEAD_SIZE, NTHR, ALIBI_ENABLED, GQA_RATIO>                \
       <<<grid, block, 0, stream>>>(                                           \
           query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads, scale,     \
           block_tables_ptr, context_lens_ptr, max_num_blocks_per_seq,         \
@@ -2275,20 +2063,20 @@ void paged_attention_custom_launcher(
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   switch (gqa_ratio) {
     case 1:
-      //LAUNCH_CUSTOM_ATTENTION(1);
-      LAUNCH_CUSTOM_ATTENTION_MFMA16(1);
+      LAUNCH_CUSTOM_ATTENTION(1);
+      //LAUNCH_CUSTOM_ATTENTION_MFMA16(1);
       break;
     case 2:
-      //LAUNCH_CUSTOM_ATTENTION(2);
-      LAUNCH_CUSTOM_ATTENTION_MFMA16(2);
+      LAUNCH_CUSTOM_ATTENTION(2);
+      //LAUNCH_CUSTOM_ATTENTION_MFMA16(2);
       break;
     case 3:
-      //LAUNCH_CUSTOM_ATTENTION(3);
-      LAUNCH_CUSTOM_ATTENTION_MFMA16(3);
+      LAUNCH_CUSTOM_ATTENTION(3);
+      //LAUNCH_CUSTOM_ATTENTION_MFMA16(3);
       break;
     case 4:
-      //LAUNCH_CUSTOM_ATTENTION(4);
-      LAUNCH_CUSTOM_ATTENTION_MFMA16(4);
+      LAUNCH_CUSTOM_ATTENTION(4);
+      //LAUNCH_CUSTOM_ATTENTION_MFMA16(4);
       break;
     case 5:
       //LAUNCH_CUSTOM_ATTENTION(5);
