@@ -124,6 +124,10 @@ class AttentionMetadata:
     multi_modal_placeholder_index_maps: Optional[Dict[
         str, MultiModalPlaceholderMap.IndexMap]]
 
+    # Enable/disable KV scales calculation. This is so that we can disable the
+    # calculation until after prefill and cuda graph capture.
+    enable_kv_scales_calculation: bool
+
     @property
     @abstractmethod
     def prefill_metadata(self) -> Optional["AttentionMetadata"]:
@@ -233,6 +237,7 @@ class AttentionImpl(ABC, Generic[T]):
         kv_cache_dtype: str = "auto",
         blocksparse_params: Optional[Dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
+        attn_type: str = AttentionType.DECODER,
     ) -> None:
         raise NotImplementedError
 
@@ -244,10 +249,11 @@ class AttentionImpl(ABC, Generic[T]):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: T,
-        k_scale: float = 1.0,
-        v_scale: float = 1.0,
-        attn_type: str = AttentionType.DECODER,
-        output: Optional[torch.Tensor] = None,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
+        q_scale: Optional[torch.Tensor] = None,
+        prob_scale: Optional[torch.Tensor] = None,
         fp8_out_scale: Optional[torch.Tensor] = None,
+        output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError

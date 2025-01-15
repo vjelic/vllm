@@ -125,6 +125,13 @@ def input_processor_for_mllama(
 
     assert is_list_of(image_data, Image.Image)
 
+    num_image_tokens = dec_inputs['prompt_token_ids'].count(
+        MLLAMA_IMAGE_TOKEN_ID)
+    if num_image_tokens != len(image_data):
+        raise ValueError(
+            f"The number of image tokens ({num_image_tokens}) must be"
+            f" the same as the number of images ({len(image_data)})")
+
     # Since only the last group of consecutive images
     # are attended by the decoded tokens, we only need to
     # get the number of tiles for those images.
@@ -772,6 +779,7 @@ class MllamaTextCrossAttention(nn.Module):
             self.scaling,
             self.num_local_key_value_heads,
             prefix=f"{prefix}.attn",
+            attn_type=AttentionType.ENCODER_DECODER,
         )
 
     def forward(
@@ -807,13 +815,9 @@ class MllamaTextCrossAttention(nn.Module):
                                                kv_range_for_decode,
                                                attn_metadata)
         else:
-            output = self.attn(q.view(-1,
-                                      self.num_local_heads * self.head_dim),
-                               k,
-                               v,
-                               kv_cache,
-                               attn_metadata,
-                               attn_type=AttentionType.ENCODER_DECODER)
+            output = self.attn(
+                q.view(-1, self.num_local_heads * self.head_dim), k, v,
+                kv_cache, attn_metadata)
         out, _ = self.o_proj(output)
         return out
 
@@ -829,6 +833,7 @@ class MllamaTextCrossAttention(nn.Module):
     ) -> torch.Tensor:
         # Skip writing kv-cache for the initial profiling run.
         if len(kv_cache.shape) > 1:
+            i = torch.ones(1, dtype=torch.float32)
             if current_platform.is_rocm():
                 key_cache, value_cache = PagedAttention.split_kv_cache(
                     kv_cache, self.num_local_key_value_heads, self.head_dim)
@@ -836,7 +841,7 @@ class MllamaTextCrossAttention(nn.Module):
                 cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
                 PagedAttention.write_to_paged_cache(
                     cached_k, cached_v, key_cache, value_cache,
-                    attn_metadata.cross_slot_mapping, "auto", 1.0, 1.0)
+                    attn_metadata.cross_slot_mapping, "auto", i, i)
             else:
                 if self.attn.backend in (_Backend.FLASH_ATTN,
                                          _Backend.FLASH_ATTN_VLLM_V1):
@@ -852,8 +857,8 @@ class MllamaTextCrossAttention(nn.Module):
                         attn_metadata.
                         cross_slot_mapping,  # type: ignore[union-attr]
                         "auto",
-                        1.0,
-                        1.0,
+                        i,
+                        i,
                     )
                 elif self.attn.backend in (_Backend.XFORMERS,
                                            _Backend.TORCH_SDPA):
@@ -866,7 +871,7 @@ class MllamaTextCrossAttention(nn.Module):
                         [v[s:e] for s, e in kv_range_for_decode])
                     PagedAttention.write_to_paged_cache(
                         cached_k, cached_v, key_cache, value_cache,
-                        attn_metadata.cross_slot_mapping, "auto", 1.0, 1.0)
+                        attn_metadata.cross_slot_mapping, "auto", i, i)
                 else:
                     raise ValueError(
                         f"Unsupported Attention backend {self.attn.backend} "
@@ -1521,6 +1526,8 @@ def convert_sparse_cross_attention_mask_to_dense(
             dense_mask[seq_start + start:seq_start + end,
                        tile_start:tile_start + tile] = 1
             tile_start += tile
+        assert ts != -1
+        assert td != 0
         tile_range_for_decode.append((ts, ts + td))
         seq_start += length
 

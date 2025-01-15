@@ -27,8 +27,8 @@ ENABLE_ARTIFICIAL_PREEMPT = bool(
 ARTIFICIAL_PREEMPTION_PROB = 0.5
 ARTIFICIAL_PREEMPTION_MAX_CNT = 500
 
-VLLM_SCHED_PREFILL_COUNT = int(
-    os.getenv("VLLM_SCHED_PREFILL_COUNT", 0))  # noqa
+VLLM_SCHED_PREFILL_COUNT = int(os.getenv("VLLM_SCHED_PREFILL_COUNT",
+                                         0))  # noqa
 
 
 class PreemptionMode(enum.Enum):
@@ -169,9 +169,18 @@ class SchedulerOutputs:
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
 
     def _sort_by_lora_ids(self):
-        self.scheduled_seq_groups = sorted(
-            self.scheduled_seq_groups,
-            key=lambda g: (g.seq_group.lora_int_id, g.seq_group.request_id))
+        assert 0 <= self.num_prefill_groups <= len(self.scheduled_seq_groups)
+
+        def key_fn(group: ScheduledSequenceGroup):
+            key = (group.seq_group.lora_int_id, group.seq_group.request_id)
+            if 0 < self.num_prefill_groups < len(self.scheduled_seq_groups):
+                # Sort sequence groups so that all prefills come before all
+                # decodes as required by chunked prefill.
+                return (not group.seq_group.is_prefill(), *key)
+            return key
+
+        self.scheduled_seq_groups = sorted(self.scheduled_seq_groups,
+                                           key=key_fn)
 
     @property
     def lora_requests(self) -> Set[LoRARequest]:
@@ -331,15 +340,17 @@ class Scheduler:
         self.lora_config = lora_config
         self.prefill_timeout = 0
 
-        # slightly hackey, but if you specify prefill batch count, the delay factor
-        # needs to exist, otherwise we will always skip.  Default will be equal to
-        # VLLM_SCHED_PREFILL_COUNT, as they should be roughly the same.
+        # slightly hackey, but if you specify prefill batch count,
+        # the delay factor needs to exist, otherwise we will always skip.
+        # Default will be equal to VLLM_SCHED_PREFILL_COUNT,
+        # as they should be roughly the same.
         # Recommend setting with --scheduler-delay-factor and experimenting
         # On command line
-        if VLLM_SCHED_PREFILL_COUNT > 0 and self.scheduler_config.delay_factor == 0:
+        if VLLM_SCHED_PREFILL_COUNT > 0 and \
+            self.scheduler_config.delay_factor == 0:
             self.scheduler_config.delay_factor = VLLM_SCHED_PREFILL_COUNT
         version = "selfattn"
-        if (self.scheduler_config.task == "embedding"
+        if (self.scheduler_config.runner_type == "pooling"
                 or self.cache_config.is_attention_free):
             version = "placeholder"
 
@@ -925,7 +936,8 @@ class Scheduler:
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
 
-        while (VLLM_SCHED_PREFILL_COUNT <= len(waiting_queue) or self._passed_delay(time.time())) and waiting_queue:
+        while (len(waiting_queue) >= VLLM_SCHED_PREFILL_COUNT
+               or self._passed_delay(time.time())) and waiting_queue:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
@@ -1582,6 +1594,7 @@ class Scheduler:
             seq.status = SequenceStatus.WAITING
             self.free_seq(seq)
             seq.reset_state_for_recompute()
+        self._free_seq_group_cross_attn_blocks(seq_group)
 
     def _preempt_by_swap(
         self,
