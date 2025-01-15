@@ -558,10 +558,10 @@ def get_default_config(
     '''
     config = {
         'BLOCK_SIZE_M': 32,
-        'BLOCK_SIZE_N': 128 if dtype is None else 64,
+        'BLOCK_SIZE_N': 128 if dtype is None else 128,
         'BLOCK_SIZE_K': 128 if dtype is None else 256,
         'GROUP_SIZE_M': 1,
-        "num_warps": 8 if dtype is None else 4,
+        "num_warps": 8 if dtype is None else 8,
         "num_stages": 2,
         "waves_per_eu": 0,
         "kpack": 2,                # garbage w/o this
@@ -570,11 +570,11 @@ def get_default_config(
     # A heuristic: fused marlin works faster with this config for small M
     if M <= E or (is_marlin and M <= 32):
         config = {
-            'BLOCK_SIZE_M': 32,
-            'BLOCK_SIZE_N': 128 if dtype is None else 64,
+            'BLOCK_SIZE_M': 16,
+            'BLOCK_SIZE_N': 128 if dtype is None else 128,
             'BLOCK_SIZE_K': 128 if dtype is None else 256,
             'GROUP_SIZE_M': 1,
-            "num_warps": 8 if dtype is None else 4,
+            "num_warps": 8 if dtype is None else 8,
             "num_stages": 2,
             "waves_per_eu": 0,
             "kpack": 2,                # garbage w/o this
