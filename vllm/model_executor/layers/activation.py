@@ -12,7 +12,7 @@ from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.utils import LazyDict
-
+from vllm.utils import rpd_mark
 
 @CustomOp.register("fatrelu_and_mul")
 class FatreluAndMul(CustomOp):
@@ -66,12 +66,13 @@ class SiluAndMul(CustomOp):
         elif current_platform.is_xpu():
             from vllm._ipex_ops import ipex_ops
             self.op = ipex_ops.silu_and_mul
-
+    @rpd_mark(name="SiluAndMul FwdNative")
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         d = x.shape[-1] // 2
         return F.silu(x[..., :d]) * x[..., d:]
 
+    @rpd_mark(name="SiluAndMul FwdCuda")
     def forward_cuda(self,
                      x: torch.Tensor,
                      scale: Optional[torch.Tensor] = None) -> torch.Tensor:

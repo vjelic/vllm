@@ -58,10 +58,10 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-
+from vllm.utils import rpd_mark
 
 class LlamaMLP(nn.Module):
-
+    @rpd_mark(name="LlamaMLP Init")
     def __init__(
         self,
         hidden_size: int,
@@ -93,7 +93,8 @@ class LlamaMLP(nn.Module):
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
-
+    
+    @rpd_mark(name="LlamaMLP Forward")
     def forward(self, x):
         if current_platform.is_rocm() and x.shape[0] == 1 and x.shape[1] == 1:
             out = torch.empty(x.shape[0],
@@ -110,9 +111,8 @@ class LlamaMLP(nn.Module):
         x, _ = self.down_proj(x)
         return x
 
-
 class LlamaAttention(nn.Module):
-
+    @rpd_mark(name="LlamaAttention Init")
     def __init__(
         self,
         config: LlamaConfig,
@@ -214,7 +214,7 @@ class LlamaAttention(nn.Module):
             per_layer_sliding_window=sliding_window,
             prefix=f"{prefix}.attn",
         )
-
+    @rpd_mark(name="LlamaAttention Forward")
     def forward(
         self,
         positions: torch.Tensor,
@@ -231,9 +231,8 @@ class LlamaAttention(nn.Module):
         output, _ = self.o_proj(attn_output)
         return output
 
-
 class LlamaDecoderLayer(nn.Module):
-
+    @rpd_mark(name="LlamaDecoderLayer Init")
     def __init__(
         self,
         config: LlamaConfig,
@@ -285,6 +284,7 @@ class LlamaDecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
+    @rpd_mark(name="LlamaDecoderLayer Forward")
     def forward(
         self,
         positions: torch.Tensor,
@@ -466,7 +466,6 @@ class LlamaModel(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
-
 class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
@@ -577,7 +576,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                                   attn_metadata, intermediate_tensors,
                                   inputs_embeds)
         return model_output
-
+    @rpd_mark(name="LlamaComputeLogits")
     def compute_logits(
         self,
         hidden_states: torch.Tensor,

@@ -23,6 +23,7 @@ from vllm.model_executor.parameter import (BasevLLMParameter,
                                            RowvLLMParameter)
 # yapf: enable
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.utils import rpd_mark
 
 logger = init_logger(__name__)
 
@@ -414,7 +415,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         prefix: The name of the layer in the state dict, including all parents
                         (e.g. model.layers.0.qkv_proj)
     """
-
+    @rpd_mark(name="MergedColumnParallelLinear Init")
     def __init__(self,
                  input_size: int,
                  output_sizes: List[int],
@@ -436,6 +437,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                          quant_config=quant_config,
                          prefix=prefix)
 
+    @rpd_mark(name="MergedColumnParallelLinear WeightLoader")
     def weight_loader(self,
                       param: Parameter,
                       loaded_weight: torch.Tensor,
@@ -1017,7 +1019,7 @@ class RowParallelLinear(LinearBase):
         params_dtype: Data type for the parameters.
         quant_config: Quantization configure.
     """
-
+    @rpd_mark(name="RowParallelLinear Init")
     def __init__(self,
                  input_size: int,
                  output_size: int,
@@ -1063,7 +1065,8 @@ class RowParallelLinear(LinearBase):
             })
         else:
             self.register_parameter("bias", None)
-
+    
+    @rpd_mark(name="RowParallelLinear WeightLoader")
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
         tp_size = get_tensor_model_parallel_world_size()
