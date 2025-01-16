@@ -47,8 +47,8 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 from vllm.utils import (DeviceMemoryProfiler, GiB_bytes, PyObjectCache,
                         async_tensor_h2d, flatten_2d_lists,
-                        is_pin_memory_available, rpd_mark, supports_dynamo,
-                        weak_ref_tensor)
+                        is_pin_memory_available, rpd_mark, rpd_user_marker, 
+                        supports_dynamo, weak_ref_tensor)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
     _add_attn_metadata_broadcastable_dict,
@@ -1699,7 +1699,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 kv_caches,
                 hidden_or_intermediate_states,
             )
-
+        
         # Compute the logits in the last pipeline stage.
         if not get_pp_group().is_last_rank:
             if (self.is_driver_worker
@@ -1721,25 +1721,40 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 
         logits = self.model.compute_logits(hidden_or_intermediate_states,
                                            model_input.sampling_metadata)
-
+        
+        marker_instance1 = rpd_user_marker(name="Driver Worker")
+        marker_instance1.start()
         if not self.is_driver_worker:
             return []
-
+        marker_instance1.end()
+        
+        marker_instance2 = rpd_user_marker(name="Async Callback")
+        marker_instance2.start()
         if model_input.async_callback is not None:
             model_input.async_callback()
-
+        marker_instance2.end()
+        
         # Sample the next token.
         output: SamplerOutput = self.model.sample(
             logits=logits,
             sampling_metadata=model_input.sampling_metadata,
         )
+
+        marker_instance3 = rpd_user_marker(name="Model Forward Sync")
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time
                 and output is not None):
+            
+            marker_instance3.start()
             model_forward_end.synchronize()
+            marker_instance3.end()
+            
+            marker_instance4 = rpd_user_marker(name="Model Forward Timer")
+            marker_instance4.start()
             model_forward_time = model_forward_start.elapsed_time(
                 model_forward_end)
             orig_model_forward_time = 0.0
+
             if intermediate_tensors is not None:
                 orig_model_forward_time = intermediate_tensors.tensors.get(
                     "model_forward_time", torch.tensor(0.0)).item()
@@ -1749,8 +1764,11 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             # the communication time as well.
             output.model_forward_time = (orig_model_forward_time +
                                          model_forward_time)
+            model_instance.end()
 
+        marker_instance5 = rpd_user_marker(name="Hidden State Return")  
         if self.return_hidden_states:
+            marker_instance5.start()
             # we only need to pass hidden states of most recent token
             assert model_input.sampling_metadata is not None
             indices = model_input.sampling_metadata.selected_token_indices
@@ -1764,6 +1782,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 hidden_states = hidden_or_intermediate_states
 
             output.hidden_states = hidden_states
+            marker_instance5.end()
 
         return [output]
 
