@@ -26,7 +26,7 @@ steps:
   - label: "AMD: {{ step.label }}"
     depends_on: ~
     agents:
-      queue: amd_gpu
+      queue: default
     commands: 
       - "docker build --build-arg max_jobs=16 --tag {{ docker_image_amd }} -f Dockerfile.rocm --progress plain ."
       - bash .buildkite/run-amd-test.sh "cd {{ (step.working_dir or default_working_dir) | safe  }} ; {{ step.command  or (step.commands | join(" && ")) | safe }}"
