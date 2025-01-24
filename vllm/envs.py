@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     VLLM_USE_ROCM_CUSTOM_PAGED_ATTN: bool = True
     VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT: bool = True
     VLLM_USE_ROCM_FP8_FLASH_ATTN: bool = False
-    VLLM_USE_ATER: bool = False
+    VLLM_USE_AITER: bool = False
     RANK: int = 0
     VLLM_FLASH_ATTN_VERSION: Optional[int] = None
     LOCAL_RANK: int = 0
@@ -278,8 +278,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
              ("true", "1")),
 
     # use ater ops
-    "VLLM_USE_ATER":
-    lambda: (os.getenv("VLLM_USE_ATER", "False").lower() in
+    "VLLM_USE_AITER":
+    lambda: (os.getenv("VLLM_USE_AITER", "False").lower() in
              ("true", "1")),
 
     # rank of the process in the distributed setting, used to determine
