@@ -543,7 +543,8 @@ if(VLLM_GPU_LANG STREQUAL "HIP")
     "csrc/rocm/ck_fused_moe/fused_moegemm_api.hip"
     "csrc/rocm/ck_fused_moe/fused_moegemm_bf16_m32.hip"
     "csrc/rocm/ck_fused_moe/fused_moegemm_fp16_m32.hip"
-    "csrc/rocm/ck_fused_moe/fused_moesorting_api.hip")
+    "csrc/rocm/ck_fused_moe/fused_moesorting_api.hip"
+    "csrc/rocm/ck_fused_moe/fused_moe.hip")
 
   define_gpu_extension_target(
     _rocm_C

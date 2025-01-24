@@ -23,3 +23,5 @@ void paged_attention(torch::Tensor& out, torch::Tensor& exp_sums,
                      torch::Tensor& v_scale,
                      const c10::optional<torch::Tensor>& fp8_out_scale,
                      int64_t partition_size);
+
+void ck_fused_moe();
