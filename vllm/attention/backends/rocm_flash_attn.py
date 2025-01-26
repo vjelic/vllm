@@ -800,7 +800,29 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 decode_query.dtype, head_size, block_size, gqa_ratio,
                 decode_meta.max_decode_seq_len)
             if envs.VLLM_USE_AITER:
-                use_custom = False
+                out = output[num_prefill_tokens:]
+                PagedAttention.forward_decode(
+                    decode_query,
+                    key_cache,
+                    value_cache,
+                    decode_meta.block_tables
+                    if self.attn_type != AttentionType.ENCODER_DECODER else
+                    decode_meta.cross_block_tables,
+                    decode_meta.seq_lens_tensor
+                    if self.attn_type != AttentionType.ENCODER_DECODER else
+                    decode_meta.encoder_seq_lens_tensor,
+                    decode_meta.max_decode_seq_len
+                    if self.attn_type != AttentionType.ENCODER_DECODER else
+                    decode_meta.max_encoder_seq_len,
+                    self.kv_cache_dtype,
+                    self.num_kv_heads,
+                    self.scale,
+                    self.alibi_slopes,
+                    layer._k_scale,
+                    layer._v_scale,
+                    out=out
+                )
+                return output.view(-1, self.num_heads * self.head_size)
             if use_custom:
                 max_seq_len = (decode_meta.max_decode_seq_len if self.attn_type
                                != AttentionType.ENCODER_DECODER else
@@ -859,7 +881,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 if cpa_fp8_out:
                     return out.view(num_seqs, num_heads * head_size)
             else:
-                output[num_prefill_tokens:] = PagedAttention.forward_decode(
+                PagedAttention.forward_decode(
+                    output[num_prefill_tokens:],
                     decode_query,
                     key_cache,
                     value_cache,
