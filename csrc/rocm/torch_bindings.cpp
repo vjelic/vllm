@@ -43,8 +43,20 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
       "wvSpltK(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"
       "        int CuCount) -> ()");
   rocm_ops.impl("wvSpltK", torch::kCUDA, &wvSpltK);
-  rocm_ops.def("ck_fused_moe() -> ()");
-  rocm_ops.impl("ck_fused_moe", torch::kCUDA, &ck_fused_moe);
+
+  rocm_ops.def(
+    "fused_ck_moe_test(Tensor in_a1)"
+    "-> ()");
+  rocm_ops.impl("fused_ck_moe_test", torch::kCUDA, &fused_ck_moe_test);
+
+  rocm_ops.def(
+    "fused_ck_moe(Tensor hidden_states, Tensor w1, Tensor w2, "
+    "             Tensor topk_weights, Tensor topk_ids, "
+    "             Tensor? w1_scale, Tensor? w2_scale,"
+    "             Tensor? a1_scale, Tensor? a2_scale,"
+    "             int? block_m)"
+    " -> Tensor");
+  rocm_ops.impl("fused_ck_moe", torch::kCUDA, &fused_ck_moe);
 }
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)

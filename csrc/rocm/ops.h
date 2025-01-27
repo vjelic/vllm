@@ -24,4 +24,17 @@ void paged_attention(torch::Tensor& out, torch::Tensor& exp_sums,
                      const c10::optional<torch::Tensor>& fp8_out_scale,
                      int64_t partition_size);
 
-void ck_fused_moe();
+void fused_ck_moe_test(torch::Tensor& in_a2);
+
+
+torch::Tensor fused_ck_moe(
+    torch::Tensor &hidden_states,
+    torch::Tensor &w1,
+    torch::Tensor &w2,
+    torch::Tensor &topk_weights,
+    torch::Tensor &topk_ids,
+    std::optional<torch::Tensor> w1_scale,
+    std::optional<torch::Tensor> w2_scale,
+    std::optional<torch::Tensor> a1_scale,
+    std::optional<torch::Tensor> a2_scale,
+    std::optional<int64_t> block_m);

@@ -657,6 +657,31 @@ def fused_experts(hidden_states: torch.Tensor,
                                                      a2_scale, block_shape)
 
 
+#def fused_experts_impl(hidden_states: torch.Tensor,
+                       #w1: torch.Tensor,
+                       #w2: torch.Tensor,
+                       #topk_weights: torch.Tensor,
+                       #topk_ids: torch.Tensor,
+                       #inplace: bool = False,
+                       #use_fp8_w8a8: bool = False,
+                       #use_int8_w8a16: bool = False,
+                       #w1_scale: Optional[torch.Tensor] = None,
+                       #w2_scale: Optional[torch.Tensor] = None,
+                       #a1_scale: Optional[torch.Tensor] = None,
+                       #a2_scale: Optional[torch.Tensor] = None,
+                       #block_shape: Optional[List[int]] = None):
+    ## Check constraints.
+    #assert hidden_states.shape[
+        #1] == w1.shape[2] - padding_size, "Hidden size mismatch"
+    #assert topk_weights.shape == topk_ids.shape, "topk shape mismatch"
+    #assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
+    #assert w1.is_contiguous(), "Expert weights1 must be contiguous"
+    #assert w2.is_contiguous(), "Expert weights2 must be contiguous"
+    #assert hidden_states.dtype in [
+        #torch.float32, torch.float16, torch.bfloat16
+    #]
+    #return ops.fused_ck_moe(hidden_states, w1, w2, topk_weights, topk_ids)
+#
 def fused_experts_impl(hidden_states: torch.Tensor,
                        w1: torch.Tensor,
                        w2: torch.Tensor,

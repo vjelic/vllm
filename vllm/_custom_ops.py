@@ -1091,3 +1091,20 @@ def LLMM_Silu(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor,
 def wvSpltK(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor, N: int,
             cu_count: int) -> None:
     torch.ops._rocm_C.wvSpltK(a, b, out, N, cu_count)
+
+def fused_ck_moe_test(in_a4: torch.Tensor) -> None:
+    torch.ops._rocm_C.fused_ck_moe_test(in_a4)
+
+def fused_ck_moe(hidden_states: torch.Tensor, 
+                 w1: torch.Tensor, 
+                 w2: torch.Tensor,
+                 topk_weights: torch.Tensor,
+                 topk_ids: torch.Tensor,
+                 w1_scale: Optional[torch.Tensor] = None,
+                 w2_scale: Optional[torch.Tensor] = None,
+                 a1_scale: Optional[torch.Tensor] = None,
+                 a2_scale: Optional[torch.Tensor] = None,
+                 block_m: Optional[List[int]] = None) -> torch.Tensor:
+    return torch.ops._rocm_C.fused_ck_moe(hidden_states, w1, w2, 
+            topk_weights, topk_ids, w1_scale, w2_scale,
+            a1_scale, a2_scale, block_m)

@@ -8,10 +8,21 @@
 
 struct fused_moe_args
 {
-    const void* a_ptr;              // [m, k], input token
-    const void* a_scale_ptr;        // [m, 1], token scale
+    //hidden_states
+    const void* a_ptr;              // [m, k], input token -- m: the number of tokens,
+                                    //                        k: the hidden size (4096 for mixtral)
+
+
+    const void* a_scale_ptr;        // [m, 1], token scale -- used to scale a pointer
+
+
+    //b_ptr in fused_moe_kernel in line 27 in fused_moe.py
     const void* g_ptr;              // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                                    // n: intermeidate_size in config.json
+
     const void* d_ptr;              // [e, n, k], pre-shuffle([e, nr, kr, w])
+
+
     const void* g_scale_ptr;        // [e, 1, n], gate(up) scale
     const void* d_scale_ptr;        // [e, 1, k], down scale
     const void* y_smooth_scale_ptr; // [e, 1, n], smooth-quant-scale for 2nd gemm input
@@ -50,4 +61,15 @@ struct fused_moe_traits
     int fused_quant; // 0:no-sweep, 1:smooth-dynamic-quant, 2:dynamic-quant
 };
 
-float fused_moe(fused_moe_traits, fused_moe_args, const ck_tile::stream_config&);
+float fused_ck_moe_(fused_moe_traits, fused_moe_args, const ck_tile::stream_config&);
+torch::Tensor fused_ck_moe(
+    torch::Tensor &hidden_states,
+    torch::Tensor &w1,
+    torch::Tensor &w2,
+    torch::Tensor &topk_weights,
+    torch::Tensor &topk_ids,
+    std::optional<torch::Tensor> w1_scale,
+    std::optional<torch::Tensor> w2_scale,
+    std::optional<torch::Tensor> a1_scale,
+    std::optional<torch::Tensor> a2_scale,
+    std::optional<int64_t> block_m);
