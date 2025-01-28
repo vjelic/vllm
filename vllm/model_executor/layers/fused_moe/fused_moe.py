@@ -557,7 +557,13 @@ def inplace_fused_experts(hidden_states: torch.Tensor,
                           a1_scale: Optional[torch.Tensor] = None,
                           a2_scale: Optional[torch.Tensor] = None,
                           block_shape: Optional[List[int]] = None) -> None:
-    fused_experts_impl(hidden_states, w1, w2, topk_weights, topk_ids, True,
+    if envs.VLLM_USE_CK_FUSED_MOE:
+        out = fused_experts_impl_ck(hidden_states, w1, w2, topk_weights, topk_ids, True,
+                       use_fp8_w8a8, use_int8_w8a16, w1_scale, w2_scale,
+                       a1_scale, a2_scale, block_shape)
+        hidden_states.copy_(out)
+    else:
+        fused_experts_impl_triton(hidden_states, w1, w2, topk_weights, topk_ids, True,
                        use_fp8_w8a8, use_int8_w8a16, w1_scale, w2_scale,
                        a1_scale, a2_scale, block_shape)
 
@@ -599,9 +605,14 @@ def outplace_fused_experts(
         a1_scale: Optional[torch.Tensor] = None,
         a2_scale: Optional[torch.Tensor] = None,
         block_shape: Optional[List[int]] = None) -> torch.Tensor:
-    return fused_experts_impl(hidden_states, w1, w2, topk_weights, topk_ids,
+    if envs.VLLM_USE_CK_FUSED_MOE:
+        return fused_experts_impl_ck(hidden_states, w1, w2, topk_weights, topk_ids,
                               False, use_fp8_w8a8, use_int8_w8a16, w1_scale,
                               w2_scale, a1_scale, a2_scale, block_shape)
+    else:
+        return fused_experts_impl_triton(hidden_states, w1, w2, topk_weights, topk_ids,
+                              False, use_fp8_w8a8, use_int8_w8a16, w1_scale,
+                              w2_scale, a1_scale, a2_scale, block_shape)        
 
 
 def outplace_fused_experts_fake(
@@ -657,7 +668,7 @@ def fused_experts(hidden_states: torch.Tensor,
                                                      a2_scale, block_shape)
 
 
-def fused_experts_impl(hidden_states: torch.Tensor,
+def fused_experts_impl_ck(hidden_states: torch.Tensor,
                        w1: torch.Tensor,
                        w2: torch.Tensor,
                        topk_weights: torch.Tensor,
@@ -682,7 +693,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
     ]
     return ops.fused_ck_moe(hidden_states, w1, w2, topk_weights, topk_ids)
 
-def fused_experts_impl1(hidden_states: torch.Tensor,
+def fused_experts_impl_triton(hidden_states: torch.Tensor,
                        w1: torch.Tensor,
                        w2: torch.Tensor,
                        topk_weights: torch.Tensor,

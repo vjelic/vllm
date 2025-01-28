@@ -112,10 +112,11 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         super().process_weights_after_loading(layer)
 
         # shuffle for fused_ck_moe
-        #layer.w13_weight = torch.nn.Parameter(shuffle_weight(layer.w13_weight.data),
-                                              #requires_grad=False)
-        #layer.w2_weight = torch.nn.Parameter(shuffle_weight(layer.w2_weight.data),
-                                             #requires_grad=False)
+        if envs.VLLM_USE_CK_FUSED_MOE:
+            layer.w13_weight = torch.nn.Parameter(shuffle_weight(layer.w13_weight.data),
+                                              requires_grad=False)
+            layer.w2_weight = torch.nn.Parameter(shuffle_weight(layer.w2_weight.data),
+                                             requires_grad=False)
 
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(
@@ -190,14 +191,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             custom_routing_function=custom_routing_function,
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias)
-
-        #return fused_ck_moe(hidden_states=x, 
-                            #w1 = layer.w13_weight,
-                            #w2 = layer.w2_weight,
-                            #topk_weights = topk_weights,
-                            #topk_ids = topk_ids)
-#
-        return fused_experts(hidden_states=x,
+        if envs.VLLM_USE_CK_FUSED_MOE:
+            return fused_ck_moe(hidden_states=x, 
+                            w1 = layer.w13_weight,
+                            w2 = layer.w2_weight,
+                            topk_weights = topk_weights,
+                            topk_ids = topk_ids)
+        else:
+            return fused_experts(hidden_states=x,
                              w1=layer.w13_weight,
                              w2=layer.w2_weight,
                              topk_weights=topk_weights,

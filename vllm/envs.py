@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     Q_SCALE_CONSTANT: int = 20
     K_SCALE_CONSTANT: int = 20
     V_SCALE_CONSTANT: int = 10
+    VLLM_USE_CK_FUSED_MOE : bool = False
 
 
 def get_default_cache_root():
@@ -560,6 +561,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: float(os.getenv("VLLM_LOG_BATCHSIZE_INTERVAL", "-1")),
     "VLLM_DISABLE_COMPILE_CACHE":
     lambda: bool(int(os.getenv("VLLM_DISABLE_COMPILE_CACHE", "0"))),
+
+    "VLLM_USE_CK_FUSED_MOE":
+    lambda: bool(int(os.getenv("VLLM_USE_CK_FUSED_MOE", "0"))),
 }
 
 # end-env-vars-definition
