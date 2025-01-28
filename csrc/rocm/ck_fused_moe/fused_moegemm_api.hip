@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
+#include "torch/all.h"
+
 #include <ck_tile/core.hpp>
 #include "fused_moegemm.hpp"
 #include "fused_moegemm_api_traits.hpp"

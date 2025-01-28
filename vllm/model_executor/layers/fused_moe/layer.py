@@ -16,6 +16,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
+from vllm._custom_ops import fused_ck_moe
 
 if current_platform.is_cuda_alike():
     from .fused_moe import fused_experts
@@ -61,6 +62,25 @@ class FusedMoEMethodBase(QuantizeMethodBase):
     ) -> torch.Tensor:
         raise NotImplementedError
 
+def shuffle_weight(x: torch.Tensor, layout=(16, 16)) -> torch.Tensor:
+    # Hardcode BLOCK_K and BLOCK_N
+    IN, IK = layout
+    BK = IK*2
+    K = 16//x.element_size()
+    BN = IN
+    assert (x.shape[-2] %
+            BN == 0), f'{x.shape[-2]} % {BN} == {x.shape[-2] % BN }'
+    assert (x.shape[-1] %
+            BK == 0), f'{x.shape[-1]} % {BK} == {x.shape[-1] % BK }'
+    
+    x_ = x
+    x_ = x_.view(-1,
+                x.shape[-2]//BN, BN,
+                x.shape[-1]//BK, BK//K, K)
+    x_ = x_.permute(0, 1, 3, 4, 2, 5)
+    x_ = x_.contiguous()
+    x_ = x_.view(*x.shape)
+    return x_
 
 @CustomOp.register("unquantized_fused_moe")
 class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
@@ -87,8 +107,15 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         layer.register_parameter("w2_weight", w2_weight)
         set_weight_attrs(w2_weight, extra_weight_attrs)
 
+
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
+
+        # shuffle for fused_ck_moe
+        #layer.w13_weight = torch.nn.Parameter(shuffle_weight(layer.w13_weight.data),
+                                              #requires_grad=False)
+        #layer.w2_weight = torch.nn.Parameter(shuffle_weight(layer.w2_weight.data),
+                                             #requires_grad=False)
 
         if envs.VLLM_MOE_PADDING:
             layer.w13_weight = torch.nn.Parameter(F.pad(
@@ -164,6 +191,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias)
 
+        #return fused_ck_moe(hidden_states=x, 
+                            #w1 = layer.w13_weight,
+                            #w2 = layer.w2_weight,
+                            #topk_weights = topk_weights,
+                            #topk_ids = topk_ids)
+#
         return fused_experts(hidden_states=x,
                              w1=layer.w13_weight,
                              w2=layer.w2_weight,

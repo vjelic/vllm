@@ -102,7 +102,7 @@ def benchmark_config(
                 input_gating,
                 topk,
                 renormalize=True,
-                inplace=True,
+                inplace=False,
                 use_fp8_w8a8=use_fp8_w8a8,
                 use_int8_w8a16=use_int8_w8a16,
                 w1_scale=w1_scale,
