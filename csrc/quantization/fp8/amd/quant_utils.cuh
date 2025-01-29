@@ -1,6 +1,5 @@
 #pragma once
 #include <hip/hip_fp8.h>
-#include "hip_float8.h"
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
@@ -183,6 +182,18 @@ vec_conversion<uint8_t, uint16_t>(const uint16_t& a) {
                                   fp8_type::__default_interpret);
 }
 
+template <>
+__inline__ __device__ uint16_t
+vec_conversion<uint16_t, uint32_t>(const uint32_t& a) {
+  union {
+    uint32_t ui32;
+    __half2_raw h2r;
+  } tmp;
+  tmp.ui32 = a;
+  return __hip_cvt_halfraw2_to_fp8x2(tmp.h2r, fp8_type::__default_saturation,
+                                     fp8_type::__default_interpret);
+}
+
 // bf16 -> fp8
 template <>
 __inline__ __device__ uint8_t
@@ -288,58 +299,6 @@ vec_conversion<bf16_8_t, Float8_>(const Float8_& a) {
 
  */
 
-// fp8 -> half
-template <>
-__inline__ __device__ uint16_t
-scaled_vec_conversion<uint16_t, uint8_t>(const uint8_t& a, float scale) {
-  __half_raw res;
-  res.data = vec_conversion<float, uint8_t>(a) * scale;
-  return res.x;
-}
-
-// fp8x2 -> half2
-template <>
-__inline__ __device__ uint32_t
-scaled_vec_conversion<uint32_t, uint16_t>(const uint16_t& a, float scale) {
-  __half2_raw h2r =
-      __hip_cvt_fp8x2_to_halfraw2(a, fp8_type::__default_interpret);
-  union {
-    __half2_raw h2r;
-    uint32_t ui32;
-  } tmp;
-  tmp.h2r = __hip_cvt_fp8x2_to_halfraw2(a, fp8_type::__default_interpret);
-  tmp.h2r.x.data *= scale;
-  tmp.h2r.y.data *= scale;
-  return tmp.ui32;
-}
-
-// fp8x4 -> half2x2
-template <>
-__inline__ __device__ uint2
-scaled_vec_conversion<uint2, uint32_t>(const uint32_t& a, float scale) {
-  union {
-    uint2 u32x2;
-    uint32_t u32[2];
-  } tmp;
-  tmp.u32[0] = scaled_vec_conversion<uint32_t, uint16_t>((uint16_t)a, scale);
-  tmp.u32[1] =
-      scaled_vec_conversion<uint32_t, uint16_t>((uint16_t)(a >> 16U), scale);
-  return tmp.u32x2;
-}
-
-// fp8x8 -> half2x4
-template <>
-__inline__ __device__ uint4 scaled_vec_conversion<uint4, uint2>(const uint2& a,
-                                                                float scale) {
-  union {
-    uint4 u64x2;
-    uint2 u64[2];
-  } tmp;
-  tmp.u64[0] = scaled_vec_conversion<uint2, uint32_t>(a.x, scale);
-  tmp.u64[1] = scaled_vec_conversion<uint2, uint32_t>(a.y, scale);
-  return tmp.u64x2;
-}
-
 using __nv_bfloat16 = __hip_bfloat16;
 
 // fp8 -> __nv_bfloat16
@@ -440,6 +399,58 @@ scaled_vec_conversion<Float8_, uint2>(const uint2& a, float scale) {
   return res;
 }
 
+// fp8 -> half
+template <>
+__inline__ __device__ uint16_t
+scaled_vec_conversion<uint16_t, uint8_t>(const uint8_t& a, float scale) {
+  __half_raw res;
+  res.data = scaled_vec_conversion<float, uint8_t>(a, scale);
+  return res.x;
+}
+
+// fp8x2 -> half2
+template <>
+__inline__ __device__ uint32_t
+scaled_vec_conversion<uint32_t, uint16_t>(const uint16_t& a, float scale) {
+  __half2_raw h2r =
+      __hip_cvt_fp8x2_to_halfraw2(a, fp8_type::__default_interpret);
+  union {
+    __half2_raw h2r;
+    uint32_t ui32;
+  } tmp;
+  tmp.h2r = __hip_cvt_fp8x2_to_halfraw2(a, fp8_type::__default_interpret);
+  tmp.h2r.x.data *= scale;
+  tmp.h2r.y.data *= scale;
+  return tmp.ui32;
+}
+
+// fp8x4 -> half2x2
+template <>
+__inline__ __device__ uint2
+scaled_vec_conversion<uint2, uint32_t>(const uint32_t& a, float scale) {
+  union {
+    uint2 u32x2;
+    uint32_t u32[2];
+  } tmp;
+  tmp.u32[0] = scaled_vec_conversion<uint32_t, uint16_t>((uint16_t)a, scale);
+  tmp.u32[1] =
+      scaled_vec_conversion<uint32_t, uint16_t>((uint16_t)(a >> 16U), scale);
+  return tmp.u32x2;
+}
+
+// fp8x8 -> half2x4
+template <>
+__inline__ __device__ uint4 scaled_vec_conversion<uint4, uint2>(const uint2& a,
+                                                                float scale) {
+  union {
+    uint4 u64x2;
+    uint2 u64[2];
+  } tmp;
+  tmp.u64[0] = scaled_vec_conversion<uint2, uint32_t>(a.x, scale);
+  tmp.u64[1] = scaled_vec_conversion<uint2, uint32_t>(a.y, scale);
+  return tmp.u64x2;
+}
+
 // half -> fp8
 template <>
 __inline__ __device__ uint8_t
@@ -498,8 +509,9 @@ __inline__ __device__ uint2 scaled_vec_conversion<uint2, uint4>(const uint4& a,
 template <>
 __inline__ __device__ uint8_t scaled_vec_conversion<uint8_t, __nv_bfloat16>(
     const __nv_bfloat16& a, float scale) {
-  hip_fp8 res{__bfloat162float(a) / scale};
-  return res.data;
+  return __hip_cvt_float_to_fp8(__bfloat162float(a) / scale,
+                                fp8_type::__default_saturation,
+                                fp8_type::__default_interpret);
 }
 
 // bf16x2 -> fp8x2
@@ -542,37 +554,16 @@ scaled_vec_conversion<uint2, bf16_8_t>(const bf16_8_t& a, float scale) {
 template <>
 __inline__ __device__ uint8_t
 scaled_vec_conversion<uint8_t, float>(const float& a, float scale) {
-  hip_fp8 f8(a);
-  return f8.data;
+  return __hip_cvt_float_to_fp8(a / scale, fp8_type::__default_saturation,
+                                fp8_type::__default_interpret);
 }
 
 // floatx2 -> fp8x2
 template <>
 __inline__ __device__ uint16_t
 scaled_vec_conversion<uint16_t, float2>(const float2& a, float scale) {
-    #ifdef __HIP__MI300__
-  union {
-    uint32_t ui32;
-    float f;
-  } f1, f2;
-  f1.f = a.x / scale;
-  f2.f = a.y / scale;
-  if ((f1.ui32 & 0x7F800000) != 0x7F800000) {
-    f1.f = __builtin_amdgcn_fmed3f(f1.f, 240.0, -240.0);
-  }
-  if ((f2.ui32 & 0x7F800000) != 0x7F800000) {
-    f2.f = __builtin_amdgcn_fmed3f(f2.f, 240.0, -240.0);
-  }
-  return __builtin_amdgcn_cvt_pk_fp8_f32(f1.f, f2.f, 0, 0);
-    #else
-  union {
-    uint8_t ui8[2];
-    uint16_t ui16;
-  } tmp;
-  tmp.ui8[0] = scaled_vec_conversion<uint8_t, float>(a.x, scale);
-  tmp.ui8[1] = scaled_vec_conversion<uint8_t, float>(a.y, scale);
-  return tmp.ui16;
-    #endif
+  return __hip_cvt_float2_to_fp8x2(a / scale, fp8_type::__default_saturation,
+                                   fp8_type::__default_interpret);
 }
 
 // floatx4 -> fp8x4
