@@ -9,7 +9,6 @@ import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.scalar_type import ScalarType
-from vllm.utils import is_navi
 
 logger = init_logger(__name__)
 
@@ -62,9 +61,7 @@ def paged_attention_v1(
         seq_lens, block_size, max_seq_len, alibi_slopes, kv_cache_dtype,
         k_scale, v_scale, tp_rank, blocksparse_local_blocks,
         blocksparse_vert_stride, blocksparse_block_size,
-        blocksparse_head_sliding_step,
-        num_threads = 1024 if current_platform.is_rocm() \
-            and not is_navi() else 128)
+        blocksparse_head_sliding_step)
 
 
 def paged_attention_v2(
@@ -96,9 +93,7 @@ def paged_attention_v2(
         num_kv_heads, scale, block_tables, seq_lens, block_size, max_seq_len,
         alibi_slopes, kv_cache_dtype, k_scale, v_scale, tp_rank,
         blocksparse_local_blocks, blocksparse_vert_stride,
-        blocksparse_block_size, blocksparse_head_sliding_step,
-        num_threads = 1024 if current_platform.is_rocm() \
-            and not is_navi() else 128)
+        blocksparse_block_size, blocksparse_head_sliding_step)
 
 
 def paged_attention_rocm(
@@ -119,15 +114,12 @@ def paged_attention_rocm(
     kv_cache_dtype: str,
     k_scale: torch.Tensor,
     v_scale: torch.Tensor,
-    fp8_out_scale: Optional[torch.Tensor],
-    partition_size: int,
 ) -> None:
     torch.ops._rocm_C.paged_attention(out, exp_sum, max_logits, tmp_out, query,
                                       key_cache, value_cache, num_kv_heads,
                                       scale, block_tables, seq_lens,
                                       block_size, max_seq_len, alibi_slopes,
-                                      kv_cache_dtype, k_scale, v_scale,
-                                      fp8_out_scale, partition_size)
+                                      kv_cache_dtype, k_scale, v_scale)
 
 
 # pos encoding ops
@@ -162,19 +154,6 @@ def rms_norm(out: torch.Tensor, input: torch.Tensor, weight: torch.Tensor,
 def fused_add_rms_norm(input: torch.Tensor, residual: torch.Tensor,
                        weight: torch.Tensor, epsilon: float) -> None:
     torch.ops._C.fused_add_rms_norm(input, residual, weight, epsilon)
-
-
-def scaled_rms_norm(out: torch.Tensor, input: torch.Tensor,
-                    weight: torch.Tensor, scale: torch.Tensor,
-                    epsilon: float) -> None:
-    torch.ops._C.rms_norm_static_fp8_quant(out, input, weight, scale, epsilon)
-
-
-def scaled_fused_add_rms_norm(out: torch.Tensor, input: torch.Tensor,
-                              residual: torch.Tensor, weight: torch.Tensor,
-                              scale: torch.Tensor, epsilon: float) -> None:
-    torch.ops._C.fused_add_rms_norm_static_fp8_quant(out, input, residual,
-                                                     weight, scale, epsilon)
 
 
 def advance_step_flashattn(num_seqs: int, num_queries: int, block_size: int,
@@ -462,28 +441,6 @@ def cutlass_scaled_mm(a: torch.Tensor,
                       scale_b: torch.Tensor,
                       out_dtype: torch.dtype,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """
-    `cutlass_scaled_mm` implements a fused version of 
-        `output = torch.mm((scale_a * a), (scale_b * b)).to(out_dtype)`
-    where scale_a * a and scale_b * b are implemented using numpy-style 
-    broadcasting. 
-    
-    In order to support blockwise scaling like found in DeepSeek V3 we also 
-    support extended "group" broadcast rules. We extend the numpy-style 
-    broadcasting rules with the following rule: 
-        "if the extent of a dimension in the source shape is between 1 and 
-        corresponding extent in the target shape we repeat each element along 
-        that dimension  src_shape[dim] // target_shape[dim] times consecutively"
-    example if we have:
-          a = [[1, 2], and target_shape = (2, 4)
-               [3, 4]]
-    then we would expand a to:
-          a = [[1, 1, 2, 2],
-               [3, 3, 4, 4]]
-    currently we only support the case:
-        scale_a.shape * [1, 128] == a.shape
-        scale_b.shape * [128, 128] == b.shape
-    """
     assert (b.shape[0] % 16 == 0 and b.shape[1] % 16 == 0)
     assert (out_dtype is torch.bfloat16 or out_dtype is torch.float16)
     assert bias is None or bias.shape[0] == b.shape[
@@ -815,8 +772,7 @@ def scaled_fp8_quant(
     shape: Union[Tuple[int, int], torch.Size] = input.shape
     # For rocm, the output fp8 dtype is torch.float_e3m3fnuz
     out_dtype: torch.dtype = torch.float8_e4m3fnuz \
-            if current_platform.is_rocm() and not \
-               is_navi() else torch.float8_e4m3fn
+            if current_platform.is_rocm() else torch.float8_e4m3fn
     if num_token_padding:
         shape = (max(num_token_padding, input.shape[0]), shape[1])
     output = torch.empty(shape, device=input.device, dtype=out_dtype)
@@ -1025,14 +981,14 @@ def reshape_and_cache_flash(
 
 
 def concat_and_cache_mla(
-    kv_c: torch.Tensor,
+    ckv: torch.Tensor,
     k_pe: torch.Tensor,
     kv_cache: torch.Tensor,
     slot_mapping: torch.Tensor,
     kv_cache_dtype: str,
     scale: torch.Tensor,
 ) -> None:
-    torch.ops._C_cache_ops.concat_and_cache_mla(kv_c, k_pe, kv_cache,
+    torch.ops._C_cache_ops.concat_and_cache_mla(ckv, k_pe, kv_cache,
                                                 slot_mapping, kv_cache_dtype,
                                                 scale)
 
@@ -1066,20 +1022,16 @@ def get_max_shared_memory_per_block_device_attribute(device: int) -> int:
 
 
 # custom ar
-def init_custom_ar(meta: torch.Tensor, rank_data: torch.Tensor,
-                   handles: List[str], offsets: List[int], rank: int,
-                   full_nvlink: bool) -> int:
-    return torch.ops._C_custom_ar.init_custom_ar(meta, rank_data, handles,
-                                                 offsets, rank, full_nvlink)
+def init_custom_ar(ipc_tensors: List[torch.Tensor], rank_data: torch.Tensor,
+                   rank: int, full_nvlink: bool) -> int:
+    return torch.ops._C_custom_ar.init_custom_ar(ipc_tensors, rank_data, rank,
+                                                 full_nvlink)
 
 
-def all_reduce_reg(fa: int, inp: torch.Tensor, out: torch.Tensor) -> None:
-    torch.ops._C_custom_ar.all_reduce_reg(fa, inp, out)
-
-
-def all_reduce_unreg(fa: int, inp: torch.Tensor, reg_buffer: torch.Tensor,
-                     out: torch.Tensor) -> None:
-    torch.ops._C_custom_ar.all_reduce_unreg(fa, inp, reg_buffer, out)
+def all_reduce(fa: int, inp: torch.Tensor, out: torch.Tensor, reg_buffer: int,
+               reg_buffer_sz_bytes: int) -> None:
+    torch.ops._C_custom_ar.all_reduce(fa, inp, out, reg_buffer,
+                                      reg_buffer_sz_bytes)
 
 
 def dispose(fa: int) -> None:
@@ -1090,39 +1042,14 @@ def meta_size() -> int:
     return torch.ops._C_custom_ar.meta_size()
 
 
-def register_buffer(fa: int, t: torch.Tensor, handles: List[str],
-                    offsets: List[int]) -> None:
-    return torch.ops._C_custom_ar.register_buffer(fa, t, handles, offsets)
+def register_buffer(fa: int, ipc_tensors: List[int]) -> None:
+    return torch.ops._C_custom_ar.register_buffer(fa, ipc_tensors)
 
 
-def get_graph_buffer_ipc_meta(fa: int) -> Tuple[torch.Tensor, List[int]]:
+def get_graph_buffer_ipc_meta(fa: int) -> Tuple[List[int], List[int]]:
     return torch.ops._C_custom_ar.get_graph_buffer_ipc_meta(fa)
 
 
-def register_graph_buffers(fa: int, handles: List[str],
+def register_graph_buffers(fa: int, handles: List[List[int]],
                            offsets: List[List[int]]) -> None:
     torch.ops._C_custom_ar.register_graph_buffers(fa, handles, offsets)
-
-
-def allocate_meta_buffer(size: int) -> torch.Tensor:
-    return torch.ops._C_custom_ar.allocate_meta_buffer(size)
-
-
-def get_meta_buffer_ipc_handle(inp: torch.Tensor) -> torch.Tensor:
-    return torch.ops._C_custom_ar.get_meta_buffer_ipc_handle(inp)
-
-
-# ROCm custom
-def LLMM1(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor,
-          rows_per_block: int) -> None:
-    torch.ops._rocm_C.LLMM1(a, b, out, rows_per_block)
-
-
-def LLMM_Silu(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor,
-              rows_per_block: int) -> None:
-    torch.ops._rocm_C.LLMM_Silu(a, b, out, rows_per_block)
-
-
-def wvSpltK(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor, N: int,
-            cu_count: int) -> None:
-    torch.ops._rocm_C.wvSpltK(a, b, out, N, cu_count)

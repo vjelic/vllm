@@ -1,14 +1,13 @@
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 
 from vllm import _custom_ops as ops
 from vllm import envs
-from vllm.attention.backends.abstract import (AttentionLayer,
-                                              AttentionMetadata,
-                                              MLAAttentionImpl, T)
+from vllm.attention.backends.abstract import (AttentionImpl, AttentionLayer,
+                                              AttentionMetadata, AttentionType)
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                RowParallelLinear)
@@ -16,14 +15,14 @@ from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from vllm.vllm_flash_attn import flash_attn_varlen_func
 
 
-@dataclass
-class MLACommonMetadata(AttentionMetadata):
-    # Input positions for rotrary embeddings since for MLA the rotary
-    # position embeddings are applied inside the attention backend
+@dataclass(kw_only=True)
+class MLAMetadataCommon(AttentionMetadata):
+    # Input positions for rotrary embeddings since for MLA the rotarty
+    # position encoding
     input_positions: torch.Tensor
 
 
-class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
+class MLAImplCommon(AttentionImpl):
     """
     Common class for implementing repeated parts 
     
@@ -53,7 +52,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
         1. The hidden states (B, H) are projected down into cq (B, Lq) and
            kv_c_k_pe (B, Lkv+R).
-        2. The kv_c_k_pe is split into kv_c (B, Lkv) and k_pe (B, R). cq
+        2. The kv_c_k_pe is split into ckv (B, Lkv) and k_pe (B, R). cq
            and kv_c are normalized.
         
         #
@@ -138,7 +137,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         # q_proj should be q_b_proj if q_lora_rank is not None, but from an
         # attention backend perspective we rely on the layer to pass in the
         # correct matrix
-        q_proj: ColumnParallelLinear,
+        q_proj: Optional[ColumnParallelLinear],
         kv_b_proj: ColumnParallelLinear,
         o_proj: RowParallelLinear,
     ) -> None:
@@ -160,9 +159,24 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         self.kv_b_proj = kv_b_proj
         self.o_proj = o_proj
 
+        unsupported_features = [
+            alibi_slopes, sliding_window, blocksparse_params, logits_soft_cap
+        ]
+        if any(unsupported_features):
+            raise NotImplementedError(
+                "FlashInferMLAImpl does not support one of the following: "
+                "alibi_slopes, sliding_window, blocksparse_params, "
+                "logits_soft_cap")
+
+        if attn_type != AttentionType.DECODER:
+            raise NotImplementedError("Encoder self-attention and "
+                                      "encoder/decoder cross-attention "
+                                      "are not implemented for "
+                                      "FlashInferMLAImpl")
+
     def _v_up_proj_and_o_proj(self, x):
         if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
-            return self.o_proj_absorbed(
+            return self.o_proj_absored(
                 x.reshape(-1, self.num_heads * self.kv_lora_rank))[0]
         else:
             x = torch.einsum("bnl,lnv->bnv", x, self.W_UV)
@@ -174,9 +188,8 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
             return torch.matmul(x, self.W_Q_UK)\
                 .view(-1, self.num_heads, self.kv_lora_rank)
         else:
-            x = torch.matmul(x, self.W_Q)\
-                .view(-1, self.num_heads, self.qk_nope_head_dim)
-            return torch.einsum("bnp,lnp->bnl", x, self.W_UK)\
+            x = torch.matmul(x, self.W_Q)
+            return torch.matmul(x, self.W_UK.T)\
                 .view(-1, self.num_heads, self.kv_lora_rank)
 
     def process_weights_after_loading(self):
@@ -211,7 +224,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
         if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
             #
-            # Perform matrix-absorption following
+            # Perform matrix-absorbtion following
             #     https://github.com/flashinfer-ai/flashinfer/pull/551
             # for decode, as a result we end up with absorbed weights for decode
             # and another copy of raw weights for prefill.
@@ -232,27 +245,25 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                 .flatten(start_dim=0, end_dim=1).contiguous()
 
             tp_size = get_tensor_model_parallel_world_size()
-            self.o_proj_absorbed = RowParallelLinear(
+            self.o_proj_absored = RowParallelLinear(
                 self.W_UV_O.shape[0] * tp_size,
                 self.W_UV_O.shape[1],
                 bias=False,
-                # TODO(lucas) figure out how to properly forward quant_method
-                #quant_config=self.o_proj.quant_method,
+                #quant_config=self.o_proj.quant_method, TODO
             )
 
-            self.o_proj_absorbed.weight = torch.nn.Parameter(self.W_UV_O.T)
+            self.o_proj_absored.weight = torch.nn.Parameter(self.W_UV_O.T)
         else:
-            self.W_UV = W_UV
-            self.W_UK = W_UK
-            self.W_Q = W_Q.flatten(start_dim=1)
+            print("Not absorbing weights")
+            self.W_UK, self.W_UV, self.W_Q = W_UK, W_UV, W_Q
 
     @abstractmethod
     def _forward_prefill(
         self,
         q: torch.Tensor,
-        kv_c_normed: torch.Tensor,
+        ckv_normed: torch.Tensor,
         k_pe: torch.Tensor,
-        attn_metadata: T,
+        attn_metadata: MLAMetadataCommon,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -262,7 +273,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         q_nope: torch.Tensor,
         q_pe: torch.Tensor,
         kv_cache: torch.Tensor,
-        attn_metadata: T,
+        attn_metadata: MLAMetadataCommon,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -273,23 +284,22 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         k_c_normed: torch.Tensor,  # key in unified attn
         k_pe: torch.Tensor,  # value in unified attn
         kv_cache: torch.Tensor,
-        attn_metadata: T,
+        attn_metadata: MLAMetadataCommon,
         output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if output is not None:
             raise NotImplementedError(
-                "output is not yet supported for MLAImplBase")
+                "output is not yet supported for TritonMLAImpl")
 
         is_decode = attn_metadata.decode_metadata is not None
         is_prefill = attn_metadata.prefill_metadata is not None
 
         if (is_decode and is_prefill):
             raise NotImplementedError(
-                "chunked prefill is not supported for MLAImplBase")
+                "chunked prefill is not supported for FlashInferMLAImpl")
 
         # Restore head dim (for rotary embedding)
         k_pe = k_pe.unsqueeze(1)
-        assert hasattr(attn_metadata, "input_positions")
 
         if is_decode:
             q_nope = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
@@ -342,8 +352,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
         k = torch.cat((k_nope, k_pe.expand((*k_nope.shape[:-1], -1))), dim=-1)
 
-        # For MLA the v head dim is smaller than qk head dim so we pad out
-        # v with 0s to match the qk head dim
+        # For MLA the v head dim is smaller than the
         v_padded = torch.nn.functional.pad(v, [0, q.shape[-1] - v.shape[-1]],
                                            value=0)
 

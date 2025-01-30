@@ -33,8 +33,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    str kv_cache_dtype, Tensor k_scale, Tensor v_scale,"
       "    int tp_rank, int blocksparse_local_blocks,"
       "    int blocksparse_vert_stride, int blocksparse_block_size,"
-      "    int blocksparse_head_sliding_step,"
-      "    int num_threads) -> ()");
+      "    int blocksparse_head_sliding_step) -> ()");
   ops.impl("paged_attention_v1", torch::kCUDA, &paged_attention_v1);
 
   // PagedAttention V2.
@@ -48,18 +47,13 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    str kv_cache_dtype, Tensor k_scale, Tensor v_scale,"
       "    int tp_rank, int blocksparse_local_blocks,"
       "    int blocksparse_vert_stride, int blocksparse_block_size,"
-      "    int blocksparse_head_sliding_step,"
-      "    int num_threads) -> ()");
+      "    int blocksparse_head_sliding_step) -> ()");
   ops.impl("paged_attention_v2", torch::kCUDA, &paged_attention_v2);
 
   // Activation ops
   // Activation function used in SwiGLU.
   ops.def("silu_and_mul(Tensor! out, Tensor input) -> ()");
   ops.impl("silu_and_mul", torch::kCUDA, &silu_and_mul);
-
-  // Activation function used in SwiGLU.
-  ops.def("scaled_silu_and_mul(Tensor! out, Tensor input, Tensor scale) -> ()");
-  ops.impl("scaled_silu_and_mul", torch::kCUDA, &scaled_silu_and_mul);
 
   ops.def("mul_and_silu(Tensor! out, Tensor input) -> ()");
   ops.impl("mul_and_silu", torch::kCUDA, &mul_and_silu);
@@ -469,9 +463,9 @@ TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _cache_ops), cache_ops) {
   cache_ops.impl("reshape_and_cache_flash", torch::kCUDA,
                  &reshape_and_cache_flash);
 
-  // Concat kv_c and k_pe and cache them.
+  // Concat ckv and k_pe and cache them.
   cache_ops.def(
-      "concat_and_cache_mla(Tensor kv_c, Tensor k_pe,"
+      "concat_and_cache_mla(Tensor ckv, Tensor k_pe,"
       "                     Tensor! kv_cache,"
       "                     Tensor slot_mapping,"
       "                     str kv_cache_dtype,"
@@ -499,39 +493,25 @@ TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _cuda_utils), cuda_utils) {
                   &get_max_shared_memory_per_block_device_attribute);
 }
 
+#ifndef USE_ROCM
 TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _custom_ar), custom_ar) {
   // Custom all-reduce kernels
   custom_ar.def(
-      "init_custom_ar(Tensor meta, Tensor rank_data, "
-      "str[] handles, int[] offsets, int rank, "
-      "bool full_nvlink) -> int");
+      "init_custom_ar(int[] ipc_tensors, Tensor rank_data, "
+      "int rank, bool full_nvlink) -> int");
   custom_ar.impl("init_custom_ar", torch::kCUDA, &init_custom_ar);
-
-  custom_ar.def("all_reduce_reg(int fa, Tensor inp, Tensor! out) -> ()");
-  custom_ar.impl("all_reduce_reg", torch::kCUDA, &all_reduce_reg);
-
   custom_ar.def(
-      "all_reduce_unreg(int fa, Tensor inp, Tensor reg_buffer, Tensor! out) -> "
-      "()");
-  custom_ar.impl("all_reduce_unreg", torch::kCUDA, &all_reduce_unreg);
+      "all_reduce(int fa, Tensor inp, Tensor! out, int reg_buffer, "
+      "int reg_buffer_sz_bytes) -> ()");
+  custom_ar.impl("all_reduce", torch::kCUDA, &all_reduce);
 
   custom_ar.def("dispose", &dispose);
   custom_ar.def("meta_size", &meta_size);
 
-  custom_ar.def(
-      "register_buffer(int fa, Tensor t, str[] handles, "
-      "int[] offsets) -> ()");
-  custom_ar.impl("register_buffer", torch::kCUDA, &register_buffer);
-
+  custom_ar.def("register_buffer", &register_buffer);
   custom_ar.def("get_graph_buffer_ipc_meta", &get_graph_buffer_ipc_meta);
   custom_ar.def("register_graph_buffers", &register_graph_buffers);
-#ifdef USE_ROCM
-  custom_ar.def("allocate_meta_buffer", &allocate_meta_buffer);
-  custom_ar.impl("allocate_meta_buffer", torch::kCUDA, &allocate_meta_buffer);
-  custom_ar.def("get_meta_buffer_ipc_handle", &get_meta_buffer_ipc_handle);
-  custom_ar.impl("get_meta_buffer_ipc_handle", torch::kCPU,
-                 &get_meta_buffer_ipc_handle);
-#endif
 }
+#endif
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)

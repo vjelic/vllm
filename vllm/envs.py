@@ -10,15 +10,7 @@ if TYPE_CHECKING:
     VLLM_RINGBUFFER_WARNING_INTERVAL: int = 60
     VLLM_NCCL_SO_PATH: Optional[str] = None
     LD_LIBRARY_PATH: Optional[str] = None
-    VLLM_ROCM_PREFER_TORCH: bool = False
-    VLLM_ROCM_PREFER_TRITON: bool = True
-    VLLM_USE_SDPA_ATTENTION: bool = False
-    VLLM_USE_TRITON_FLASH_ATTN: bool = True
-    VLLM_USE_ROCM_SKINNY_GEMM: bool = True
-    VLLM_USE_ROCM_CUSTOM_PAGED_ATTN: bool = True
-    VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT: bool = True
-    VLLM_USE_ROCM_FP8_FLASH_ATTN: bool = False
-    RANK: int = 0
+    VLLM_USE_TRITON_FLASH_ATTN: bool = False
     VLLM_FLASH_ATTN_VERSION: Optional[int] = None
     LOCAL_RANK: int = 0
     CUDA_VISIBLE_DEVICES: Optional[str] = None
@@ -73,23 +65,18 @@ if TYPE_CHECKING:
     VLLM_RPC_TIMEOUT: int = 10000  # ms
     VLLM_PLUGINS: Optional[List[str]] = None
     VLLM_TORCH_PROFILER_DIR: Optional[str] = None
-    VLLM_RPD_PROFILER_DIR: Optional[str] = None
     VLLM_USE_TRITON_AWQ: bool = False
     VLLM_ALLOW_RUNTIME_LORA_UPDATING: bool = False
     VLLM_SKIP_P2P_CHECK: bool = False
     VLLM_DISABLED_KERNELS: List[str] = []
     VLLM_USE_V1: bool = False
-    VLLM_MOE_PADDING: bool = False
-    VLLM_FP8_PADDING: bool = True
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = True
     VLLM_LOG_BATCHSIZE_INTERVAL: float = -1
     VLLM_DISABLE_COMPILE_CACHE: bool = False
-    Q_SCALE_CONSTANT: int = 20
-    K_SCALE_CONSTANT: int = 20
-    V_SCALE_CONSTANT: int = 10
+    K_SCALE_CONSTANT: int = 200
+    V_SCALE_CONSTANT: int = 100
     VLLM_SERVER_DEV_MODE: bool = False
     VLLM_V1_OUTPUT_PROC_CHUNK_SIZE: int = 128
-    VLLM_MLA_DISABLE: bool = False
     VLLM_MLA_PERFORM_MATRIX_ABSORPTION: bool = True
 
 
@@ -221,21 +208,6 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "LD_LIBRARY_PATH":
     lambda: os.environ.get("LD_LIBRARY_PATH", None),
 
-    # flag to tell vllm to prefer torch on ROCm
-    "VLLM_ROCM_PREFER_TORCH":
-    lambda: (os.environ.get("VLLM_ROCM_PREFER_TORCH", "False").lower() in
-             ("true", "1")),
-
-    # flag to tell vllm to prefer triton on ROCm
-    "VLLM_ROCM_PREFER_TRITON":
-    lambda: (os.environ.get("VLLM_ROCM_PREFER_TRITON", "True").lower() in
-             ("true", "1")),
-
-    # flag to control if vllm should use naive scaled dot-product attention
-    "VLLM_USE_SDPA_ATTENTION":
-    lambda: (os.environ.get("VLLM_USE_SDPA_ATTENTION", "False").lower() in
-             ("true", "1")),
-
     # flag to control if vllm should use triton flash attention
     "VLLM_USE_TRITON_FLASH_ATTN":
     lambda: (os.environ.get("VLLM_USE_TRITON_FLASH_ATTN", "True").lower() in
@@ -250,32 +222,6 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE":
     lambda: bool(
         os.environ.get("VLLM_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
-
-    # small gemms custom implementation for MI3* cards
-    "VLLM_USE_ROCM_SKINNY_GEMM":
-    lambda: (os.getenv("VLLM_USE_ROCM_SKINNY_GEMM", "True").lower() in
-             ("true", "1")),
-
-    # custom paged attention implemented for MI3* cards
-    "VLLM_USE_ROCM_CUSTOM_PAGED_ATTN":
-    lambda: (os.getenv("VLLM_USE_ROCM_CUSTOM_PAGED_ATTN", "True").lower() in
-             ("true", "1")),
-
-    # have custom paged attention implemented for MI3* cards write out fp8
-    "VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT":
-    lambda:
-    (os.getenv("VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT", "True").lower() in
-     ("true", "1")),
-
-    # use quantized q,k,v,softmax(qk^T), attn output during prefill
-    "VLLM_USE_ROCM_FP8_FLASH_ATTN":
-    lambda: (os.getenv("VLLM_USE_ROCM_FP8_FLASH_ATTN", "False").lower() in
-             ("true", "1")),
-
-    # rank of the process in the distributed setting, used to determine
-    # the driver worker
-    "RANK":
-    lambda: int(os.environ.get("RANK", "0")),
 
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
@@ -355,6 +301,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # otherwise will use heuristic based on model architecture.
     "VLLM_FLASHINFER_FORCE_TENSOR_CORES":
     lambda: bool(int(os.getenv("VLLM_FLASHINFER_FORCE_TENSOR_CORES", "0"))),
+
+    # If set, vLLM will disable the MLA attention optimizations.
+    "VLLM_DISABLE_MLA":
+    lambda: bool(int(os.getenv("VLLM_DISABLE_MLA", "0"))),
 
     # Pipeline stage partition strategy
     "VLLM_PP_LAYER_PARTITION":
@@ -455,7 +405,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
             os.path.join(get_default_cache_root(), "vllm", "xla_cache"),
         )),
     "VLLM_FUSED_MOE_CHUNK_SIZE":
-    lambda: int(os.getenv("VLLM_FUSED_MOE_CHUNK_SIZE", "65536")),
+    lambda: int(os.getenv("VLLM_FUSED_MOE_CHUNK_SIZE", "32768")),
 
     # If set, vllm will skip the deprecation warnings.
     "VLLM_NO_DEPRECATION_WARNING":
@@ -502,12 +452,6 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: (None if os.getenv("VLLM_TORCH_PROFILER_DIR", None) is None else os
              .path.expanduser(os.getenv("VLLM_TORCH_PROFILER_DIR", "."))),
 
-    # Enables rpd profiler if set. Path to the directory where torch profiler
-    # traces are saved. Note that it must be an absolute path.
-    "VLLM_RPD_PROFILER_DIR":
-    lambda: (None if os.getenv("VLLM_RPD_PROFILER_DIR", None) is None else os.
-             path.expanduser(os.getenv("VLLM_RPD_PROFILER_DIR", "."))),
-
     # If set, vLLM will use Triton implementations of AWQ.
     "VLLM_USE_TRITON_AWQ":
     lambda: bool(int(os.getenv("VLLM_USE_TRITON_AWQ", "0"))),
@@ -537,27 +481,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_USE_V1":
     lambda: bool(int(os.getenv("VLLM_USE_V1", "0"))),
 
-    # Pad the weight for moe kernel or not
-    "VLLM_MOE_PADDING":
-    lambda: bool(int(os.getenv("VLLM_MOE_PADDING", "0"))),
-
-    # Pad the weight for moe kernel or not
-    "VLLM_FP8_PADDING":
-    lambda: bool(int(os.getenv("VLLM_FP8_PADDING", "1"))),
-
-    # Divisor for dynamic query scale factor calculation for FP8 attention
-    "Q_SCALE_CONSTANT":
-    lambda: int(os.getenv("Q_SCALE_CONSTANT", "20")),
-
-    # Divisor for dynamic key scale factor calculation
-    # for FP8 KV Cache and attention
+    # Divisor for dynamic key scale factor calculation for FP8 KV Cache
     "K_SCALE_CONSTANT":
-    lambda: int(os.getenv("K_SCALE_CONSTANT", "20")),
+    lambda: int(os.getenv("K_SCALE_CONSTANT", "200")),
 
-    # Divisor for dynamic value scale factor calculation
-    # for FP8 KV Cache and attention
+    # Divisor for dynamic value scale factor calculation for FP8 KV Cache
     "V_SCALE_CONSTANT":
-    lambda: int(os.getenv("V_SCALE_CONSTANT", "10")),
+    lambda: int(os.getenv("V_SCALE_CONSTANT", "100")),
     # If set, enable multiprocessing in LLM for the V1 code path.
     "VLLM_ENABLE_V1_MULTIPROCESSING":
     lambda: bool(int(os.getenv("VLLM_ENABLE_V1_MULTIPROCESSING", "1"))),
@@ -582,15 +512,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_V1_OUTPUT_PROC_CHUNK_SIZE":
     lambda: int(os.getenv("VLLM_V1_OUTPUT_PROC_CHUNK_SIZE", "128")),
 
-    # If set, vLLM will disable the MLA attention optimizations.
-    "VLLM_MLA_DISABLE":
-    lambda: bool(int(os.getenv("VLLM_MLA_DISABLE", "0"))),
-
-    # Flag that can control whether or not we perform matrix-absorption for MLA
-    # decode, i.e. absorb W_UK into W_Q/W_UK and W_UV into W_O, absorbing the
-    # matrices reduces the runtime FLOPs needed to compute MLA but requires
-    # storing more weights, W_Q_UK and W_UV_O, so can increase memory usage,
-    # the is enabled by default
+    # Flag that can control whether
+    #
+    #
     "VLLM_MLA_PERFORM_MATRIX_ABSORPTION":
     lambda: bool(int(os.getenv("VLLM_MLA_PERFORM_MATRIX_ABSORPTION", "1")))
 }

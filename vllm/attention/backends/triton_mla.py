@@ -20,7 +20,7 @@ from vllm.attention.backends.abstract import (AttentionBackend,
                                               AttentionMetadata,
                                               AttentionMetadataBuilder,
                                               AttentionState, AttentionType)
-from vllm.attention.backends.mla.utils import MLACommonImpl, MLACommonMetadata
+from vllm.attention.backends.mla.utils import MLAImplCommon, MLAMetadataCommon
 from vllm.attention.backends.utils import (PAD_SLOT_ID, compute_slot_mapping,
                                            compute_slot_mapping_start_idx,
                                            is_block_tables_empty)
@@ -90,109 +90,41 @@ class TritonMLAState(AttentionState):
 
     def __init__(self, runner):
         self.runner = runner
-        self._is_graph_capturing = False
 
     @contextmanager
     def graph_capture(self, max_batch_size: int):
-        self._is_graph_capturing = True
-
-        self._graph_slot_mapping = torch.full((max_batch_size, ),
-                                              PAD_SLOT_ID,
-                                              dtype=torch.long,
-                                              device=self.runner.device)
-        self._graph_seq_lens = torch.ones(max_batch_size,
-                                          dtype=torch.int32,
-                                          device=self.runner.device)
-        self._graph_block_tables = torch.from_numpy(
-            self.runner.graph_block_tables).to(device=self.runner.device)
-
-        self._positions = torch.zeros((max_batch_size, ),
-                                      dtype=torch.long,
-                                      device=self.runner.device)
-
-        yield
-
-        self._is_graph_capturing = False
-        del self._graph_slot_mapping
-        del self._graph_seq_lens
-        del self._graph_block_tables
-        del self._positions
+        raise NotImplementedError(
+            "TritonMLAState does not support graph capture")
 
     def graph_clone(self, batch_size: int):
-        assert self._is_graph_capturing
-        return self.__class__(self.runner)
+        raise NotImplementedError(
+            "TritonMLAState does not support graph capture")
 
     def graph_capture_get_metadata_for_batch(
             self, batch_size: int, is_encoder_decoder_model: bool = False):
-        assert self._is_graph_capturing
-
-        attn_metadata = self.runner.attn_backend.make_metadata(
-            num_prefills=0,
-            num_prefill_tokens=0,
-            num_decode_tokens=batch_size,
-            slot_mapping=self._graph_slot_mapping[:batch_size],
-            multi_modal_placeholder_index_maps=None,
-            enable_kv_scales_calculation=True,
-            seq_lens=None,
-            seq_lens_tensor=self._graph_seq_lens[:batch_size],
-            max_query_len=1,
-            max_decode_query_len=1,
-            max_prefill_seq_len=0,
-            max_decode_seq_len=self.runner.max_seq_len_to_capture,
-            query_start_loc=None,
-            seq_start_loc=None,
-            context_lens_tensor=None,
-            block_tables=self._graph_block_tables[:batch_size],
-            use_cuda_graph=True,
-            input_positions=self._positions[:batch_size],
-            head_dim=self.runner.model_config.get_head_size())
-
-        if is_encoder_decoder_model:
-            raise NotImplementedError(
-                "TritonMLAState does not support encoder/decoder yet")
-
-        return attn_metadata
+        raise NotImplementedError(
+            "TritonMLAState does not support graph capture")
 
     def get_graph_input_buffers(self,
                                 attn_metadata,
                                 is_encoder_decoder_model: bool = False):
-        input_buffers = {
-            "slot_mapping": attn_metadata.slot_mapping,
-            "seq_lens_tensor": attn_metadata.decode_metadata.seq_lens_tensor,
-            "block_tables": attn_metadata.decode_metadata.block_tables,
-            "input_positions": attn_metadata.decode_metadata.input_positions,
-        }
-        if is_encoder_decoder_model:
-            raise NotImplementedError(
-                "TritonMLAState does not support encoder/decoder yet")
-
-        return input_buffers
+        raise NotImplementedError(
+            "TritonMLAState does not support graph capture")
 
     def prepare_graph_input_buffers(self,
                                     input_buffers,
                                     attn_metadata,
                                     is_encoder_decoder_model: bool = False):
-        input_positions = attn_metadata.input_positions
-        num_positions = input_positions.shape[0]
-        input_buffers["seq_lens_tensor"].copy_(
-            attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
-        input_buffers["block_tables"].copy_(
-            attn_metadata.decode_metadata.block_tables, non_blocking=True)
-        # CUDA graph buffer is padded so only perform a partial copy based on
-        # num_positions
-        input_buffers["input_positions"][:num_positions].copy_(
-            input_positions, non_blocking=True)
-        if is_encoder_decoder_model:
-            raise NotImplementedError(
-                "TritonMLAState does not support encoder/decoder yet")
+        raise NotImplementedError(
+            "TritonMLAState does not support graph capture")
 
     def begin_forward(self, model_input):
         return
 
 
-@dataclass
-class TritonMLAMetadata(MLACommonMetadata):
-    """Metadata for TritonMLAMetadata.
+@dataclass(kw_only=True)
+class TritonMLAMetadata(MLAMetadataCommon):
+    """Metadata for FlashAttentionBackend.
 
     NOTE: Any python object stored here is not updated when it is
     cuda-graph replayed. If you have values that need to be changed
@@ -257,7 +189,7 @@ class TritonMLAMetadata(MLACommonMetadata):
 
     num_prefill_tokens: int
 
-    num_kv_splits: int = 4  # TODO(lucas) add heuristic
+    num_kv_splits: int = 4
     attn_logits: Optional[torch.Tensor] = None
     req_idx: Optional[torch.Tensor] = None
 
@@ -280,8 +212,10 @@ class TritonMLAMetadata(MLACommonMetadata):
         if self._cached_prefill_metadata is not None:
             return self._cached_prefill_metadata
 
-        assert self.seq_lens is not None
-        assert self.seq_lens_tensor is not None
+        assert ((self.seq_lens is not None)
+                or (self.encoder_seq_lens is not None))
+        assert ((self.seq_lens_tensor is not None)
+                or (self.encoder_seq_lens_tensor is not None))
 
         # Compute some attn_metadata fields which default to None
         query_start_loc = (None if self.query_start_loc is None else
@@ -309,7 +243,6 @@ class TritonMLAMetadata(MLACommonMetadata):
             multi_modal_placeholder_index_maps=self.
             multi_modal_placeholder_index_maps,
             enable_kv_scales_calculation=self.enable_kv_scales_calculation,
-            input_positions=input_positions,
             seq_lens=seq_lens,
             seq_lens_tensor=seq_lens_tensor,
             max_query_len=self.max_query_len,
@@ -321,6 +254,7 @@ class TritonMLAMetadata(MLACommonMetadata):
             context_lens_tensor=context_lens_tensor,
             block_tables=block_tables,
             use_cuda_graph=False,
+            input_positions=input_positions,
             head_dim=self.head_dim)
         return self._cached_prefill_metadata
 
@@ -331,7 +265,8 @@ class TritonMLAMetadata(MLACommonMetadata):
 
         if self._cached_decode_metadata is not None:
             return self._cached_decode_metadata
-        assert self.seq_lens_tensor is not None
+        assert ((self.seq_lens_tensor is not None)
+                or (self.encoder_seq_lens_tensor is not None))
 
         # Compute some attn_metadata fields which default to None
         slot_mapping = (None if self.slot_mapping is None else
@@ -634,7 +569,6 @@ class TritonMLAMetadataBuilder(AttentionMetadataBuilder[TritonMLAMetadata]):
             seq_lens=seq_lens,
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=True,
-            input_positions=input_positions,
             seq_lens_tensor=seq_lens_tensor,
             max_query_len=max_query_len,
             max_decode_query_len=max_decode_query_len,
@@ -645,12 +579,13 @@ class TritonMLAMetadataBuilder(AttentionMetadataBuilder[TritonMLAMetadata]):
             context_lens_tensor=context_lens_tensor,
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
+            input_positions=input_positions,
             num_kv_splits=num_kv_splits,
             head_dim=self.runner.model_config.get_head_size(),
         )
 
 
-class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
+class TritonMLAImpl(MLAImplCommon):
 
     def __init__(
             self,
@@ -693,7 +628,6 @@ class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
         k_pe: torch.Tensor,
         attn_metadata: TritonMLAMetadata,
     ) -> torch.Tensor:
-        assert isinstance(attn_metadata, TritonMLAMetadata)
         return self._forward_prefill_flash(q, kv_c_normed, k_pe,
                                            attn_metadata.seq_start_loc,
                                            attn_metadata.max_prefill_seq_len)
@@ -710,7 +644,6 @@ class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
             raise NotImplementedError("FP8 Triton MLA not yet supported")
 
         decode_meta = attn_metadata.decode_metadata
-        assert decode_meta is not None
         B = q_nope.shape[0]
 
         q = torch.cat([q_nope, q_pe], dim=-1)
@@ -720,7 +653,7 @@ class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
                         dtype=q.dtype,
                         device=q.device)
 
-        # TODO(lucas) Allocate ahead of time
+        # TODO(lucas) Allocate ahead of prefill
         attn_logits = torch.empty(
             (
                 B,

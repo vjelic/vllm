@@ -32,8 +32,7 @@ from vllm.transformers_utils.config import (
 from vllm.transformers_utils.s3_utils import S3Model
 from vllm.transformers_utils.utils import is_s3
 from vllm.utils import (GiB_bytes, LayerBlockType, cuda_device_count_stateless,
-                        get_cpu_memory, is_mi250, is_navi, random_uuid,
-                        resolve_obj_by_qualname)
+                        get_cpu_memory, random_uuid, resolve_obj_by_qualname)
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -74,6 +73,20 @@ _TASK_RUNNER: Dict[_ResolvedTask, RunnerType] = {
 
 HfOverrides = Union[Dict[str, Any], Callable[[PretrainedConfig],
                                              PretrainedConfig]]
+
+
+def _is_flashinfer_available() -> bool:
+    """Check if FlashInfer is available.
+
+    Returns:
+        bool: True if FlashInfer is installed and available, False otherwise.
+    """
+    try:
+        from flashinfer import (  # noqa:F401
+            BatchDecodeMlaWithPagedKVCacheWrapper)
+        return True
+    except ImportError:
+        return False
 
 
 class SupportsHash(Protocol):
@@ -166,6 +179,7 @@ class ModelConfig:
             `logits_processors` extra completion argument. Defaults to None,
             which allows no processors.
         generation_config: Configuration parameter file for generation.
+        disable_mla: Whether to disable MLA for DeepSeek models.
         override_generation_config: Override the generation config with the
             given config.
     """
@@ -227,6 +241,7 @@ class ModelConfig:
         override_pooler_config: Optional["PoolerConfig"] = None,
         logits_processor_pattern: Optional[str] = None,
         generation_config: Optional[str] = None,
+        disable_mla: bool = False,
         enable_sleep_mode: bool = False,
         override_generation_config: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -277,6 +292,7 @@ class ModelConfig:
         self.max_logprobs = max_logprobs
         self.disable_sliding_window = disable_sliding_window
         self.skip_tokenizer_init = skip_tokenizer_init
+        self.disable_mla = disable_mla
         self.enable_sleep_mode = enable_sleep_mode
 
         from vllm.platforms import current_platform
@@ -577,12 +593,10 @@ class ModelConfig:
 
             # Detect which checkpoint is it
             for name in QUANTIZATION_METHODS:
-                from vllm.platforms import current_platform
                 method = get_quantization_config(name)
                 quantization_override = method.override_quantization_method(
                     quant_cfg, self.quantization)
-                if (quantization_override and quantization_override
-                        in current_platform.supported_quantization):
+                if quantization_override:
                     quant_method = quantization_override
                     self.quantization = quantization_override
                     break
@@ -741,15 +755,16 @@ class ModelConfig:
 
     @property
     def is_deepseek_mla(self) -> bool:
-        # TODO add deepseek_v3
         return hasattr(self.hf_text_config,
                        "model_type") and (self.hf_text_config.model_type
-                                          in ('deepseek_v2'))
+                                          in ('deepseek_v2', 'deepseek_v3'))
 
     def get_head_size(self) -> int:
         # TODO remove hard code
         if self.is_deepseek_mla:
-            if self.use_mla:
+            # FlashAttention supports only head_size 32, 64, 128, 256,
+            # we need to pad head_size 192 to 256
+            if self.should_use_mla:
                 return self.hf_text_config.kv_lora_rank
             else:
                 qk_rope_head_dim = getattr(self.hf_text_config,
@@ -816,8 +831,8 @@ class ModelConfig:
 
     def get_num_kv_heads(self, parallel_config: "ParallelConfig") -> int:
         """Returns the number of KV heads per GPU."""
-        if self.use_mla:
-            # When using MLA during decode it becomes MQA
+        if self.should_use_mla:
+            # TODO(simon): feature flag MLA
             return 1
 
         total_num_kv_heads = self.get_total_num_kv_heads()
@@ -971,11 +986,11 @@ class ModelConfig:
         return ModelRegistry.is_cross_encoder_model(architectures)
 
     @property
-    def use_mla(self) -> bool:
-        use_mla = (self.is_deepseek_mla and not envs.VLLM_MLA_DISABLE)
+    def should_use_mla(self) -> bool:
+        use_mla = (self.is_deepseek_mla and not self.disable_mla
+                   and not envs.VLLM_DISABLE_MLA)
         return use_mla
 
-    @property
     def supported_runner_types(self) -> Set[RunnerType]:
         return {_TASK_RUNNER[task] for task in self.supported_tasks}
 
@@ -1361,30 +1376,6 @@ class ParallelConfig:
 
         self._verify_args()
 
-        if is_mi250() and self.tensor_parallel_size > 1:
-            self.disable_custom_all_reduce = True
-            logger.info(
-                "Disabled the custom all-reduce kernel because it is not "
-                "working correctly on multi AMD MI250.")
-
-        if is_navi() and self.tensor_parallel_size <= 2:
-            self.disable_custom_all_reduce = True
-            logger.info(
-                "Disabled the custom all-reduce kernel because it is not "
-                "working correctly when using two AMD Navi GPUs.")
-
-        if is_mi250() and self.tensor_parallel_size > 1:
-            self.disable_custom_all_reduce = True
-            logger.info(
-                "Disabled the custom all-reduce kernel because it is not "
-                "working correctly on multi AMD MI250.")
-
-        if is_navi() and self.tensor_parallel_size <= 2:
-            self.disable_custom_all_reduce = True
-            logger.info(
-                "Disabled the custom all-reduce kernel because it is not "
-                "working correctly when using two AMD Navi GPUs.")
-
     @property
     def use_ray(self) -> bool:
         return self.distributed_executor_backend == "ray" or (
@@ -1394,6 +1385,7 @@ class ParallelConfig:
     def _verify_args(self) -> None:
         # Lazy import to avoid circular import
         from vllm.executor.executor_base import ExecutorBase
+        from vllm.platforms import current_platform
         if self.distributed_executor_backend not in (
                 "ray", "mp", "uni",
                 "external_launcher", None) and not (isinstance(
@@ -1407,12 +1399,11 @@ class ParallelConfig:
         if self.use_ray:
             from vllm.executor import ray_utils
             ray_utils.assert_ray_available()
-        if (not self.disable_custom_all_reduce and self.world_size > 1
-                and self.pipeline_parallel_size > 1):
+        if current_platform.is_rocm():
             self.disable_custom_all_reduce = True
             logger.info(
                 "Disabled the custom all-reduce kernel because it is not "
-                "supported with pipeline parallelism.")
+                "supported on AMD GPUs.")
         if self.ray_workers_use_nsight and not self.use_ray:
             raise ValueError("Unable to use nsight profiling unless workers "
                              "run with Ray.")
