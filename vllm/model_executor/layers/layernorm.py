@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 
 from vllm.model_executor.custom_op import CustomOp
-from vllm.envs import VLLM_USE_AITER
-if VLLM_USE_AITER:
+from vllm.envs import VLLM_USE_AITER_NORM
+if VLLM_USE_AITER_NORM:
     import aiter
 
 
@@ -99,7 +99,7 @@ class RMSNorm(CustomOp):
             return out
 
         if residual is not None:
-            if VLLM_USE_AITER:
+            if VLLM_USE_AITER_NORM:
                 aiter.rmsnorm2d_fwd_with_add(
                     x,
                     x,
@@ -117,7 +117,7 @@ class RMSNorm(CustomOp):
                 )
             return x, residual
         
-        if VLLM_USE_AITER:
+        if VLLM_USE_AITER_NORM:
             out = aiter.rms_norm(x, self.weight.data, self.variance_epsilon)
         else:
             out = torch.empty_like(x)
