@@ -6,12 +6,12 @@ from amdsmi import (amdsmi_get_gpu_board_info, amdsmi_get_processor_handles,
 
 amdsmi_init()
 handle = amdsmi_get_processor_handles()[0]
-device_name = amdsmi_get_gpu_board_info(handle)["product_name"]
+device_name = amdsmi_get_gpu_board_info(handle)["product_name"].replace(" ","_")
 amdsmi_shut_down
 
 print(f"device_name = {device_name}")
 
-num_result_files = 4
+num_result_files = 8
 
 result_objs = {}
 unique_nk = {}

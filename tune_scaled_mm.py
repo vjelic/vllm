@@ -152,6 +152,7 @@ def tune(update_callback, start_callback, partition_func, event_queue,
         (512, 7168),
         (576, 7168),
         (7168, 1024),
+        (7168, 8192),
         (7168, 1152),
         (7168, 128),
         (7168, 16384),
@@ -159,6 +160,8 @@ def tune(update_callback, start_callback, partition_func, event_queue,
         (7168, 2048),
         (7168, 2304),
         (7168, 256),
+        (7168, 8192),
+        (8192, 1536),
     ]
 
     choices_M = [
