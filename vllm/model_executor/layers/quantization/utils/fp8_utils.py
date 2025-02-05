@@ -448,6 +448,7 @@ def w8a8_block_fp8_matmul(
     Bs: torch.Tensor,
     block_size: List[int],
     output_dtype: torch.dtype = torch.float16,
+    tune_config = None,
 ) -> torch.Tensor:
     """This function performs matrix multiplication with block-wise
     quantization.
@@ -480,22 +481,25 @@ def w8a8_block_fp8_matmul(
     C_shape = A.shape[:-1] + (N, )
     C = A.new_empty(C_shape, dtype=output_dtype)
 
-    configs = get_w8a8_block_fp8_configs(N, K, block_size[0], block_size[1])
-    if configs:
-        # Get the optimal config if there is one
-        config = configs[min(configs.keys(), key=lambda x: abs(x - M))]
+    if tune_config is None:
+        configs = get_w8a8_block_fp8_configs(N, K, block_size[0], block_size[1])
+        if configs:
+            # Get the optimal config if there is one
+            config = configs[min(configs.keys(), key=lambda x: abs(x - M))]
+        else:
+            # Default config
+            # Block-wise quant: BLOCK_SIZE_N must be divisible by block_size[0]
+            # BLOCK_SIZE_K must be divisible by block_size[1]
+            config = {
+                "BLOCK_SIZE_M": 64,
+                "BLOCK_SIZE_N": block_size[0],
+                "BLOCK_SIZE_K": block_size[1],
+                "GROUP_SIZE_M": 32,
+                "num_warps": 4,
+                "num_stages": 2,
+            }
     else:
-        # Default config
-        # Block-wise quant: BLOCK_SIZE_N must be divisible by block_size[0]
-        # BLOCK_SIZE_K must be divisible by block_size[1]
-        config = {
-            "BLOCK_SIZE_M": 64,
-            "BLOCK_SIZE_N": block_size[0],
-            "BLOCK_SIZE_K": block_size[1],
-            "GROUP_SIZE_M": 32,
-            "num_warps": 4,
-            "num_stages": 2,
-        }
+        config = tune_config
 
     def grid(META):
         return (triton.cdiv(M, META["BLOCK_SIZE_M"]) *

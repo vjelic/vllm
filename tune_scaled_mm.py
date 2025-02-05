@@ -166,8 +166,8 @@ def tune(update_callback, start_callback, partition_func, event_queue,
         3072, 4096
     ]
 
-    # [(M, N, K), ...]
-    shapes = [(t[0], t[1][0], t[1][1])
+    # [(M, K, N), ...]
+    shapes = [(t[0], t[1][1], t[1][0])
               for t in list(itertools.product(choices_M, choices_NK))]
 
     block_m_choices = [32, 64, 128]
