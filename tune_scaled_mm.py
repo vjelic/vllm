@@ -119,6 +119,21 @@ def run_benchmark(update_callback, a, b, a_per_token, b_per_block, group_n,
                                                      quantiles=quantiles,
                                                      warmup=warmup,
                                                      rep=rep)
+
+        golden_function = lambda: w8a8_block_fp8_matmul(a,
+                                                       b,
+                                                       a_per_token,
+                                                       b_per_block,
+                                                       [group_n, group_k],
+                                                       out_dtype,
+        result = bench_function()
+        golden = golden_function()
+
+        if not torch.testing.allclose(golden, result, rtol=1e-1, atol=1e-1):
+            ms = max_ms = min_ms = 10000.0
+
+
+
         update_callback()
         return ms, max_ms, min_ms
 
@@ -186,7 +201,7 @@ def tune(update_callback, start_callback, partition_func, event_queue,
     block_k_choices = [32, 64, 128]#, 256]
     group_m_choices = [1, 8, 16, 32]
     num_warps_choices = [4]
-    kpack_choices = [2]#[1, 2]
+    kpack_choices = [1]#[1, 2]
     matrix_instr_nonkdim_choices = [16]#[16, 32]
 
     config_choices = lambda: itertools.product(

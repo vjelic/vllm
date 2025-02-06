@@ -500,6 +500,14 @@ def w8a8_block_fp8_matmul(
             }
     else:
         config = tune_config
+    # config = {
+        # "BLOCK_SIZE_M": 64,
+        # "BLOCK_SIZE_N": block_size[0],
+        # "BLOCK_SIZE_K": block_size[1],
+        # "GROUP_SIZE_M": 32,
+        # "num_warps": 4,
+        # "num_stages": 2,
+    # }
 
     def grid(META):
         return (triton.cdiv(M, META["BLOCK_SIZE_M"]) *
