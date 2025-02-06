@@ -11,7 +11,7 @@ amdsmi_shut_down
 
 print(f"device_name = {device_name}")
 
-num_result_files = 8
+num_result_files = 4 
 
 result_objs = {}
 unique_nk = {}
