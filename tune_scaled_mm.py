@@ -17,6 +17,8 @@ default_config = {
     "BLOCK_SIZE_K": 128,
     "GROUP_SIZE_M": 32,
     "num_warps": 4,
+    "kpack": 1,
+    "matrix_instr_nonkdim": 16,
 }
 default_values = tuple(default_config.values())
 
@@ -25,7 +27,8 @@ def get_pruner(M, N, K, a_element_size, b_element_size):
     import torch
 
     def pruner(config):
-        (BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M, num_warps) = config
+        (BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M, num_warps,
+         kpack, matrix_instr_nonkdim) = config
         # Will run out of LDS.
         if BLOCK_SIZE_N * BLOCK_SIZE_M * BLOCK_SIZE_K > 128 * 64 * 64:
             return False
@@ -39,7 +42,10 @@ def collect_results(result_configs, M, N, K, results):
         (default_config['BLOCK_SIZE_M'] == result_configs['BLOCK_SIZE_M'])
         & (default_config['BLOCK_SIZE_N'] == result_configs['BLOCK_SIZE_N'])
         & (default_config['BLOCK_SIZE_K'] == result_configs['BLOCK_SIZE_K'])
-        & (default_config['GROUP_SIZE_M'] == result_configs['GROUP_SIZE_M'])]
+        & (default_config['GROUP_SIZE_M'] == result_configs['GROUP_SIZE_M'])
+        & (default_config['kpack'] == result_configs['kpack'])
+        & (default_config['matrix_instr_nonkdim']
+           == result_configs['matrix_instr_nonkdim'])]
 
     best_configs = result_configs[result_configs['Triton'] ==
                                   result_configs['Triton'].min()]
@@ -77,7 +83,7 @@ def run_benchmark(update_callback, a, b, a_per_token, b_per_block, group_n,
     tune_benchmark_obj = triton.testing.Benchmark(
         x_names=[
             "BLOCK_SIZE_M", "BLOCK_SIZE_N", "BLOCK_SIZE_K", "GROUP_SIZE_M",
-            "num_warps",
+            "num_warps", "kpack", "matrix_instr_nonkdim"
         ],
         x_vals=config_choices_list,
         x_log=True,
@@ -92,13 +98,15 @@ def run_benchmark(update_callback, a, b, a_per_token, b_per_block, group_n,
 
     @triton.testing.perf_report(tune_benchmark_obj)
     def bench_config(BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M,
-                     num_warps, provider):
+                     num_warps, kpack, matrix_instr_nonkdim, provider):
         config = {
             "BLOCK_SIZE_M": BLOCK_SIZE_M,
             "BLOCK_SIZE_N": BLOCK_SIZE_N,
             "BLOCK_SIZE_K": BLOCK_SIZE_K,
             "GROUP_SIZE_M": GROUP_SIZE_M,
             "num_warps": num_warps,
+            "kpack": kpack,
+            "matrix_instr_nonkdim": matrix_instr_nonkdim,
         }
         bench_function = lambda: w8a8_block_fp8_matmul(a,
                                                        b,
@@ -152,7 +160,6 @@ def tune(update_callback, start_callback, partition_func, event_queue,
         (512, 7168),
         (576, 7168),
         (7168, 1024),
-        (7168, 8192),
         (7168, 1152),
         (7168, 128),
         (7168, 16384),
@@ -160,6 +167,7 @@ def tune(update_callback, start_callback, partition_func, event_queue,
         (7168, 2048),
         (7168, 2304),
         (7168, 256),
+        (7168, 8192),
         (7168, 8192),
         (8192, 1536),
     ]
@@ -173,15 +181,17 @@ def tune(update_callback, start_callback, partition_func, event_queue,
     shapes = [(t[0], t[1][1], t[1][0])
               for t in list(itertools.product(choices_M, choices_NK))]
 
-    block_m_choices = [32, 64, 128, 256]
-    block_n_choices = [32, 64, 128, 256]
-    block_k_choices = [32, 64, 128, 256]
-    num_warps_choices = [4]
+    block_m_choices = [32, 64, 128]#, 256]
+    block_n_choices = [32, 64, 128]#, 256]
+    block_k_choices = [32, 64, 128]#, 256]
     group_m_choices = [1, 8, 16, 32]
+    num_warps_choices = [4]
+    kpack_choices = [2]#[1, 2]
+    matrix_instr_nonkdim_choices = [16]#[16, 32]
 
     config_choices = lambda: itertools.product(
         block_m_choices, block_n_choices, block_k_choices, group_m_choices,
-        num_warps_choices)
+        num_warps_choices, kpack_choices, matrix_instr_nonkdim_choices)
     out_dtype = torch.float16
 
     torch.manual_seed(0)
