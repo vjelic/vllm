@@ -576,6 +576,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 w2_weight = layer.w2_weight
                 w2_weight_scale_inv = layer.w2_weight_scale_inv
 
+            if envs.VLLM_USE_AITER_MOE:
+                block_n = w13_weight.shape[-2] // w13_weight_scale_inv.shape[-2]
+                #block_k = w13_weight.shape[-1] // w13_weight_scale_inv.shape[-1]
+                w13_weight_scale_inv = w13_weight_scale_inv.repeat(
+                    (1,) * len(w13_weight_scale_inv.shape[:-2]) + (block_n, 1)
+                ).amin(-1, keepdim=True)
+                w2_weight_scale_inv = w2_weight_scale_inv.repeat(
+                    (1,) * len(w2_weight_scale_inv.shape[:-2]) + (block_n, 1)
+                ).amin(-1, keepdim=True)
+                w13_weight = shuffle_weight(w13_weight)
+                w2_weight = shuffle_weight(w2_weight)
             # torch.compile() cannot use Parameter subclasses.
             layer.w13_weight = Parameter(w13_weight, requires_grad=False)
             layer.w13_weight_scale_inv = Parameter(w13_weight_scale_inv,
@@ -742,11 +753,16 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                            w2=layer.w2_weight,
                            topk_weight=topk_weights,
                            topk_ids=topk_ids,
-                           fc1_scale=layer.w13_weight_scale,
-                           fc2_scale=layer.w2_weight_scale,
+                           fc1_scale=(layer.w13_weight_scale_inv
+                                     if self.block_quant
+                                     else layer.w13_weight_scale),
+                           fc2_scale=(layer.w2_weight_scale_inv
+                                     if self.block_quant
+                                     else layer.w2_weight_scale),
                            fc1_smooth_scale=None,
                            fc2_smooth_scale=None,
-                           a16=False)
+                           a16=False,
+                           block_shape=self.quant_config.weight_block_size)
 
         return fused_experts(
             x,
