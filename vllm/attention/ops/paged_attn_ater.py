@@ -75,21 +75,18 @@ class PagedAttention:
         k_scale: torch.Tensor,
         v_scale: torch.Tensor,
     ) -> None:
-        # print(f"{key.shape=}{key.dtype}")
-        # print(f"{key_cache.shape=}{key_cache.dtype}")
-        # print(f"{value_cache.shape=}{value_cache.dtype}")
-        # print(f"{k_scale.shape=}{k_scale.dtype}")
-        # print(f"{v_scale.shape=}{v_scale.dtype}")
-        # print(f"{k_scale.numel()=}")
-        # print(f"{slot_mapping.flatten()=}")
-        dtypeDict = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp8': torch.int8, 'int8': torch.int8, 'auto': torch.float16 }
-        kvCacheDtype = dtypeDict[kv_cache_dtype]
         if key_cache.dtype.itemsize == 1:
+            if "fp8" in kv_cache_dtype:
+                key_cache = key_cache.view(torch.float8_e4m3fnuz)
+                value_cache = value_cache.view(torch.float8_e4m3fnuz)
+            else:
+                key_cache = key_cache.view(torch.int8)
+                value_cache = value_cache.view(torch.int8)
             aiter.reshape_and_cache_with_pertoken_quant(
                 key,
                 value,
-                key_cache.view(kvCacheDtype),
-                value_cache.view(kvCacheDtype),
+                key_cache,
+                value_cache,
                 k_scale,
                 v_scale,
                 slot_mapping.flatten(),
@@ -156,14 +153,8 @@ class PagedAttention:
         elif "fp8" in kv_cache_dtype:
             key_cache = key_cache.view(torch.float8_e4m3fnuz)
             value_cache = value_cache.view(torch.float8_e4m3fnuz)
-        else:
-            key_cache = key_cache.view(torch.int8)
-            value_cache = value_cache.view(torch.int8)
-        dtype=out.dtype
-        aiter.pa_fwd_asm(query.to(torch.bfloat16), key_cache, value_cache, block_tables, seq_lens, max_num_blocks_per_seq, k_scale, v_scale,out)
-        if dtype==torch.float16:
-            # aiter.pa_fwd_as only support bf16 output for now
-            out.copy_(out.view(torch.bfloat16).to(torch.float16))
+        aiter.pa_fwd_asm(query, key_cache, value_cache, block_tables, seq_lens,
+                         max_num_blocks_per_seq, k_scale, v_scale,out)
         return out
 
     @staticmethod
