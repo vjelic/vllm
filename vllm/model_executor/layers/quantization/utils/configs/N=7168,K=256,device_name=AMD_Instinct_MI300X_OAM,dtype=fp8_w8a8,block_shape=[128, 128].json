@@ -1,9 +1,9 @@
 {
     "1": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 16,
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 32,
+        "GROUP_SIZE_M": 8,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
@@ -11,42 +11,42 @@
     "2": {
         "BLOCK_SIZE_K": 128,
         "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
+        "GROUP_SIZE_M": 32,
+        "kpack": 1,
+        "matrix_instr_nonkdim": 16,
+        "num_warps": 4
+    },
+    "4": {
+        "BLOCK_SIZE_K": 32,
+        "BLOCK_SIZE_M": 256,
         "BLOCK_SIZE_N": 32,
         "GROUP_SIZE_M": 8,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
-    "4": {
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
+    "8": {
+        "BLOCK_SIZE_K": 32,
+        "BLOCK_SIZE_M": 256,
         "BLOCK_SIZE_N": 32,
         "GROUP_SIZE_M": 1,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
-    "8": {
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 32,
-        "GROUP_SIZE_M": 8,
-        "kpack": 1,
-        "matrix_instr_nonkdim": 16,
-        "num_warps": 4
-    },
     "16": {
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_K": 32,
+        "BLOCK_SIZE_M": 256,
         "BLOCK_SIZE_N": 32,
-        "GROUP_SIZE_M": 32,
+        "GROUP_SIZE_M": 1,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
     "24": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_M": 32,
         "BLOCK_SIZE_N": 32,
         "GROUP_SIZE_M": 16,
         "kpack": 1,
@@ -54,10 +54,10 @@
         "num_warps": 4
     },
     "32": {
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 8,
+        "BLOCK_SIZE_K": 64,
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 32,
+        "GROUP_SIZE_M": 32,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
@@ -73,18 +73,18 @@
     },
     "64": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 32,
-        "GROUP_SIZE_M": 16,
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 64,
+        "GROUP_SIZE_M": 8,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
     "96": {
-        "BLOCK_SIZE_K": 128,
+        "BLOCK_SIZE_K": 64,
         "BLOCK_SIZE_M": 32,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 32,
+        "BLOCK_SIZE_N": 128,
+        "GROUP_SIZE_M": 16,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
@@ -93,25 +93,25 @@
         "BLOCK_SIZE_K": 128,
         "BLOCK_SIZE_M": 32,
         "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 32,
+        "GROUP_SIZE_M": 16,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
     "256": {
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 32,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 1,
+        "BLOCK_SIZE_K": 32,
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 32,
+        "GROUP_SIZE_M": 8,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
     },
     "512": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 1,
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "GROUP_SIZE_M": 32,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
@@ -146,8 +146,8 @@
     "3072": {
         "BLOCK_SIZE_K": 128,
         "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 8,
+        "BLOCK_SIZE_N": 128,
+        "GROUP_SIZE_M": 32,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4

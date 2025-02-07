@@ -126,13 +126,12 @@ def run_benchmark(update_callback, a, b, a_per_token, b_per_block, group_n,
                                                        b_per_block,
                                                        [group_n, group_k],
                                                        out_dtype,
+                                                       use_default_config=True)
         result = bench_function()
         golden = golden_function()
 
-        if not torch.testing.allclose(golden, result, rtol=1e-1, atol=1e-1):
-            ms = max_ms = min_ms = 10000.0
-
-
+        if not torch.allclose(golden, result, rtol=1e-3, atol=1e-3):
+            ms = max_ms = min_ms = 1000000.0
 
         update_callback()
         return ms, max_ms, min_ms
@@ -196,9 +195,9 @@ def tune(update_callback, start_callback, partition_func, event_queue,
     shapes = [(t[0], t[1][1], t[1][0])
               for t in list(itertools.product(choices_M, choices_NK))]
 
-    block_m_choices = [32, 64, 128]#, 256]
-    block_n_choices = [32, 64, 128]#, 256]
-    block_k_choices = [32, 64, 128]#, 256]
+    block_m_choices = [32, 64, 128, 256]
+    block_n_choices = [32, 64, 128, 256]
+    block_k_choices = [32, 64, 128, 256]
     group_m_choices = [1, 8, 16, 32]
     num_warps_choices = [4]
     kpack_choices = [1]#[1, 2]

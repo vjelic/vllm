@@ -21,7 +21,7 @@
         "BLOCK_SIZE_K": 128,
         "BLOCK_SIZE_M": 32,
         "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 32,
+        "GROUP_SIZE_M": 1,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
@@ -64,8 +64,8 @@
     },
     "48": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 32,
-        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
         "GROUP_SIZE_M": 1,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
@@ -73,9 +73,9 @@
     },
     "64": {
         "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_M": 64,
         "BLOCK_SIZE_N": 64,
-        "GROUP_SIZE_M": 1,
+        "GROUP_SIZE_M": 8,
         "kpack": 1,
         "matrix_instr_nonkdim": 16,
         "num_warps": 4
