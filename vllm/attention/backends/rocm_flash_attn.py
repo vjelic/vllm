@@ -422,7 +422,28 @@ def _get_seq_len_block_table_args(
     else:
         raise AttributeError(f"Invalid attention type {str(attn_type)}")
 
-
+def dump_input(
+        path,
+        query: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        block_tables: torch.Tensor,
+        seq_lens: torch.Tensor,
+        k_scale: float,
+        v_scale: float,
+        out_test):
+    from aiter.test_common import tensor_dump
+    import os
+    if not os.path.exists(path):
+        os.mkdir(path)
+    tensor_dump(query, 'Q', path)
+    tensor_dump(k_cache, 'K_cache', path)
+    tensor_dump(v_cache, 'V_cache', path)
+    tensor_dump(block_tables, 'block_tables', path)
+    tensor_dump(seq_lens, 'seq_lens', path)
+    tensor_dump(k_scale, 'k_scale', path)
+    tensor_dump(v_scale, 'v_scale', path)
+    tensor_dump(out_test, 'out_test', path)
 class ROCmFlashAttentionImpl(AttentionImpl):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
@@ -462,8 +483,6 @@ class ROCmFlashAttentionImpl(AttentionImpl):
         logits_soft_cap: Optional[float] = None,
         attn_type: str = AttentionType.DECODER,
     ) -> None:
-        self.k_scale = torch.tensor([1.0], dtype=torch.float32)
-        self.v_scale = torch.tensor([1.0], dtype=torch.float32)
         self.init_kv_scales = False
         if blocksparse_params is not None:
             raise ValueError(
@@ -618,14 +637,19 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             self.init_kv_scales is False and kv_cache.shape != torch.Size([0])):
             num_blocks = kv_cache.shape[1]
             block_size = kv_cache.shape[2] // (self.num_kv_heads * self.head_size)
-            self.k_scale = torch.ones((self.num_kv_heads, num_blocks * block_size), 
-                                      dtype=torch.float32, device=kv_cache.device)
-            self.v_scale = torch.ones((self.num_kv_heads, num_blocks * block_size), 
-                                      dtype=torch.float32, device=kv_cache.device)
+            k_scale = torch.empty((self.num_kv_heads, num_blocks * block_size), 
+                                   dtype=torch.float32, device=kv_cache.device)
+            v_scale = torch.empty((self.num_kv_heads, num_blocks * block_size), 
+                                   dtype=torch.float32, device=kv_cache.device)
+            # k_scale.fill_(layer._k_scale_float)
+            # v_scale.fill_(layer._v_scale_float)
+            k_scale.fill_(10000)
+            v_scale.fill_(10000)
             self.init_kv_scales = True
-        # if self.init_kv_scales:
-            layer._k_scale = self.k_scale
-            layer._v_scale = self.v_scale
+            layer._k_scale = (k_scale, layer._k_scale_float)
+            layer._v_scale = (v_scale, layer._v_scale_float)
+            print(self.scale,layer.layer_name)
+        # print(fp8_out_scale)
 
         if self.attn_type != AttentionType.ENCODER and kv_cache.numel() > 0:
             key_cache, value_cache = PagedAttention.split_kv_cache(
@@ -821,6 +845,25 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     layer._v_scale,
                     out=out
                 )
+                dump_input(f'./{layer.layer_name}',
+                    decode_query,key_cache,value_cache,
+                           decode_meta.block_tables
+                            if self.attn_type != AttentionType.ENCODER_DECODER else
+                            decode_meta.cross_block_tables,
+                            decode_meta.seq_lens_tensor
+                            if self.attn_type != AttentionType.ENCODER_DECODER else
+                            decode_meta.encoder_seq_lens_tensor,
+                                        layer._k_scale[0],
+                                        layer._v_scale[0],
+                                        out)
+                # if num_prefill_tokens == 0 and fp8_out_scale is not None:
+                #     import aiter
+                #     out_fp8 = torch.empty_like(out, dtype=torch.float8_e4m3fnuz)
+                #     out_fp8= out_fp8.view(-1, self.num_heads * self.head_size)
+                #     aiter.static_scaled_fp8_quant(out_fp8, out, fp8_out_scale)
+                #     # out_fp8,_= aiter.per_tensor_quant(out.view(-1, self.num_heads * self.head_size), fp8_out_scale,
+                #     #                                   quant_dtype=torch.float8_e4m3fnuz)
+                #     return out_fp8
                 return output.view(-1, self.num_heads * self.head_size)
             if use_custom:
                 max_seq_len = (decode_meta.max_decode_seq_len if
@@ -877,6 +920,17 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     fp8_out_scale if cpa_fp8_out else None,
                     _PARTITION_SIZE_ROCM,
                 )
+                dump_input(f'./{layer.layer_name}_golden',
+                    decode_query,key_cache,value_cache,
+                           decode_meta.block_tables
+                            if self.attn_type != AttentionType.ENCODER_DECODER else
+                            decode_meta.cross_block_tables,
+                            decode_meta.seq_lens_tensor
+                            if self.attn_type != AttentionType.ENCODER_DECODER else
+                            decode_meta.encoder_seq_lens_tensor,
+                                        layer._k_scale,
+                                        layer._v_scale,
+                                        out)
                 if cpa_fp8_out:
                     return out.view(num_seqs, num_heads * head_size)
             else:

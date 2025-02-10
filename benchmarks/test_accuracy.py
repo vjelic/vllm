@@ -40,7 +40,7 @@ def main(args: argparse.Namespace):
               'The capital of Russia is ',
               'The CEO of DeepSeek is ',
               'The future of AI is',
-             ] * 32
+             ][:1]
     outputs = llm.generate(inputs, sampling_params)
     for i, output in enumerate(outputs):
         prompt = output.prompt

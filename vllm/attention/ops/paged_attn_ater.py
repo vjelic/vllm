@@ -75,13 +75,16 @@ class PagedAttention:
         k_scale: torch.Tensor,
         v_scale: torch.Tensor,
     ) -> None:
+        k_scale,k_scale_per_tensor=k_scale
+        v_scale,v_scale_per_tensor=v_scale
         if key_cache.dtype.itemsize == 1:
-            if "fp8" in kv_cache_dtype:
-                key_cache = key_cache.view(torch.float8_e4m3fnuz)
-                value_cache = value_cache.view(torch.float8_e4m3fnuz)
-            else:
-                key_cache = key_cache.view(torch.int8)
-                value_cache = value_cache.view(torch.int8)
+            # if "fp8" in kv_cache_dtype:
+            #     key_cache = key_cache.view(torch.float8_e4m3fnuz)
+            #     value_cache = value_cache.view(torch.float8_e4m3fnuz)
+            # else:
+            key_cache = key_cache.view(torch.int8)
+            value_cache = value_cache.view(torch.int8)
+            dtype=key.dtype
             aiter.reshape_and_cache_with_pertoken_quant(
                 key,
                 value,
@@ -100,8 +103,8 @@ class PagedAttention:
                 value_cache,
                 slot_mapping.flatten(),
                 kv_cache_dtype,
-                k_scale,
-                v_scale,
+                k_scale_per_tensor,
+                v_scale_per_tensor,
                 True
             )
 
@@ -151,10 +154,32 @@ class PagedAttention:
             k_scale, v_scale = (None, None)
             query = query.contiguous()
         elif "fp8" in kv_cache_dtype:
-            key_cache = key_cache.view(torch.float8_e4m3fnuz)
-            value_cache = value_cache.view(torch.float8_e4m3fnuz)
+            # key_cache = key_cache.view(torch.float8_e4m3fnuz)
+            # value_cache = value_cache.view(torch.float8_e4m3fnuz)
+
+            # num_kv_heads=value_cache.shape[1]
+            # k_scale_ = torch.empty((num_kv_heads, max_num_blocks_per_seq * block_size), 
+            #                 dtype=torch.float32, device=key_cache.device)
+            # v_scale_ = torch.empty((num_kv_heads, max_num_blocks_per_seq * block_size), 
+            #                           dtype=torch.float32, device=key_cache.device)
+            # k_scale_.fill_(k_scale.item())
+            # v_scale_.fill_(v_scale.item())
+            # k_scale=k_scale_
+            # v_scale=v_scale_
+            k_scale,_=k_scale
+            v_scale,_=v_scale
+            key_cache = key_cache.view(torch.int8)
+            value_cache = value_cache.view(torch.int8)
+        # def asm_V_shuffle(VC):
+        #     # [num_blocks, num_kv_heads, head_size, block_size]
+        #     x = 16//VC.element_size()
+        #     num_blocks, num_kv_heads, head_size, block_size = VC.shape
+        #     VC = VC.view(num_blocks, num_kv_heads, head_size, block_size//x, x)
+        #     # [num_blocks, num_kv_heads, block_size/X, head_size, X]
+        #     VC = VC.permute(0, 1, 3, 2, 4).contiguous()
+        #     return VC
         aiter.pa_fwd_asm(query, key_cache, value_cache, block_tables, seq_lens,
-                         max_num_blocks_per_seq, k_scale, v_scale,out)
+                         max_num_blocks_per_seq, k_scale, v_scale, out)
         return out
 
     @staticmethod
