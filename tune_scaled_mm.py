@@ -130,7 +130,7 @@ def run_benchmark(update_callback, a, b, a_per_token, b_per_block, group_n,
         result = bench_function()
         golden = golden_function()
 
-        if not torch.allclose(golden, result, rtol=1e-3, atol=1e-3):
+        if not torch.allclose(golden, result, rtol=1e-5, atol=1e-5):
             ms = max_ms = min_ms = 1000000.0
 
         update_callback()
