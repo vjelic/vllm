@@ -441,8 +441,8 @@ void reshape_and_cache_flash(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
-                             CALL_RESHAPE_AND_CACHE_FLASH);
+  DISPATCH_BY_KV_CACHE_DTYPE1(key.dtype(), kv_cache_dtype,
+                              CALL_RESHAPE_AND_CACHE_FLASH);
 }
 
 // KV_T is the stored data type of kv-cache.
