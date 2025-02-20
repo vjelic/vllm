@@ -607,7 +607,6 @@ def moe_align_block_size(
                 num_tokens_post_pad,
             )
         else:
-            # Currently requires num_experts=256
             ops.sgl_moe_align_block_size(
                 topk_ids,
                 num_experts,
@@ -1154,7 +1153,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
     E, N, _ = w1.shape
     # We execute the fused_moe kernel in chunks to circumvent this issue:
     # https://github.com/vllm-project/vllm/issues/5938
-    CHUNK_SIZE = envs.VLLM_FUSED_MOE_CHUNK_SIZE
+    CHUNK_SIZE = min(envs.VLLM_FUSED_MOE_CHUNK_SIZE, 32768)
     M = min(num_tokens, CHUNK_SIZE)
     config_dtype = get_config_dtype_str(use_fp8_w8a8=use_fp8_w8a8,
                                         use_int8_w8a16=use_int8_w8a16,
