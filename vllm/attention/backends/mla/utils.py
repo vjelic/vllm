@@ -31,14 +31,12 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
 from vllm.model_executor.layers.rotary_embedding import (
     DeepseekScalingRotaryEmbedding, RotaryEmbedding)
 
-if envs.VLLM_USE_TRITON_FLASH_ATTN:
-    from vllm.attention.ops.triton_flash_attention import triton_attention
-    flash_attn_varlen_func = None
-else:
-    try:
-        from vllm.vllm_flash_attn import flash_attn_varlen_func
-    except ImportError:
-        from flash_attn import flash_attn_varlen_func
+from vllm.attention.ops.triton_flash_attention import triton_attention
+
+try:
+    from vllm.vllm_flash_attn import flash_attn_varlen_func
+except ImportError:
+    from flash_attn import flash_attn_varlen_func
 
 
 @dataclass
@@ -167,11 +165,6 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         kv_b_proj: ColumnParallelLinear,
         o_proj: RowParallelLinear,
     ) -> None:
-
-        assert not alibi_slopes, "Triton MLA doesn't support alibi now!"
-        assert not envs.VLLM_USE_ROCM_FP8_FLASH_ATTN, (
-            "Triton MLA doesn't support FP8 flash attention now!")
-
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
@@ -196,6 +189,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         # Handle the differences between the flash_attn_varlen from flash_attn
         # and the one from vllm_flash_attn. The former is used on RoCM and the
         # latter has an additional parameter to control FA2 vs FA3
+        self.triton_flash_attn = triton_attention
         self.flash_attn_varlen_func = flash_attn_varlen_func
         if self.vllm_flash_attn_version is not None:
             self.flash_attn_varlen_func = \
@@ -508,7 +502,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                                            value=0)
 
         if envs.VLLM_USE_TRITON_FLASH_ATTN:
-            attn_output, _ = triton_attention(
+            attn_output, _ = self.triton_flash_attn(
                 q,
                 k,
                 v_padded,
