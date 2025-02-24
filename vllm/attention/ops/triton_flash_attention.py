@@ -67,13 +67,14 @@ class MetaData:
         self.persistent = persistent
 
     def set_eight_bit_params(self, q_descale, k_descale, v_descale, p_scale,
-                        p_descale):
+                        p_descale, o_scale):
         self.eight_bit = True
         self.q_descale = q_descale
         self.k_descale = k_descale
         self.v_descale = v_descale
         self.p_scale = p_scale
         self.p_descale = p_descale
+        self.o_scale = o_scale
         self.use_p_scale = (p_scale is not None) and (
             p_descale is not None) and (v_descale is not None)
         self.eight_bit_kv = ((q_descale is None) and (k_descale is not None)
@@ -139,7 +140,7 @@ class MetaData:
                     assert (self.p_scale is not None) and (self.p_descale
                                                            is not None)
         else:
-            assert q.dtype == k.dtype and q.dtype == v.dtype
+            assert (q.dtype == k.dtype) and (q.dtype == v.dtype)
         assert head_size <= 256
         assert o.shape == q.shape
         assert (nheads_q % nheads_k) == 0
@@ -374,7 +375,7 @@ def _attn_fwd_inner(
 
         if EIGHT_BIT_GEMM:
             if USE_P_SCALE:
-                p = (p * p_scale).to(EIGHT_BIT_DTYPE)
+                p = (p * p_scale).to(tl.float8e4b8)
                 # They are all eight_bit
                 acc += tl.dot(p, v)
             else:
@@ -600,6 +601,7 @@ def attn_fwd(
     K_descale,
     P_scale,
     P_descale,
+    o_descale,
     V_descale,
     cu_seqlens_q,
     cu_seqlens_k,
@@ -632,9 +634,10 @@ def attn_fwd(
     EIGHT_BIT: tl.constexpr,
     USE_P_SCALE: tl.constexpr,
     EIGHT_BIT_KV: tl.constexpr,
+    IS_FP8: tl.constexpr,
     FP8_MIN: tl.constexpr = float8_info.min,
     FP8_MAX: tl.constexpr = float8_info.max,
-    EIGHT_BIT_DTYPE: tl.constexpr = tl.float8e4b8
+    EIGHT_BIT_DTYPE: tl.constexpr = tl.float8e4b8,
 ):
 
     if PERSISTENT:  # if persistent, kernel loops over multiple tiles
@@ -995,6 +998,10 @@ def attn_fwd(
                 end_m_idx = (start_m + 1) * BLOCK_M
                 start_m_idx = start_m * BLOCK_M
                 causal_start_idx = seqlen_q - seqlen_k
+                if EIGHT_BIT and not EIGHT_BIT_KV:
+                    if o_descale is not None:
+                      acc *= o_descale
+                      acc = tl.clamp(acc, FP8_MIN, FP8_MAX)
                 acc = acc.to(Out.type.element_ty)
                 if IS_CAUSAL:  # noqa: SIM102
                     if (causal_start_idx > start_m_idx
@@ -1101,6 +1108,8 @@ class _attention(torch.autograd.Function):
             else:
                 o = torch.empty_like(q, dtype=torch.float16)
 
+
+        print(f"_attention.forward:q.dtype={q.dtype}, k.dtype={k.dtype}, v.dtype={v.dtype}")
         metadata.check_args(q, k, v, o)
 
         batch, nheads_q, nheads_k, head_size = get_shape_from_layout(
@@ -1150,11 +1159,12 @@ class _attention(torch.autograd.Function):
             alibi_strides = (0, 0)
 
         if metadata.eight_bit:
-            q_descale, k_descale, p_scale, p_descale, v_descale = (
+            q_descale, k_descale, p_scale, p_descale, v_descale, o_scale = (
                 metadata.q_descale, metadata.k_descale, metadata.p_scale,
-                metadata.p_descale, metadata.v_descale)
+                metadata.p_descale, metadata.v_descale, metadata.o_scale)
+            o_descale = 1.0 / o_scale if o_scale is not None else None
         else:
-            q_descale = k_descale = p_scale = p_descale = v_descale = None
+            q_descale = k_descale = p_scale = p_descale = v_descale = o_descale = None
 
         # number of compute units available
         NUM_CU = torch.cuda.get_device_properties("cuda").multi_processor_count
@@ -1187,6 +1197,7 @@ class _attention(torch.autograd.Function):
                        k_descale,
                        p_scale,
                        p_descale,
+                       o_descale,
                        v_descale,
                        metadata.cu_seqlens_q,
                        metadata.cu_seqlens_k,
@@ -1214,7 +1225,8 @@ class _attention(torch.autograd.Function):
                        PERSISTENT_DYNAMIC=metadata.persistent == "dynamic",
                        NUM_CU=NUM_CU,
                        atomic_counter=atomic_counter,
-                       B=batch)
+                       B=batch,
+                       IS_FP8 = True)
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
@@ -1232,6 +1244,16 @@ class _attention(torch.autograd.Function):
 
 triton_attention_rocm = _attention.apply
 
+
+def check_and_convert(t, scale):
+    float8 = torch.float8_e4m3fnuz
+    if t.dtype != float8:
+        descale = 1.0 / scale
+        ts = (t * descale).clamp(min=float8_info.min,
+                                 max=float8_info.max)
+        return ts.to(float8)
+    else:
+        return t
 
 def triton_attention(
     q,
@@ -1256,6 +1278,22 @@ def triton_attention(
     attn_metadata.causal = causal
     attn_metadata.bias = bias
     attn_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
+
+    if fp8_scales is not None:
+        (q_scale, k_scale, v_scale, p_scale, o_scale) = fp8_scales
+        q = check_and_convert(q, q_scale)
+        k = check_and_convert(k, k_scale)
+        v = check_and_convert(v, v_scale)
+
+        q_scale = torch.tensor(q_scale, dtype = torch.float32, device=q.device)
+        k_scale = torch.tensor(k_scale, dtype = torch.float32, device=q.device)
+        v_scale = torch.tensor(v_scale, dtype = torch.float32, device=q.device)
+        p_scale = torch.tensor(p_scale, dtype = torch.float32, device=q.device)
+        attn_metadata.set_eight_bit_params(1.0 / q_scale, 1.0 / k_scale,
+                                           1.0 / v_scale, p_scale,
+                                           1.0 / p_scale, o_scale)
+
     if fp8_scales is not None:
         print(f"fp8_scales = {fp8_scales}")
+    print(f"q.dtype={q.dtype}, k.dtype={k.dtype}, v.dtype={v.dtype}")
     return triton_attention_rocm(q, k, v, o, attn_metadata)
