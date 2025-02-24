@@ -161,11 +161,14 @@ def apply_fp8_linear(
         # Note: we pad the input because torch._scaled_mm is more performant
         # for matrices with batch dimension > 16.
         # This could change in the future.
-        qinput, x_scale = ops.scaled_fp8_quant(
-            input_2d,
-            input_scale,
-            num_token_padding=17,
-            use_per_token_if_dynamic=use_per_token_if_dynamic)
+        if input.dtype != torch.float8_e4m3fnuz:
+            qinput, x_scale = ops.scaled_fp8_quant(
+                input_2d,
+                input_scale,
+                num_token_padding=17,
+                use_per_token_if_dynamic=use_per_token_if_dynamic)
+        else:
+            qinput, x_scale = input_2d, input_scale
 
         per_tensor_weights = (weight_scale.numel() == 1)
         per_tensor_activations = (x_scale.numel() == 1)
@@ -174,7 +177,7 @@ def apply_fp8_linear(
             # Fused GEMM_DQ
             output = torch._scaled_mm(qinput,
                                       weight,
-                                      out_dtype=input.dtype,
+                                      out_dtype=torch.bfloat16,
                                       scale_a=x_scale,
                                       scale_b=weight_scale,
                                       bias=bias)

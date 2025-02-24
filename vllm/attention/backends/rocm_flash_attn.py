@@ -679,6 +679,13 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                             query.dtype,
                             seq_lens,
                             make_attn_mask=False)  # type: ignore
+                    full_scales = (
+                        layer._q_scale.item(), layer._k_scale.item(),
+                        layer._v_scale.item(), layer._prob_scale.item(),
+                        layer._fp8_out_scale.item()) if (
+                            layer._fp8_out_scale and layer._q_scale
+                            and layer._prob_scale
+                            and envs.VLLM_USE_ROCM_FP8_FLASH_ATTN) else None
                     out, _ = self.attn_func(
                         query,
                         key,
@@ -692,6 +699,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                         self.scale,
                         attn_masks[0][None]
                         if attn_masks is not None else None,
+                        full_scales,
                     )
                 elif self.use_naive_attn:
                     if self.num_kv_heads != self.num_heads:
@@ -791,10 +799,16 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     device=output.device,
                 )
                 max_logits = torch.empty_like(exp_sums)
+                cpa_fp8_out = False
                 if num_prefill_tokens > 0:
                     out = output[num_prefill_tokens:]
                 else:
-                    out = output
+                    if False:
+                        out = torch.empty_like(output,
+                                               dtype=torch.float8_e4m3fnuz)
+                        cpa_fp8_out = True
+                    else:
+                        out = output
                 ops.paged_attention_rocm(
                     out,
                     exp_sums,
@@ -818,6 +832,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     layer._k_scale,
                     layer._v_scale,
                 )
+                if cpa_fp8_out:
+                    return out.view(num_seqs, num_heads * head_size)
             else:
                 output[num_prefill_tokens:] = PagedAttention.forward_decode(
                     decode_query,
