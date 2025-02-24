@@ -1106,14 +1106,8 @@ def fused_experts(hidden_states: torch.Tensor,
                   block_shape: Optional[List[int]] = None,
                   expert_mask: torch.Tensor = None,
 ):
-    print("\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
-    if envs.VLLM_USE_AITER_MOE:
-        print("Using AITER MoE!")
-    else:
-        print("Using Triton MoE!")
-    print("\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
-
     if is_hip and envs.VLLM_USE_AITER_MOE:
+        import aiter
         from aiter.fused_moe_bf16_asm import moe_sorting_ck
 
         local_E = E = w1.shape[0]
