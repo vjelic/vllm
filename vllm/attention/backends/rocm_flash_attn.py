@@ -679,7 +679,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                             query.dtype,
                             seq_lens,
                             make_attn_mask=False)  # type: ignore
-                    full_scales = (
+                    full_scales = (  # Ima hack, unhack me
                         layer._q_scale.item(), layer._k_scale.item(),
                         layer._v_scale.item(), layer._prob_scale.item(),
                         layer._fp8_out_scale.item()) if (
