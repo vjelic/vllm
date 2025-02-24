@@ -19,6 +19,8 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 
+is_hip = current_platform.is_rocm
+
 if current_platform.is_cuda_alike():
     from .fused_moe import fused_experts
 else:
@@ -272,6 +274,8 @@ class FusedMoE(torch.nn.Module):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
+        num_shared_experts: Optional[int] = 0,
+        routed_scaling_factor: Optional[float] = 1.0,
     ):
         super().__init__()
 
@@ -320,6 +324,7 @@ class FusedMoE(torch.nn.Module):
             moe_quant_params["intermediate_size_full"] = intermediate_size
 
         self.quant_method.create_weights(layer=self, **moe_quant_params)
+        self.aiter_shuffle = False
 
     def _load_per_tensor_weight_scale(self, shard_id: str,
                                       param: torch.nn.Parameter,
@@ -595,6 +600,14 @@ class FusedMoE(torch.nn.Module):
                 router_logits: torch.Tensor):
         assert self.quant_method is not None
 
+        if is_hip and envs.VLLM_USE_AITER_MOE:
+            from aiter.ops.shuffle import shuffle_weight
+
+            if not self.aiter_shuffle:
+                self.w13_weight.data = shuffle_weight(self.w13_weight, (16, 16))
+                self.w2_weight.data = shuffle_weight(self.w2_weight, (16, 16))
+                self.aiter_shuffle = True
+
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
             layer=self,
@@ -619,7 +632,9 @@ class FusedMoE(torch.nn.Module):
     def make_expert_params_mapping(
             cls, ckpt_gate_proj_name: str, ckpt_down_proj_name: str,
             ckpt_up_proj_name: str,
-            num_experts: int) -> List[Tuple[str, str, int, str]]:
+            num_experts: int,
+            num_shared_experts: Optional[int] = 0,
+    ) -> List[Tuple[str, str, int, str]]:
 
         return [
             # (param_name, weight_name, expert_id, shard_id)

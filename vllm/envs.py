@@ -101,6 +101,7 @@ if TYPE_CHECKING:
     VLLM_RAY_PER_WORKER_GPUS: float = 1.0
     VLLM_RAY_BUNDLE_INDICES: str = ""
     VLLM_CUDART_SO_PATH: Optional[str] = None
+    VLLM_USE_AITER_MOE: bool = False
 
 
 def get_default_cache_root():
@@ -658,6 +659,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # specify the path through environment variable VLLM_CUDART_SO_PATH.
     "VLLM_CUDART_SO_PATH":
     lambda: os.getenv("VLLM_CUDART_SO_PATH", None),
+
+    # flag to control if vllm should use AITER MoE
+    "VLLM_USE_AITER_MOE":
+    lambda: (os.environ.get("VLLM_USE_AITER_MOE", "False").lower() in
+             ("true", "1")),
 }
 
 # end-env-vars-definition
