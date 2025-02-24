@@ -39,7 +39,7 @@ class MetaData:
     persistent = None
     num_contexts = 0
     varlen = False
-    int8 = False
+    eight_bit = False
     layout = None
     dropout_p, return_encoded_softmax = 0.0, False
 
@@ -66,9 +66,9 @@ class MetaData:
     def set_persistent(self, persistent):
         self.persistent = persistent
 
-    def set_int8_params(self, q_descale, k_descale, v_descale, p_scale,
+    def set_eight_bit_params(self, q_descale, k_descale, v_descale, p_scale,
                         p_descale):
-        self.int8 = True
+        self.eight_bit = True
         self.q_descale = q_descale
         self.k_descale = k_descale
         self.v_descale = v_descale
@@ -76,7 +76,7 @@ class MetaData:
         self.p_descale = p_descale
         self.use_p_scale = (p_scale is not None) and (
             p_descale is not None) and (v_descale is not None)
-        self.int8_kv = ((q_descale is None) and (k_descale is not None)
+        self.eight_bit_kv = ((q_descale is None) and (k_descale is not None)
                         and (v_descale is not None))
 
     def need_bias(self, bias, batch, nheads, seqlen_q, seqlen_k):
@@ -122,15 +122,15 @@ class MetaData:
         assert k.shape == v.shape
         assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
         # TODO: Change assert if we support qkl f8 and v f16
-        if self.int8:
-            if self.int8_kv:
-                assert v.dtype == k.dtype and k.dtype == torch.int8
+        if self.eight_bit:
+            if self.eight_bit_kv:
+                assert v.dtype == k.dtype and k.dtype == torch.float8_e4m3fnuz
                 assert q.dtype != k.dtype
                 assert (self.v_descale is not None) and (self.k_descale
                                                          is not None)
             else:
                 assert (q.dtype == k.dtype and q.dtype == v.dtype
-                        and q.dtype == torch.int8)
+                        and q.dtype == torch.float8_e4m3fnuz)
                 assert (self.q_descale
                         is not None) and (self.k_descale
                                           is not None) and (self.v_descale
@@ -276,8 +276,8 @@ def _attn_fwd_inner(
         PRE_LOAD_V: tl.constexpr, MASK_STEPS: tl.constexpr,
         ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr,
         PADDED_HEAD: tl.constexpr, ACTUAL_BLOCK_DMODEL: tl.constexpr,
-        QK_SCALE: tl.constexpr, INT8_GEMM: tl.constexpr,
-        USE_P_SCALE: tl.constexpr, INT8_KV: tl.constexpr):
+        QK_SCALE: tl.constexpr, EIGHT_BIT_GEMM: tl.constexpr,
+        USE_P_SCALE: tl.constexpr, EIGHT_BIT_KV: tl.constexpr):
     # loop over k, v, and update accumulator
     for start_n in range(block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
@@ -312,11 +312,11 @@ def _attn_fwd_inner(
             causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
-        if INT8_GEMM:
+        if EIGHT_BIT_GEMM:
             qk += ((((tl.dot(q, k).to(tl.float32) * q_descale)) * k_descale) *
                    QK_SCALE)
         else:
-            if INT8_KV:
+            if EIGHT_BIT_KV:
                 k = (k * k_descale).to(q.type.element_ty)
             qk += (tl.dot(q, k) * QK_SCALE)
 
@@ -372,16 +372,16 @@ def _attn_fwd_inner(
         # update m_i and l_i
         m_i = m_ij
 
-        if INT8_GEMM:
+        if EIGHT_BIT_GEMM:
             if USE_P_SCALE:
-                p = (p * p_scale).to(tl.int8)
-                # They are all int8
+                p = (p * p_scale).to(EIGHT_BIT_DTYPE)
+                # They are all eight_bit
                 acc += tl.dot(p, v)
             else:
-                # v is in int8 but p is not, we want the gemm in p's type
+                # v is in eight_bit but p is not, we want the gemm in p's type
                 acc += tl.dot(p, v.to(p.type.element_ty))
         else:
-            if INT8_KV:
+            if EIGHT_BIT_KV:
                 v = (v * v_descale).to(p.type.element_ty)
             acc += tl.dot(p.to(v.type.element_ty), v)
 
@@ -558,6 +558,8 @@ def get_autotune_configs():
 autotune_configs, autotune_keys = get_autotune_configs()
 
 
+float8_info = torch.finfo(torch.float8_e4m3fnuz)
+
 @triton.autotune(
     configs=autotune_configs,
     key=autotune_keys,
@@ -627,11 +629,12 @@ def attn_fwd(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
     USE_ALIBI: tl.constexpr,
-    INT8: tl.constexpr,
+    EIGHT_BIT: tl.constexpr,
     USE_P_SCALE: tl.constexpr,
-    INT8_KV: tl.constexpr,
+    EIGHT_BIT_KV: tl.constexpr,
     FP8_MIN: tl.constexpr = float8_info.min,
     FP8_MAX: tl.constexpr = float8_info.max,
+    EIGHT_BIT_DTYPE: tl.constexpr = tl.float8e4b8
 ):
 
     if PERSISTENT:  # if persistent, kernel loops over multiple tiles
@@ -767,11 +770,11 @@ def attn_fwd(
                           offs_d[None, :] * stride_vn)
                 # Compute pointers for all scale tensors used in this kernel.
 
-                INT8_GEMM: tl.constexpr = INT8 & (not INT8_KV)
-                if INT8:
+                EIGHT_BIT_GEMM: tl.constexpr = EIGHT_BIT & (not EIGHT_BIT_KV)
+                if EIGHT_BIT:
                     k_descale_ptrs = K_descale + off_h_k
                     v_descale_ptrs = V_descale + off_h_k
-                    if not INT8_KV:
+                    if not EIGHT_BIT_KV:
                         q_descale_ptrs = Q_descale + off_h_q
                     if USE_P_SCALE:
                         p_scale_ptrs = P_scale + off_h_q
@@ -823,10 +826,10 @@ def attn_fwd(
                                                  < ACTUAL_BLOCK_DMODEL)
                 q = tl.load(q_ptrs, mask=q_ptrs_mask, other=0.0)
 
-                if INT8:
+                if EIGHT_BIT:
                     k_descale = tl.load(k_descale_ptrs)
                     v_descale = tl.load(v_descale_ptrs)
-                    q_descale = None if INT8_KV else tl.load(q_descale_ptrs)
+                    q_descale = None if EIGHT_BIT_KV else tl.load(q_descale_ptrs)
                     if USE_P_SCALE:
                         p_scale = tl.load(p_scale_ptrs)
                         p_descale = tl.load(p_descale_ptrs)
@@ -906,9 +909,9 @@ def attn_fwd(
                         PADDED_HEAD,
                         ACTUAL_BLOCK_DMODEL,
                         QK_SCALE,
-                        INT8_GEMM,
+                        EIGHT_BIT_GEMM,
                         USE_P_SCALE,
-                        INT8_KV)
+                        EIGHT_BIT_KV)
                     block_min = block_max
                     block_max = n_blocks * BLOCK_N
 
@@ -967,11 +970,11 @@ def attn_fwd(
                         PADDED_HEAD,
                         ACTUAL_BLOCK_DMODEL,
                         QK_SCALE,
-                        INT8_GEMM,
+                        EIGHT_BIT_GEMM,
                         USE_P_SCALE,
-                        INT8_KV)
+                        EIGHT_BIT_KV)
 
-                if INT8 and not INT8_KV:
+                if EIGHT_BIT and not EIGHT_BIT_KV:
                     if USE_P_SCALE:
                         acc *= p_descale
                     acc *= v_descale
@@ -1093,7 +1096,7 @@ class _attention(torch.autograd.Function):
             assert (metadata.bias.numel() < 2**31)
 
         if o is None:
-            if not metadata.int8:
+            if not metadata.eight_bit:
                 o = torch.empty_like(q, dtype=v.dtype)
             else:
                 o = torch.empty_like(q, dtype=torch.float16)
@@ -1146,7 +1149,7 @@ class _attention(torch.autograd.Function):
         else:
             alibi_strides = (0, 0)
 
-        if metadata.int8:
+        if metadata.eight_bit:
             q_descale, k_descale, p_scale, p_descale, v_descale = (
                 metadata.q_descale, metadata.k_descale, metadata.p_scale,
                 metadata.p_descale, metadata.v_descale)
@@ -1204,9 +1207,9 @@ class _attention(torch.autograd.Function):
                        USE_ALIBI=metadata.alibi_slopes is not None,
                        ENABLE_DROPOUT=metadata.dropout_p > 0.0,
                        RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
-                       INT8=metadata.int8,
-                       USE_P_SCALE=metadata.int8 and metadata.use_p_scale,
-                       INT8_KV=metadata.int8 and metadata.int8_kv,
+                       EIGHT_BIT=metadata.eight_bit,
+                       USE_P_SCALE=metadata.eight_bit and metadata.use_p_scale,
+                       EIGHT_BIT_KV=metadata.eight_bit and metadata.eight_bit_kv,
                        PERSISTENT=metadata.persistent is not None,
                        PERSISTENT_DYNAMIC=metadata.persistent == "dynamic",
                        NUM_CU=NUM_CU,
@@ -1253,4 +1256,6 @@ def triton_attention(
     attn_metadata.causal = causal
     attn_metadata.bias = bias
     attn_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
+    if fp8_scales is not None:
+        print(f"fp8_scales = {fp8_scales}")
     return triton_attention_rocm(q, k, v, o, attn_metadata)
