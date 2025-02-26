@@ -115,22 +115,6 @@ RUN mkdir -p /app/install && cp /app/pytorch/dist/*.whl /app/install \
     && cp /app/vision/dist/*.whl /app/install \
     && cp /app/flash-attention/dist/*.whl /app/install
 
-FROM base AS build_aiter
-ARG AITER_BRANCH
-ARG AITER_REPO
-COPY requirements-rocm.txt /app
-COPY requirements-common.txt /app
-RUN pip install -r requirements-rocm.txt
-RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
-    pip install /install/*.whl
-RUN git clone --recursive ${AITER_REPO}
-RUN cd aiter \
-    && git checkout ${AITER_BRANCH} \
-    && git submodule update --init --recursive \
-    && pip install -r requirements.txt \
-    && PREBUILD_KERNELS=1 GPU_ARCHS=gfx942 python3 setup.py bdist_wheel --dist-dir=dist && ls /app/aiter/dist/*.whl
-RUN mkdir -p /app/install && cp /app/aiter/dist/*.whl /app/install
-
 FROM base AS final
 RUN --mount=type=bind,from=build_hipblaslt,src=/app/install/,target=/install \
     dpkg -i /install/*deb \
@@ -146,8 +130,13 @@ RUN --mount=type=bind,from=build_amdsmi,src=/app/install/,target=/install \
     pip install /install/*.whl
 RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
     pip install /install/*.whl
-RUN --mount=type=bind,from=build_aiter,src=/app/install/,target=/install \
-    pip install /install/*.whl
+
+RUN git clone --recursive ${AITER_REPO}
+RUN cd aiter \
+    && git checkout ${AITER_BRANCH} \
+    && git submodule update --init --recursive \
+    && pip install -r requirements.txt \
+    && PREBUILD_KERNELS=1 GPU_ARCHS=gfx942 python3 setup.py develop && pip show aiter    
 
 ARG BASE_IMAGE
 ARG HIPBLAS_COMMON_BRANCH
