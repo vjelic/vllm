@@ -131,6 +131,8 @@ RUN --mount=type=bind,from=build_amdsmi,src=/app/install/,target=/install \
 RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
     pip install /install/*.whl
 
+ARG AITER_REPO
+ARG AITER_BRANCH
 RUN git clone --recursive ${AITER_REPO}
 RUN cd aiter \
     && git checkout ${AITER_BRANCH} \
@@ -152,8 +154,6 @@ ARG PYTORCH_REPO
 ARG PYTORCH_VISION_REPO
 ARG FA_BRANCH
 ARG FA_REPO
-ARG AITER_BRANCH
-ARG AITER_REPO
 RUN echo "BASE_IMAGE: ${BASE_IMAGE}" > /app/versions.txt \
     && echo "HIPBLAS_COMMON_BRANCH: ${HIPBLAS_COMMON_BRANCH}" >> /app/versions.txt \
     && echo "HIPBLASLT_BRANCH: ${HIPBLASLT_BRANCH}" >> /app/versions.txt \
