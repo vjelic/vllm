@@ -107,7 +107,7 @@ steps:
   working_dir: "/vllm-workspace/tests"
   fast_check: true
   mirror_hardwares: [amd]
-  amd_gpus: 2   # Just for the sake of queue testing
+  amd_gpus: 1   # Just for the sake of queue testing
   source_file_dependencies:
   - vllm/
   commands:
@@ -161,6 +161,7 @@ steps:
 
 - label: Regression Test # 5min
   mirror_hardwares: [amd]
+  amd_gpus: 1
   source_file_dependencies:
   - vllm/
   - tests/test_regression
@@ -171,6 +172,7 @@ steps:
 
 - label: Engine Test # 10min
   mirror_hardwares: [amd]
+  amd_gpus: 1
   source_file_dependencies:
   - vllm/
   - tests/engine
@@ -223,6 +225,7 @@ steps:
 - label: Prefix Caching Test # 9min
   working_dir: "/vllm-workspace/tests"
   mirror_hardwares: [amd]
+  amd_gpus: 1
   source_file_dependencies:
   - vllm/
   - tests/prefix_caching
@@ -242,6 +245,7 @@ steps:
 - label: LogitsProcessor Test # 5min
   working_dir: "/vllm-workspace/tests"
   mirror_hardwares: [amd]
+  amd_gpus: 1
   source_file_dependencies:
   - vllm/model_executor/layers
   - vllm/model_executor/guided_decoding
@@ -305,6 +309,7 @@ steps:
   working_dir: "/vllm-workspace/tests"
   mirror_hardwares: [amd]
   soft_fail: true
+  amd_gpus: 1
   source_file_dependencies:
   - vllm/model_executor/model_loader
   - tests/tensorizer_loader
@@ -316,6 +321,7 @@ steps:
 - label: Benchmarks # 9min
   working_dir: "/vllm-workspace/.buildkite"
   mirror_hardwares: [amd]
+  amd_gpus: 1
   source_file_dependencies:
   - benchmarks/
   commands:
@@ -348,6 +354,7 @@ steps:
   working_dir: "/vllm-workspace/tests" 
   fast_check: false
   mirror_hardwares: [ amd ]
+  amd_gpus: 1
   source_file_dependencies:
     - vllm/
     - tests/tool_use
