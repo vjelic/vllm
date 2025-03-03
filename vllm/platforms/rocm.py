@@ -126,6 +126,7 @@ class RocmPlatform(Platform):
         else:
             logger.info("%s is not supported in AMD GPUs.", selected_backend)
         logger.info("Using ROCmFlashAttention backend.")
+        # return "vllm.attention.backends.torch_sdpa.TorchSDPABackend"
         return "vllm.attention.backends.rocm_flash_attn.ROCmFlashAttentionBackend"  # noqa: E501
 
     @classmethod

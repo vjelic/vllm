@@ -125,13 +125,13 @@ class MetaData:
         # TODO: Change assert if we support qkl f8 and v f16
         if self.eight_bit:
             if self.eight_bit_kv:
-                assert v.dtype == k.dtype and k.dtype == torch.float8_e4m3fnuz
+                assert v.dtype == k.dtype and k.dtype == torch.float8_e4m3fn
                 assert q.dtype != k.dtype
                 assert (self.v_descale is not None) and (self.k_descale
                                                          is not None)
             else:
                 assert (q.dtype == k.dtype and q.dtype == v.dtype
-                        and q.dtype == torch.float8_e4m3fnuz)
+                        and q.dtype == torch.float8_e4m3fn)
                 assert (self.q_descale
                         is not None) and (self.k_descale
                                           is not None) and (self.v_descale
@@ -280,6 +280,7 @@ def _attn_fwd_inner(
         QK_SCALE: tl.constexpr, EIGHT_BIT_GEMM: tl.constexpr,
         USE_P_SCALE: tl.constexpr, EIGHT_BIT_KV: tl.constexpr):
     # loop over k, v, and update accumulator
+    tl.device_assert(EIGHT_BIT_GEMM)
     for start_n in range(block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
@@ -375,7 +376,7 @@ def _attn_fwd_inner(
 
         if EIGHT_BIT_GEMM:
             if USE_P_SCALE:
-                p = (p * p_scale).to(tl.float8e4b8)
+                p = (p * p_scale).to(v.type.element_ty)
                 # They are all eight_bit
                 acc += tl.dot(p, v)
             else:
@@ -559,7 +560,7 @@ def get_autotune_configs():
 autotune_configs, autotune_keys = get_autotune_configs()
 
 
-float8_info = torch.finfo(torch.float8_e4m3fnuz)
+float8_info = torch.finfo(torch.float8_e4m3fn)
 
 @triton.autotune(
     configs=autotune_configs,
@@ -977,6 +978,8 @@ def attn_fwd(
                         USE_P_SCALE,
                         EIGHT_BIT_KV)
 
+                print(f"acc={acc.to(tl.float32)}")
+                tl.device_assert(USE_P_SCALE)
                 if EIGHT_BIT and not EIGHT_BIT_KV:
                     if USE_P_SCALE:
                         acc *= p_descale
@@ -1012,7 +1015,7 @@ def attn_fwd(
                         mask_m_offsets = start_m_idx + tl.arange(0, BLOCK_M)
                         out_ptrs_mask = (mask_m_offsets[:, None]
                                          >= out_mask_boundary[None, :])
-                        z = tl.zeros((1, ), tl.float32)
+                        z = 0.0#tl.zeros((1, ), tl.float32)
                         acc = tl.where(out_ptrs_mask, acc,
                                        z.to(acc.type.element_ty))
                 # write back LSE
@@ -1103,10 +1106,11 @@ class _attention(torch.autograd.Function):
             assert (metadata.bias.numel() < 2**31)
 
         if o is None:
-            if not metadata.eight_bit:
-                o = torch.empty_like(q, dtype=v.dtype)
-            else:
-                o = torch.empty_like(q, dtype=torch.float16)
+            o = torch.empty_like(q, dtype=v.dtype)
+            # if not metadata.eight_bit:
+                # o = torch.empty_like(q, dtype=v.dtype)
+            # else:
+                # o = torch.empty_like(q, dtype=torch.float16)
 
 
         print(f"_attention.forward:q.dtype={q.dtype}, k.dtype={k.dtype}, v.dtype={v.dtype}")
@@ -1228,7 +1232,6 @@ class _attention(torch.autograd.Function):
                        B=batch,
                        IS_FP8 = True)
 
-        ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
         ctx.sm_scale = metadata.sm_scale
         ctx.BLOCK_DMODEL = head_size
@@ -1244,9 +1247,12 @@ class _attention(torch.autograd.Function):
 
 triton_attention_rocm = _attention.apply
 
+num_tensors = 0
+num_good = 0
+objects = { 'tensors' : {}}
 
 def check_and_convert(t, scale):
-    float8 = torch.float8_e4m3fnuz
+    float8 = torch.float8_e4m3fn
     if t.dtype != float8:
         descale = 1.0 / scale
         ts = (t * descale).clamp(min=float8_info.min,
@@ -1289,11 +1295,333 @@ def triton_attention(
         k_scale = torch.tensor(k_scale, dtype = torch.float32, device=q.device)
         v_scale = torch.tensor(v_scale, dtype = torch.float32, device=q.device)
         p_scale = torch.tensor(p_scale, dtype = torch.float32, device=q.device)
-        attn_metadata.set_eight_bit_params(1.0 / q_scale, 1.0 / k_scale,
-                                           1.0 / v_scale, p_scale,
-                                           1.0 / p_scale, o_scale)
+        # attn_metadata.set_eight_bit_params(1.0 / q_scale, 1.0 / k_scale,
+                                           # 1.0 / v_scale, p_scale,
+                                           # 1.0 / p_scale, o_scale)
+        attn_metadata.set_eight_bit_params(q_scale, k_scale,
+                                           v_scale, 1.0 / p_scale,
+                                           p_scale, o_scale)
 
-    if fp8_scales is not None:
-        print(f"fp8_scales = {fp8_scales}")
-    print(f"q.dtype={q.dtype}, k.dtype={k.dtype}, v.dtype={v.dtype}")
-    return triton_attention_rocm(q, k, v, o, attn_metadata)
+    check, _= triton_attention_rocm(q, k, v, o, attn_metadata)
+    check_result = False
+    if check_result:
+        if fp8_scales is not None:
+            print(f"fp8_scales = {fp8_scales}")
+        print(f"causal = {causal}, bias = {bias} sm_scale={sm_scale}")
+        print(f"q.dtype={q.dtype}, k.dtype={k.dtype}, v.dtype={v.dtype}")
+        print(f"q.shape = {q.shape}, k.shape = {k.shape}, v.shape = {v.shape}")
+
+
+        from vllm.attention.ops.old_triton_flash_attention \
+                import old_triton_attention
+        golden,_ = old_triton_attention(q,
+                    k,
+                    v,
+                    o,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_seqlens_q,
+                    max_seqlens_k,
+                    causal,
+                    sm_scale,
+                    bias,
+                    fp8_scales)
+
+        good = torch.allclose(golden.to(torch.float16),
+                              check.to(torch.float16), atol=1e-1,rtol=1e-1)
+        global num_tensors
+        global objects
+        global num_good
+        num_tensors += 1
+        num_good += good
+
+        max_abs_diff = (check.to(torch.float16).detach() -
+                golden.to(torch.float16).detach()).abs().max()
+
+        def copy_tensorfp16(t):
+            return t.clone().detach().to(torch.float16)
+        def copy_tensor(t):
+            return t.clone().detach()
+
+        objects['tensors'][num_tensors] = {
+            'q' : copy_tensorfp16(q).cpu(),
+            'k' : copy_tensorfp16(k).cpu(),
+            'v' : copy_tensorfp16(v).cpu(),
+            'cu_seqlens_q' : copy_tensor(cu_seqlens_q).cpu(),
+            'cu_seqlens_k' : copy_tensor(cu_seqlens_k).cpu(),
+            'max_seqlens_q': max_seqlens_q,
+            'max_seqlens_k': max_seqlens_k,
+            'bias': bias,
+            'sm_scale':sm_scale,
+            'causal':causal,
+            'fp8_scales':fp8_scales,
+            'FP8_MIN':FP8_MIN,
+            'FP8_MAX':FP8_MAX,
+            'good': good,
+            'max_abs_diff':max_abs_diff,
+        }
+
+        print(f"tensor#{num_tensors}: good = {good},"
+              f"#good = {num_good},"
+              f"#bad = {num_tensors - num_good}",
+              f"#max_abs_diff = {max_abs_diff}")
+        if num_tensors == 64:
+            torch.save(objects, 'objects.pt')
+
+
+    return check, 1
+
+
+from einops import rearrange, repeat
+import math
+
+def construct_local_mask(
+    seqlen_q,
+    seqlen_k,
+    window_size=(-1, -1),  # -1 means infinite window size
+    query_padding_mask=None,
+    key_padding_mask=None,
+    device=None,
+    key_leftpad=None,
+):
+    row_idx = rearrange(torch.arange(seqlen_q, device=device, dtype=torch.long), "s -> s 1")
+    col_idx = torch.arange(seqlen_k, device=device, dtype=torch.long)
+    if key_leftpad is not None:
+        key_leftpad = rearrange(key_leftpad, "b -> b 1 1 1")
+        col_idx = repeat(col_idx, "s -> b 1 1 s", b=key_leftpad.shape[0])
+        col_idx = torch.where(col_idx >= key_leftpad, col_idx - key_leftpad, 2**32)
+    sk = (
+        seqlen_k
+        if key_padding_mask is None
+        else rearrange(key_padding_mask.sum(-1), "b -> b 1 1 1")
+    )
+    sq = (
+        seqlen_q
+        if query_padding_mask is None
+        else rearrange(query_padding_mask.sum(-1), "b -> b 1 1 1")
+    )
+    if window_size[0] < 0:
+        return col_idx > row_idx + sk - sq + window_size[1]
+    else:
+        sk = torch.full_like(col_idx, seqlen_k) if key_padding_mask is None else sk
+        return torch.logical_or(
+            col_idx > torch.minimum(row_idx + sk - sq + window_size[1], sk),
+            col_idx < row_idx + sk - sq - window_size[0],
+        )
+
+def ref_attn(
+    q,
+    k,
+    v,
+    query_padding_mask=None,
+    key_padding_mask=None,
+    attn_bias=None,
+    dropout_p=0.0,
+    dropout_mask=None,
+    causal=False,
+    window_size=(-1, -1),  # -1 means infinite window size
+    softcap=0.0,
+    upcast=True,
+    reorder_ops=False,
+    key_leftpad=None,
+):
+    """
+    Arguments:
+        q: (batch_size, seqlen_q, nheads, head_dim)
+        k: (batch_size, seqlen_k, nheads_k, head_dim)
+        v: (batch_size, seqlen_k, nheads_k, head_dim)
+        query_padding_mask: (batch_size, seqlen_q)
+        key_padding_mask: (batch_size, seqlen_k)
+        attn_bias: broadcastable to (batch_size, nheads, seqlen_q, seqlen_k)
+        dropout_p: float
+        dropout_mask: (batch_size, nheads, seqlen_q, seqlen_k)
+        causal: whether to apply causal masking
+        window_size: (int, int), left and right window size
+        upcast: whether to cast all inputs to fp32, do all computation in fp32, then cast
+            output back to fp16/bf16.
+        reorder_ops: whether to change the order of operations (scaling k instead of scaling q, etc.)
+            without changing the math. This is to estimate the numerical error from operation
+            reordering.
+    Output:
+        output: (batch_size, seqlen_q, nheads, head_dim)
+        lse: (batch_size, nheads, seqlen_q)
+    """
+    if causal:
+        window_size = (window_size[0], 0)
+    dtype_og = q.dtype
+    if upcast:
+        q, k, v = q.float(), k.float(), v.float()
+    seqlen_q, seqlen_k = q.shape[1], k.shape[1]
+    k = repeat(k, "b s h d -> b s (h g) d", g=q.shape[2] // k.shape[2])
+    v = repeat(v, "b s h d -> b s (h g) d", g=q.shape[2] // v.shape[2])
+    d = q.shape[-1]
+    if not reorder_ops:
+        scores = torch.einsum("bthd,bshd->bhts", q / math.sqrt(d), k)
+    else:
+        scores = torch.einsum("bthd,bshd->bhts", q, k / math.sqrt(d))
+
+    lse_ref = scores.logsumexp(dim=-1)    
+
+    if softcap > 0:
+        scores = scores / softcap
+        scores = scores.tanh()
+        scores = scores * softcap
+    if key_padding_mask is not None:
+        scores.masked_fill_(rearrange(~key_padding_mask, "b s -> b 1 1 s"), float("-inf"))
+    if window_size[0] >= 0 or window_size[1] >= 0:
+        local_mask = construct_local_mask(
+            seqlen_q,
+            seqlen_k,
+            window_size,
+            query_padding_mask,
+            key_padding_mask,
+            q.device,
+            key_leftpad=key_leftpad,
+        )
+        scores.masked_fill_(local_mask, float("-inf"))
+    if attn_bias is not None:
+        scores = scores + attn_bias
+    attention = torch.softmax(scores, dim=-1).to(v.dtype)
+    # Some rows might be completely masked out so we fill them with zero instead of NaN
+    if window_size[0] >= 0 or window_size[1] >= 0:
+        attention = attention.masked_fill(torch.all(local_mask, dim=-1, keepdim=True), 0.0)
+    # We want to mask here so that the attention matrix doesn't have any NaNs
+    # Otherwise we'll get NaN in dV
+    if query_padding_mask is not None:
+        attention = attention.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0)
+    dropout_scaling = 1.0 / (1 - dropout_p)
+    # attention_drop = attention.masked_fill(~dropout_mask, 0.0) * dropout_scaling
+    # output = torch.einsum('bhts,bshd->bthd', attention_drop , v)
+    if dropout_mask is not None:
+        attention_drop = attention.masked_fill(~dropout_mask, 0.0)
+    else:
+        attention_drop = attention
+    output = torch.einsum("bhts,bshd->bthd", attention_drop, v * dropout_scaling)
+    if query_padding_mask is not None:
+        output.masked_fill_(rearrange(~query_padding_mask, "b s -> b s 1 1"), 0.0)
+
+    return output.to(dtype=dtype_og), lse_ref
+
+
+# triton_attention = _attention.apply
+# query   - [num_tokens, num_heads, head_size]
+# key     - [num_tokens, num_kv_heads, head_size]
+# value   - [num_tokens, num_kv_heads, head_size
+# output  - [num_tokens, num_heads, head_size]
+def torch_attention(
+        query,
+        key,
+        value,
+        output,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlens_q,
+        max_seqlens_k,
+        causal=False,
+        sm_scale=1.0,
+        bias=None,
+        fp8_scales=None):
+        # print(f"torch_attention")
+        output = torch.empty_like(query) if output is None else output
+        from torch.nn.functional import scaled_dot_product_attention
+        num_tokens, num_heads, head_size = query.shape
+        _, num_kv_heads, _ = key.shape
+        num_queries_per_kv = num_heads // num_kv_heads
+        if num_kv_heads != num_heads:
+            key = key.repeat_interleave(num_queries_per_kv, dim=1)
+            value = value.repeat_interleave(num_queries_per_kv, dim=1)
+
+        cu_seqlens_q = cu_seqlens_q.tolist()
+        cu_seqlens_k = cu_seqlens_k.tolist()
+        seqlen_q = cu_seqlens_q[1] - cu_seqlens_q[0]
+        seqlen_k = cu_seqlens_k[1] - cu_seqlens_k[0]
+        print(f"num_tokens = {num_tokens},"
+              f"num_q_heads = {num_heads},"
+              f"num_kv_heads = {num_kv_heads},"
+              f"head_size = {head_size},"
+              f"seqlen_q = {seqlen_q},"
+              f"seqlen_kv = {seqlen_k}")
+        attn_masks = [bias] * len(cu_seqlens_q)
+
+
+
+        query = query.movedim(0, query.dim() - 2)
+        key = key.movedim(0, key.dim() - 2)
+        value = value.movedim(0, value.dim() - 2)
+
+        causal_attn = causal
+
+        seqlens_q, seqlens_kv = cu_seqlens_q, cu_seqlens_k
+        start_q, start_kv = 0, 0
+        for seqlen_q, seqlen_kv, mask in zip(seqlens_q, seqlens_kv,
+                                               attn_masks):
+            end_q = start_q + seqlen_q
+            end_kv = start_kv + seqlen_kv
+            if start_q < end_q:
+                sub_out = scaled_dot_product_attention(
+                    query[:, start_q:end_q, :],
+                    key[:, start_kv:end_kv, :],
+                    value[:, start_kv:end_kv, :],
+                    attn_mask=mask,
+                    dropout_p=0.0,
+                    is_causal=causal_attn and mask is None,
+                    scale=sm_scale).movedim(query.dim() - 2, 0)
+                output_shape = output[start_q:end_q,:,:].shape
+                output[start_q:end_q,:,:] = sub_out
+            start_q, start_kv = end_q, end_kv
+        if fp8_scales is not None:
+            (q_scale, k_scale, v_scale, p_scale, o_scale) = fp8_scales
+            output = output * (1.0 / o_scale)
+        FP8_MIN = float8_info.min
+        FP8_MAX = float8_info.max
+        if fp8_scales is not None:
+            output = torch.clamp(output, FP8_MIN, FP8_MAX).to(torch.float8_e4m3fn)
+        return output, 0
+
+# query   - [num_tokens, num_q_heads, head_size]
+# key     - [num_tokens, num_kv_heads, head_size]
+# value   - [num_tokens, num_kv_heads, head_size
+# output  - [num_tokens, num_q_heads, head_size]
+def torch_attention2(
+        query,
+        key,
+        value,
+        output,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlens_q,
+        max_seqlens_k,
+        causal=False,
+        sm_scale=1.0,
+        bias=None,
+        fp8_scales=None):
+  # q - [batch_size * seqlen_q, num_q_heads, head_size]
+  # k - [batch_size * seqlen_k, num_kv_heads, head_size]
+  # v - [batch_size * seqlen_v, num_kv_heads, head_size]
+  # reformat tensors
+  # [batch_size * seqlen_q, num_q_heads, head_size] ->
+  # [batch_size, seqlen_q, num_q_heads, head_size]
+  num_tokens, num_q_heads, head_size = query.shape
+  num_kv_heads =  key.shape[1]
+  seqlens_q = cu_seqlens_q.tolist()
+  seqlens_k = cu_seqlens_k.tolist()
+  seqlen_q = seqlens_q[1] - seqlens_q[0]
+  seqlen_kv = seqlens_k[1] - seqlens_k[0]
+  batch_size = num_tokens // seqlen_q
+  print(f"num_tokens = {num_tokens},"
+        f"num_q_heads = {num_q_heads},"
+        f"num_kv_heads = {num_kv_heads},"
+        f"head_size = {head_size},"
+        f"seqlen_q = {seqlen_q},"
+        f"seqlen_kv = {seqlen_kv}")
+
+
+  q = query.reshape((batch_size, seqlen_q, num_q_heads, head_size)).to(torch.float16)
+  k = key.reshape((batch_size, seqlen_kv, num_kv_heads, head_size)).to(torch.float16)
+  v = value.reshape((batch_size, seqlen_kv, num_kv_heads, head_size)).to(torch.float16)
+  output, lse_ref = ref_attn(q, k, v, query_padding_mask = None, key_padding_mask = None,
+                  attn_bias=bias, dropout_p=0.0, dropout_mask = None,
+                  causal=causal, upcast=False)
+  output = output.reshape((num_tokens, num_q_heads, head_size)).contiguous()
+  return output, lse_ref
+
