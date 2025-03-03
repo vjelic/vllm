@@ -33,6 +33,7 @@ import logging
 import triton
 import triton.language as tl
 
+from vllm import envs
 from vllm.platforms import current_platform
 
 is_hip_ = current_platform.is_rocm()
@@ -663,6 +664,19 @@ def decode_attention_fwd(
             page_size,
             logit_cap,
         )
+    elif is_hip_ and envs.VLLM_USE_AITER_MLA:
+        from aiter.mla import mla_decode_fwd
+        mla_decode_fwd(
+            q,
+            k_buffer.view(-1, 1, 1, q.shape[-1]),
+            o,
+            req_to_token,
+            b_seq_len,
+            attn_logits,
+            sm_scale,
+            logit_cap
+        )
+        k_buffer = k_buffer.reshape(-1, 1, q.shape[-1])
     else:
         # GQA/MQA/MLA
         decode_attention_fwd_grouped(

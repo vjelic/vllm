@@ -102,6 +102,8 @@ if TYPE_CHECKING:
     VLLM_RAY_BUNDLE_INDICES: str = ""
     VLLM_CUDART_SO_PATH: Optional[str] = None
     VLLM_USE_AITER_MOE: bool = False
+    VLLM_USE_AITER_BLOCK_GEMM: bool = False
+    VLLM_USE_AITER_MLA: bool = False
 
 
 def get_default_cache_root():
@@ -664,6 +666,17 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_USE_AITER_MOE":
     lambda: (os.environ.get("VLLM_USE_AITER_MOE", "False").lower() in
              ("true", "1")),
+
+    # flag to control if vllm should use AITER MoE
+    "VLLM_USE_AITER_BLOCK_GEMM":
+    lambda: (os.environ.get("VLLM_USE_AITER_BLOCK_GEMM", "False").lower() in
+             ("true", "1")),
+
+    # flag to control if vllm should use AITER MoE
+    "VLLM_USE_AITER_MLA":
+    lambda: (os.environ.get("VLLM_USE_AITER_MLA", "False").lower() in
+             ("true", "1")),
+
 }
 
 # end-env-vars-definition

@@ -11,6 +11,7 @@ import triton
 import triton.language as tl
 
 from vllm import _custom_ops as ops
+from vllm import envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     _normalize_quant_group_shape, scaled_dequantize)
@@ -20,9 +21,10 @@ from vllm.platforms import current_platform
 from vllm.utils import is_navi
 
 logger = init_logger(__name__)
+is_hip = current_platform.is_rocm()
 
 current_platform_fp8_dtype = (torch.float8_e4m3fnuz
-                              if current_platform.is_rocm() else
+                              if is_hip else
                               torch.float8_e4m3fn)
 
 
@@ -48,7 +50,7 @@ def apply_w8a8_block_fp8_linear(
 
     shape_supported_by_cutlass = (weight.shape[0] % 128 == 0
                                   and weight.shape[1] % 128 == 0)
-    if current_platform.is_rocm():
+    if is_hip:
         scale_a_shape = ((input_2d.shape[-1] // block_size[1], ) +
                          input_2d.shape[:-1])[::-1]
         scale_b_shape = (weight_scale.view(-1, 1)
@@ -71,12 +73,23 @@ def apply_w8a8_block_fp8_linear(
         q_input, x_scale = per_token_group_quant_fp8(input_2d,
                                                      block_size[1],
                                                      column_major_scales=False)
-        output = w8a8_block_fp8_matmul(q_input,
-                                       weight,
-                                       x_scale,
-                                       weight_scale,
-                                       block_size,
-                                       output_dtype=input.dtype)
+        if is_hip and envs.VLLM_USE_AITER_BLOCK_GEMM:
+            from aiter import gemm_a8w8_blockscale
+            output = torch.zeros(
+                [q_input.shape[0], weight.shape[0]],
+                dtype=input.dtype,
+                device=q_input.device,
+            )
+            gemm_a8w8_blockscale(q_input, weight, x_scale, weight_scale, output)
+        else:
+            output = w8a8_block_fp8_matmul(q_input,
+                                           weight,
+                                           x_scale,
+                                           weight_scale,
+                                           block_size,
+                                           output_dtype=input.dtype
+            )
+
     if bias is not None:
         output = output + bias
     return output.to(dtype=input.dtype).view(*output_shape)
@@ -131,7 +144,7 @@ def input_to_float8(
     """This function quantizes input values to float8 values "
     "with tensor-wise quantization."""
     if dtype is None:
-        dtype = (torch.float8_e4m3fnuz if current_platform.is_rocm()
+        dtype = (torch.float8_e4m3fnuz if is_hip
                  and not is_navi() else torch.float8_e4m3fn)
     finfo = torch.finfo(dtype)
     min_val, max_val = x.aminmax()
@@ -263,7 +276,7 @@ def per_token_group_quant_fp8(
         scaling factor for quantization.
     """
     if dtype is None:
-        dtype = (torch.float8_e4m3fnuz if current_platform.is_rocm()
+        dtype = (torch.float8_e4m3fnuz if is_hip
                  and not is_navi() else torch.float8_e4m3fn)
     assert (x.shape[-1] % group_size == 0), (
         f"the last dimension of `x` {x.shape[-1]} must be divisible "

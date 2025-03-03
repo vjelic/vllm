@@ -1106,7 +1106,8 @@ def fused_experts(hidden_states: torch.Tensor,
                   block_shape: Optional[List[int]] = None,
                   expert_mask: torch.Tensor = None,
 ):
-    if is_hip and envs.VLLM_USE_AITER_MOE:
+    if is_hip and envs.VLLM_USE_AITER_MOE \
+        and block_shape is not None:
         import aiter
         from aiter.fused_moe_bf16_asm import moe_sorting_ck
 
