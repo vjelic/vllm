@@ -649,7 +649,28 @@ def decode_attention_fwd(
     assert num_kv_splits == attn_logits.shape[2]
     kv_group_num = q.shape[1] // v_buffer.shape[-2]
 
-    if kv_group_num == 1:
+    if is_hip_ and envs.VLLM_USE_AITER_MLA:
+        from aiter.mla import mla_decode_fwd
+        import torch
+        kv_indptr = torch.empty(b_seq_len.shape[0]+1, dtype=b_seq_len.dtype, device=b_seq_len.device)
+        kv_indptr[0] = 0
+        for i in range(len(b_seq_len)):
+            kv_indptr[i+1] = kv_indptr[i] + b_seq_len[i]
+        kv_indices = req_to_token.flatten().to(b_seq_len.device)
+        attn_logits = torch.ones(b_seq_len.shape[0], dtype=torch.int, device=b_seq_len.device)
+
+        mla_decode_fwd(
+            q,
+            k_buffer.view(-1, 1, 1, q.shape[-1]),
+            o,
+            kv_indptr,
+            kv_indices,
+            attn_logits,
+            sm_scale,
+            logit_cap
+        )
+        k_buffer = k_buffer.reshape(-1, 1, q.shape[-1])
+    elif kv_group_num == 1:
         # MHA
         decode_attention_fwd_normal(
             q,
@@ -664,19 +685,6 @@ def decode_attention_fwd(
             page_size,
             logit_cap,
         )
-    elif is_hip_ and envs.VLLM_USE_AITER_MLA:
-        from aiter.mla import mla_decode_fwd
-        mla_decode_fwd(
-            q,
-            k_buffer.view(-1, 1, 1, q.shape[-1]),
-            o,
-            req_to_token,
-            b_seq_len,
-            attn_logits,
-            sm_scale,
-            logit_cap
-        )
-        k_buffer = k_buffer.reshape(-1, 1, q.shape[-1])
     else:
         # GQA/MQA/MLA
         decode_attention_fwd_grouped(
