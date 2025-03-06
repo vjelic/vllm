@@ -372,6 +372,10 @@ def _get_seq_len_block_table_args(
         return (query_seq_start_loc, attn_metadata.max_encoder_seq_len,
                 query_seq_start_loc, attn_metadata.max_encoder_seq_len,
                 attn_metadata.encoder_seq_lens, causal_mask)
+    elif attn_type == AttentionType.ENCODER_ONLY:
+        return (attn_metadata.seq_start_loc, attn_metadata.max_prefill_seq_len,
+                attn_metadata.seq_start_loc, attn_metadata.max_prefill_seq_len,
+                None, False)
     elif attn_type == AttentionType.DECODER:
         # Decoder self-attention
         # Choose max_seq_len based on whether we are in prompt_run
