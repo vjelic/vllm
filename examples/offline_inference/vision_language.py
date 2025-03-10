@@ -82,6 +82,22 @@ def run_deepseek_vl2(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Florence2
+def run_florence2(question: str, modality: str):
+    assert modality == "image"
+
+    llm = LLM(model="microsoft/Florence-2-large",
+              tokenizer="facebook/bart-large",
+              max_num_seqs=8,
+              trust_remote_code=True,
+              dtype="bfloat16",
+              disable_mm_preprocessor_cache=args.disable_mm_preprocessor_cache)
+
+    prompt = "<MORE_DETAILED_CAPTION>"
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
 # Fuyu
 def run_fuyu(question: str, modality: str):
     assert modality == "image"
@@ -105,8 +121,12 @@ def run_glm4v(question: str, modality: str):
               max_num_seqs=2,
               trust_remote_code=True,
               enforce_eager=True,
+              hf_overrides={"architectures": ["GLM4VForCausalLM"]},
               disable_mm_preprocessor_cache=args.disable_mm_preprocessor_cache)
-    prompt = question
+
+    prompt = f"<|user|>\n<|begin_of_image|><|endoftext|><|end_of_image|>\
+        {question}<|assistant|>"
+
     stop_token_ids = [151329, 151336, 151338]
     return llm, prompt, stop_token_ids
 
@@ -115,7 +135,7 @@ def run_glm4v(question: str, modality: str):
 def run_h2ovl(question: str, modality: str):
     assert modality == "image"
 
-    model_name = "h2oai/h2ovl-mississippi-2b"
+    model_name = "h2oai/h2ovl-mississippi-800m"
 
     llm = LLM(
         model=model_name,
@@ -132,7 +152,7 @@ def run_h2ovl(question: str, modality: str):
                                            add_generation_prompt=True)
 
     # Stop tokens for H2OVL-Mississippi
-    # https://huggingface.co/h2oai/h2ovl-mississippi-2b
+    # https://huggingface.co/h2oai/h2ovl-mississippi-800m
     stop_token_ids = [tokenizer.eos_token_id]
     return llm, prompt, stop_token_ids
 
@@ -493,6 +513,7 @@ def run_qwen_vl(question: str, modality: str):
         trust_remote_code=True,
         max_model_len=1024,
         max_num_seqs=2,
+        hf_overrides={"architectures": ["QwenVLForConditionalGeneration"]},
         disable_mm_preprocessor_cache=args.disable_mm_preprocessor_cache,
     )
 
@@ -531,11 +552,42 @@ def run_qwen2_vl(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Qwen2.5-VL
+def run_qwen2_5_vl(question: str, modality: str):
+
+    model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+            "fps": 1,
+        },
+        disable_mm_preprocessor_cache=args.disable_mm_preprocessor_cache,
+    )
+
+    if modality == "image":
+        placeholder = "<|image_pad|>"
+    elif modality == "video":
+        placeholder = "<|video_pad|>"
+
+    prompt = ("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+              f"<|im_start|>user\n<|vision_start|>{placeholder}<|vision_end|>"
+              f"{question}<|im_end|>\n"
+              "<|im_start|>assistant\n")
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
 model_example_map = {
     "aria": run_aria,
     "blip-2": run_blip2,
     "chameleon": run_chameleon,
     "deepseek_vl_v2": run_deepseek_vl2,
+    "florence2": run_florence2,
     "fuyu": run_fuyu,
     "glm4v": run_glm4v,
     "h2ovl_chat": run_h2ovl,
@@ -557,6 +609,7 @@ model_example_map = {
     "pixtral_hf": run_pixtral_hf,
     "qwen_vl": run_qwen_vl,
     "qwen2_vl": run_qwen2_vl,
+    "qwen2_5_vl": run_qwen2_5_vl,
 }
 
 

@@ -36,13 +36,19 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, rocm_ops) {
       "                Tensor? alibi_slopes,"
       "                str kv_cache_dtype,"
       "                Tensor k_scale, Tensor v_scale,"
-      "                Tensor? fp8_out_scale,"
-      "                int partition_size) -> ()");
+      "                Tensor? fp8_out_scale) -> ()");
   rocm_ops.impl("paged_attention", torch::kCUDA, &paged_attention);
   rocm_ops.def(
       "wvSpltK(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"
       "        int CuCount) -> ()");
   rocm_ops.impl("wvSpltK", torch::kCUDA, &wvSpltK);
+  rocm_ops.def(
+      "wvSpltKQ(Tensor in_a, Tensor in_b, Tensor! out_c, Tensor scale_a, "
+      "Tensor scale_b,"
+      "        int N_in,"
+      "        int Otp_in,"
+      "        int CuCount) -> ()");
+  rocm_ops.impl("wvSpltKQ", torch::kCUDA, &wvSpltKQ);
 }
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)

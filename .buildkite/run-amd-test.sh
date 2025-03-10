@@ -77,7 +77,6 @@ echo "Commands:$commands"
 #ignore certain kernels tests
 if [[ $commands == *" kernels "* ]]; then
   commands="${commands} \
-  --ignore=kernels/test_attention.py \
   --ignore=kernels/test_attention_selector.py \
   --ignore=kernels/test_blocksparse_attention.py \
   --ignore=kernels/test_causal_conv1d.py \
@@ -123,6 +122,8 @@ if [[ $commands == *"--shard-id="* ]]; then
         --rm \
         -e HIP_VISIBLE_DEVICES="${GPU}" \
         -e HF_TOKEN \
+        -e AWS_ACCESS_KEY_ID \
+        -e AWS_SECRET_ACCESS_KEY \
         -v "${HF_CACHE}:${HF_MOUNT}" \
         -e "HF_HOME=${HF_MOUNT}" \
         --name "${container_name}_${GPU}" \
@@ -151,6 +152,8 @@ else
           --rm \
           -e HIP_VISIBLE_DEVICES=0 \
           -e HF_TOKEN \
+          -e AWS_ACCESS_KEY_ID \
+          -e AWS_SECRET_ACCESS_KEY \
           -v "${HF_CACHE}:${HF_MOUNT}" \
           -e "HF_HOME=${HF_MOUNT}" \
           --name "${container_name}" \
