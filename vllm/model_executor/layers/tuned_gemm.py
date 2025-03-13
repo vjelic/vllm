@@ -129,9 +129,9 @@ class TunedGemm:
     def mm(self, inp, weights, bias=None):
         if not support_tuned_gemms:
             return F.linear(inp, weights, bias)
-        # F.Linear can take a 3 dimensional (or even larger) input. vllm
-        # uses this for linear units. However, sampler
-        # will use torch.matmul with 2 dimensions only
+        # F.Linear can take a 3 dimensional (or even larger)
+        # input. vllm uses this for linear units. However,
+        # sampler will use torch.matmul with 2 dimensions only
         if inp.dim() >= 3:
             try:
                 inp_view = inp.view(-1, inp.size(-1))
