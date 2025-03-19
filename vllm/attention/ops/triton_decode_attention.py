@@ -51,7 +51,6 @@ def tanh(x):
     # Tanh is just a scaled sigmoid
     return 2 * tl.sigmoid(2 * x) - 1
 
-
 @triton.jit
 def _fwd_kernel_stage1(
     Q,
@@ -227,6 +226,268 @@ def _decode_att_m_fwd(
         Lv=Lv,
     )
 
+def tensor_triton_arg(tensor):
+    return tensor, *tensor.stride()[:-1]
+
+@triton.jit
+def _fwd_grouped_kernel_stage1_part1(
+    Q,
+    K_Buffer,
+    V_Buffer,
+    sm_scale,
+    Req_to_tokens,
+    B_Seqlen,
+
+    Att_Out_1,
+    Att_Out_1_stride0,
+    Att_Out_1_stride1,
+    Att_Out_1_stride2,
+    Att_Out_1_stride3,
+
+    temp_size: tl.constexpr,
+
+    stride_req_to_tokens_b,
+    stride_qbs,
+    stride_qh,
+    stride_buf_kbs,
+    stride_buf_kh,
+    stride_buf_vbs,
+    stride_buf_vh,
+    kv_group_num: tl.constexpr,
+    q_head_num: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
+    BLOCK_DPE: tl.constexpr,
+    BLOCK_DV: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_H: tl.constexpr,
+    NUM_KV_SPLITS: tl.constexpr,
+    PAGE_SIZE: tl.constexpr,
+    logit_cap: tl.constexpr,
+    Lk: tl.constexpr,
+    Lv: tl.constexpr,
+):
+    cur_batch = tl.program_id(0)
+    cur_head_id = tl.program_id(1)
+    cur_kv_head = cur_head_id // tl.cdiv(kv_group_num, BLOCK_H)
+    split_kv_id = tl.program_id(2) % NUM_KV_SPLITS
+    page_id = tl.program_id(2) // NUM_KV_SPLITS
+
+    if kv_group_num > BLOCK_H:
+        VALID_BLOCK_H: tl.constexpr = BLOCK_H
+    else:
+        VALID_BLOCK_H: tl.constexpr = kv_group_num
+    cur_head = cur_head_id * VALID_BLOCK_H + tl.arange(0, BLOCK_H)
+    mask_h = cur_head < (cur_head_id + 1) * VALID_BLOCK_H
+    mask_h = mask_h & (cur_head < q_head_num)
+
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    offs_dv = tl.arange(0, BLOCK_DV)
+    mask_d = offs_d < Lk
+    mask_dv = offs_dv < Lv
+    cur_batch_seq_len = tl.load(B_Seqlen + cur_batch)
+    cur_batch_req_idx = cur_batch
+
+    offs_q = cur_batch * stride_qbs + cur_head[:, None] * stride_qh + offs_d[
+        None, :]
+    q = tl.load(Q + offs_q,
+                mask=(mask_h[:, None]) & (mask_d[None, :]),
+                other=0.0)
+
+    if BLOCK_DPE > 0:
+        offs_dpe = BLOCK_DMODEL + tl.arange(0, BLOCK_DPE)
+        mask_dpe = offs_dpe < Lk
+        off_qpe = (cur_batch * stride_qbs + cur_head[:, None] * stride_qh +
+                   offs_dpe[None, :])
+        qpe = tl.load(Q + off_qpe,
+                      mask=(mask_h[:, None]) & (mask_dpe[None, :]),
+                      other=0.0)
+
+    kv_len_per_split = tl.cdiv(cur_batch_seq_len, NUM_KV_SPLITS)
+    split_kv_start = kv_len_per_split * split_kv_id
+    split_kv_end = tl.minimum(split_kv_start + kv_len_per_split,
+                              cur_batch_seq_len)
+
+    e_max = tl.zeros([BLOCK_H], dtype=tl.float32) - float("inf")
+    e_sum = tl.zeros([BLOCK_H], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_H, BLOCK_DV], dtype=tl.float32)
+    ps = tl.zeros([BLOCK_H], dtype=tl.float32)
+
+    if split_kv_end > split_kv_start:
+        for start_n in range(split_kv_start+page_id*BLOCK_N, split_kv_end, BLOCK_N*temp_size):
+            offs_n = start_n + tl.arange(0, BLOCK_N)
+            kv_page_number = tl.load(
+                Req_to_tokens + stride_req_to_tokens_b * cur_batch_req_idx +
+                offs_n // PAGE_SIZE,
+                mask=offs_n < split_kv_end,
+                other=0,
+            )
+            kv_loc = kv_page_number * PAGE_SIZE + offs_n % PAGE_SIZE
+            offs_buf_k = (kv_loc[None, :] * stride_buf_kbs +
+                          cur_kv_head * stride_buf_kh + offs_d[:, None])
+            k = tl.load(
+                K_Buffer + offs_buf_k,
+                mask=(offs_n[None, :] < split_kv_end) & (mask_d[:, None]),
+                other=0.0,
+            )
+            qk = tl.dot(q, k.to(q.dtype))
+            if BLOCK_DPE > 0:
+                offs_buf_kpe = (kv_loc[None, :] * stride_buf_kbs +
+                                cur_kv_head * stride_buf_kh +
+                                offs_dpe[:, None])
+                kpe = tl.load(
+                    K_Buffer + offs_buf_kpe,
+                    mask=(offs_n[None, :] < split_kv_end) &
+                    (mask_dpe[:, None]),
+                    other=0.0,
+                )
+                qk += tl.dot(qpe, kpe.to(qpe.dtype))
+            qk *= sm_scale
+
+            if logit_cap > 0:
+                qk = logit_cap * tanh(qk / logit_cap)
+
+            qk = tl.where(mask_h[:, None] & (offs_n[None, :] < split_kv_end),
+                          qk, float("-inf"))
+
+            offs_buf_v = (kv_loc[:, None] * stride_buf_vbs +
+                          cur_kv_head * stride_buf_vh + offs_dv[None, :])
+            v = tl.load(
+                V_Buffer + offs_buf_v,
+                mask=(offs_n[:, None] < split_kv_end) & (mask_dv[None, :]),
+                other=0.0,
+            )
+
+
+            n_e_max = tl.maximum(tl.max(qk, 1), e_max)
+            re_scale = tl.exp(e_max - n_e_max)
+            p = tl.exp(qk - n_e_max[:, None])
+            acc *= re_scale[:, None]
+            acc += tl.dot(p.to(v.dtype), v)
+
+            e_sum = e_sum * re_scale + tl.sum(p, 1)
+            e_max = n_e_max
+
+        store_index0=page_id
+        store_index1=cur_batch
+        store_index2=cur_head[:,None]
+        store_index3=split_kv_id
+        store_index4=offs_dv[None,:]
+        row=Att_Out_1+store_index0*Att_Out_1_stride0 \
+                     +store_index1*Att_Out_1_stride1 \
+                     +store_index2*Att_Out_1_stride2 \
+                     +store_index3*Att_Out_1_stride3
+        tl.store(
+            row+store_index4,
+            acc,
+            mask=(mask_h[:, None]) & (mask_dv[None, :]),
+        )
+        tl.store(
+            row+Att_Out_1_stride3-2,
+            e_sum[:,None],
+            mask=(mask_h[:, None]),
+        )
+        tl.store(
+            row+Att_Out_1_stride3-1,
+            e_max[:,None],
+            mask=(mask_h[:, None]),
+        )
+
+@triton.jit
+def _fwd_grouped_kernel_stage1_part2(
+    B_Seqlen,
+
+    Att_Out_1,
+    Att_Out_1_stride0,
+    Att_Out_1_stride1,
+    Att_Out_1_stride2,
+    Att_Out_1_stride3,
+
+    Att_Out,
+    Att_Out_stride0,
+    Att_Out_stride1,
+    Att_Out_stride2,
+
+    page_count,
+
+    kv_group_num: tl.constexpr,
+    q_head_num: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
+    BLOCK_DPE: tl.constexpr,
+    BLOCK_DV: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_H: tl.constexpr,
+    NUM_KV_SPLITS: tl.constexpr,
+    PAGE_SIZE: tl.constexpr,
+    logit_cap: tl.constexpr,
+    Lk: tl.constexpr,
+    Lv: tl.constexpr,
+):
+    cur_batch = tl.program_id(0)
+    cur_head_id = tl.program_id(1)
+    cur_kv_head = cur_head_id // tl.cdiv(kv_group_num, BLOCK_H)
+    h = tl.program_id(2) % BLOCK_H
+    split_kv_id = tl.program_id(2) // BLOCK_H
+
+    if kv_group_num > BLOCK_H:
+        VALID_BLOCK_H: tl.constexpr = BLOCK_H
+    else:
+        VALID_BLOCK_H: tl.constexpr = kv_group_num
+    cur_head = cur_head_id * VALID_BLOCK_H + h
+    mask_h = cur_head < (cur_head_id + 1) * VALID_BLOCK_H
+    mask_h = mask_h & (cur_head < q_head_num)
+
+    if not mask_h:
+        return
+
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    offs_dv = tl.arange(0, BLOCK_DV)
+    mask_d = offs_d < Lk
+    mask_dv = offs_dv < Lv
+
+    cur_batch_seq_len = tl.load(B_Seqlen + cur_batch)
+
+    # this makes no sense to me, but this is what the original function does
+    kv_len_per_split = tl.cdiv(cur_batch_seq_len, NUM_KV_SPLITS)
+    page_count = tl.minimum(page_count, tl.cdiv(tl.minimum(kv_len_per_split, cur_batch_seq_len-kv_len_per_split * split_kv_id), BLOCK_N))
+
+    e_max = - float("inf")
+    e_sum = 0.0
+    acc = tl.zeros([BLOCK_DV], dtype=tl.float32)
+
+    for i in range(page_count):
+        store_index0=i
+        store_index1=cur_batch
+        store_index2=cur_head
+        store_index3=split_kv_id
+        store_index4=offs_dv 
+        row=Att_Out_1+store_index0*Att_Out_1_stride0 \
+                     +store_index1*Att_Out_1_stride1 \
+                     +store_index2*Att_Out_1_stride2 \
+                     +store_index3*Att_Out_1_stride3
+        d_acc = tl.load(row+store_index4)
+        d_e_max = tl.load(row+Att_Out_1_stride3-1)
+        ps = tl.load(row+Att_Out_1_stride3-2)
+
+        n_e_max = tl.maximum(d_e_max, e_max)
+        re_scale = tl.exp(e_max - n_e_max)
+        p2 = tl.exp(d_e_max - n_e_max)
+
+        acc *= re_scale
+        acc += d_acc*p2
+        e_sum = e_sum * re_scale + ps*p2 
+        e_max = n_e_max
+
+    offs_mid_o = (cur_batch * Att_Out_stride0 +
+                  cur_head * Att_Out_stride1 +
+                  split_kv_id * Att_Out_stride2 )
+
+    tl.store(Att_Out + offs_mid_o + offs_dv,
+        acc / e_sum,
+        mask=mask_dv)
+
+    tl.store(Att_Out + offs_mid_o + Lv,
+        e_max + tl.log(e_sum))
+
 
 @triton.jit
 def _fwd_grouped_kernel_stage1(
@@ -389,6 +650,7 @@ def _decode_grouped_att_m_fwd(
     sm_scale,
     page_size,
     logit_cap,
+    att_buf
 ):
     BLOCK = 32
     Lk = k_buffer.shape[-1]
@@ -432,41 +694,102 @@ def _decode_grouped_att_m_fwd(
         }
         num_stages = 1
 
-    _fwd_grouped_kernel_stage1[grid](
-        q,
-        k_buffer,
-        v_buffer,
-        sm_scale,
-        Req_to_tokens,
-        B_Seqlen,
-        att_out,
-        Req_to_tokens.stride(0),
-        q.stride(0),
-        q.stride(1),
-        k_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
-        k_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
-        v_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
-        v_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
-        att_out.stride(0),
-        att_out.stride(1),
-        att_out.stride(2),
-        kv_group_num=kv_group_num,
-        q_head_num=head_num,
-        BLOCK_DMODEL=BLOCK_DMODEL,
-        BLOCK_DPE=BLOCK_DPE,
-        BLOCK_DV=BLOCK_DV,
-        BLOCK_N=BLOCK,
-        BLOCK_H=BLOCK_H,
-        NUM_KV_SPLITS=NUM_KV_SPLITS,
-        PAGE_SIZE=page_size,
-        logit_cap=logit_cap,
-        num_warps=4,
-        num_stages=num_stages,
-        Lk=Lk,
-        Lv=Lv,
-        **extra_kargs,
-    )
+    if True:
+        temp_page_count = 32
+        assert temp_page_count <= att_buf.shape[0]
+        grid2= (
+            batch,
+            triton.cdiv(head_num, min(BLOCK_H, kv_group_num)),
+            NUM_KV_SPLITS*temp_page_count,
+        )
+        grid3= (
+            batch,
+            triton.cdiv(head_num, min(BLOCK_H, kv_group_num)),
+            NUM_KV_SPLITS*BLOCK_H,
+        )
+        args=[
+            Req_to_tokens.stride(0),
+            q.stride(0),
+            q.stride(1),
+            k_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            k_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            v_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            v_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            att_out.stride(0),
+            att_out.stride(1),
+            att_out.stride(2)
+        ]
+        kwargs={
+            "kv_group_num":kv_group_num,
+            "q_head_num":head_num,
+            "BLOCK_DMODEL":BLOCK_DMODEL,
+            "BLOCK_DPE":BLOCK_DPE,
+            "BLOCK_DV":BLOCK_DV,
+            "BLOCK_N":BLOCK,
+            "BLOCK_H":BLOCK_H,
+            "NUM_KV_SPLITS":NUM_KV_SPLITS,
+            "PAGE_SIZE":page_size,
+            "logit_cap":logit_cap,
+            "num_warps":4,
+            "num_stages":num_stages,
+            "Lk":Lk,
+            "Lv":Lv,
+        }
+        kwargs.update(extra_kargs)
 
+        _fwd_grouped_kernel_stage1_part1[grid2](
+            q,
+            k_buffer,
+            v_buffer,
+            sm_scale,
+            Req_to_tokens,
+            B_Seqlen,
+            *tensor_triton_arg(att_buf),
+            temp_page_count,
+            *args[:7],
+            **kwargs)
+
+        _fwd_grouped_kernel_stage1_part2[grid3](
+            B_Seqlen,
+            *tensor_triton_arg(att_buf),
+            *tensor_triton_arg(att_out),
+            temp_page_count,
+            **kwargs)
+    else:
+        _fwd_grouped_kernel_stage1[grid](
+            q,
+            k_buffer,
+            v_buffer,
+            sm_scale,
+            Req_to_tokens,
+            B_Seqlen,
+            att_out,
+            Req_to_tokens.stride(0),
+            q.stride(0),
+            q.stride(1),
+            k_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            k_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            v_buffer.stride(-3),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            v_buffer.stride(-2),  # Assume (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+            att_out.stride(0),
+            att_out.stride(1),
+            att_out.stride(2),
+            kv_group_num=kv_group_num,
+            q_head_num=head_num,
+            BLOCK_DMODEL=BLOCK_DMODEL,
+            BLOCK_DPE=BLOCK_DPE,
+            BLOCK_DV=BLOCK_DV,
+            BLOCK_N=BLOCK,
+            BLOCK_H=BLOCK_H,
+            NUM_KV_SPLITS=NUM_KV_SPLITS,
+            PAGE_SIZE=page_size,
+            logit_cap=logit_cap,
+            num_warps=4,
+            num_stages=num_stages,
+            Lk=Lk,
+            Lv=Lv,
+            **extra_kargs,
+        )
 
 @triton.jit
 def _fwd_kernel_stage2(
@@ -608,6 +931,7 @@ def decode_attention_fwd_grouped(
     num_kv_splits,
     sm_scale,
     page_size,
+    att_buf,
     logit_cap=0.0,
 ):
     _decode_grouped_att_m_fwd(
@@ -621,6 +945,7 @@ def decode_attention_fwd_grouped(
         sm_scale,
         page_size,
         logit_cap,
+        att_buf,
     )
     _decode_softmax_reducev_fwd(attn_logits, q, o, v_buffer, b_seq_len,
                                 num_kv_splits)
@@ -636,6 +961,7 @@ def decode_attention_fwd(
     attn_logits,
     num_kv_splits,
     sm_scale,
+    att_buf,
     page_size=1,
     logit_cap=0.0,
 ):
@@ -670,5 +996,6 @@ def decode_attention_fwd(
             num_kv_splits,
             sm_scale,
             page_size,
+            att_buf,
             logit_cap,
         )
