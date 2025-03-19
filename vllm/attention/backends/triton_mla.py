@@ -646,6 +646,7 @@ class TritonMLAMetadataBuilder(AttentionMetadataBuilder[TritonMLAMetadata]):
             head_dim=self.runner.model_config.get_head_size(),
         )
 
+attn_buf_cache={}
 
 class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
 
@@ -730,6 +731,13 @@ class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
             dtype=torch.float32,
             device=q.device,
         )
+        key=(32, B, self.num_heads, attn_metadata.num_kv_splits, self.kv_lora_rank+2)
+        global attn_buf_cache
+        if key in attn_buf_cache:
+            attn_buf=attn_buf_cache[key]
+        else:
+            attn_buf=torch.empty(key, dtype=torch.float32, device=q.device)
+            attn_buf_cache[key]=attn_buf
 
         # Add a head dim of 1
         kv_c_and_k_pe_cache = kv_c_and_k_pe_cache.unsqueeze(2)
@@ -741,6 +749,7 @@ class TritonMLAImpl(MLACommonImpl[TritonMLAMetadata]):
                              decode_meta.block_tables,
                              decode_meta.seq_lens_tensor, attn_logits,
                              attn_metadata.num_kv_splits, self.scale,
+                             attn_buf,
                              PAGE_SIZE)
 
         return self._v_up_proj_and_o_proj(o)
