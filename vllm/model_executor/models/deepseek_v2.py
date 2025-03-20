@@ -27,7 +27,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 import torch
 from torch import nn
 from transformers import PretrainedConfig
-
+import vllm.envs as envs
 from vllm.attention import Attention, AttentionMetadata
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
@@ -50,13 +50,14 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsPP
 from .utils import (PPMissingLayer, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-
+is_hip = current_platform.is_rocm
 
 class DeepseekV2MLP(nn.Module):
 
@@ -125,8 +126,8 @@ class DeepseekV2MoE(nn.Module):
                 torch.empty(config.n_routed_experts))
         else:
             self.gate.e_score_correction_bias = None
-
-        self.experts = FusedMoE(
+        MoEImpl = EPMoE if is_hip and envs.VLLM_USE_AITER_EP_MOE else FusedMoE
+        self.experts = MoEImpl(
             num_experts=config.n_routed_experts,
             top_k=config.num_experts_per_tok,
             hidden_size=config.hidden_size,
