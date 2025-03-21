@@ -104,6 +104,8 @@ if TYPE_CHECKING:
     VLLM_USE_AITER_MOE: bool = False
     VLLM_USE_AITER_BLOCK_GEMM: bool = False
     VLLM_USE_AITER_MLA: bool = False
+    VLLM_USE_AITER_EP_MOE: bool = False
+    VLLM_USE_CK_MOE: bool = False
 
 
 def get_default_cache_root():
@@ -675,6 +677,16 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # flag to control if vllm should use AITER MoE
     "VLLM_USE_AITER_MLA":
     lambda: (os.environ.get("VLLM_USE_AITER_MLA", "False").lower() in
+             ("true", "1")),
+
+    # flag to control if vllm should use AITER EP_MoE
+    "VLLM_USE_AITER_EP_MOE":
+    lambda: (os.environ.get("VLLM_USE_AITER_EP_MOE", "False").lower() in
+             ("true", "1")),
+
+    # flag to control if vllm should use AITER asm EP_MoE
+    "VLLM_USE_CK_MOE":
+    lambda: (os.environ.get("VLLM_USE_CK_MOE", "False").lower() in
              ("true", "1")),
 
 }
