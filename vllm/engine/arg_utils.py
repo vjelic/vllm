@@ -25,7 +25,7 @@ from vllm.plugins import load_general_plugins
 from vllm.test_utils import MODEL_WEIGHTS_S3_BUCKET, MODELS_ON_S3
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import FlexibleArgumentParser, StoreBoolean
+from vllm.utils import FlexibleArgumentParser, StoreBoolean, aiter_mla_enabled
 
 if TYPE_CHECKING:
     from vllm.transformers_utils.tokenizer_group import BaseTokenizerGroup
@@ -1222,6 +1222,12 @@ class EngineArgs:
             cpu_offload_gb=self.cpu_offload_gb,
             calculate_kv_scales=self.calculate_kv_scales,
         )
+        if aiter_mla_enabled() \
+            and model_config.hf_config.model_type.lower().startswith("deepseek"):
+            assert cache_config.block_size == 1, \
+                "Enable AITER MLA for DeepSeek models " \
+                f"currently requires --block-size=1, but got '{cache_config.block_size}'."
+
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,
             tensor_parallel_size=self.tensor_parallel_size,

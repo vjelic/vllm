@@ -336,7 +336,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # use aiter MLA op if ater ops are enabled
     "VLLM_USE_AITER_MLA":
-    lambda: (os.getenv("VLLM_USE_AITER_MLA", "True").lower() in ("true", "1")),
+    lambda: (os.getenv("VLLM_USE_AITER_MLA", "False").lower() in ("true", "1")),
 
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
