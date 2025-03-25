@@ -26,7 +26,7 @@ from vllm.model_executor.layers.ep_moe.kernels import (
     run_moe_ep_preproess,
     silu_and_mul_triton_kernel,
 )
-from vllm.model_executor.layers.fused_moe import FusedMoE, FusedMoEMethodBase
+from vllm.model_executor.layers.fused_moe import FusedMoE, FusedMoEMethodBase, FusedMoeWeightScaleSupported, FusedMoEMethodBase
 # from sglang.srt.layers.quantization.base_config import (
 #     QuantizationConfig,
 #     QuantizeMethodBase,
@@ -626,7 +626,6 @@ class EPMoE(torch.nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, router_logits: torch.Tensor):
         assert self.quant_method is not None
-
         if _is_hip and envs.VLLM_USE_CK_MOE:
             # Matrix multiply.
             final_hidden_states = self.quant_method.apply(
@@ -656,7 +655,8 @@ class EPMoE(torch.nn.Module):
             renormalize=self.renormalize,
             topk_group=self.topk_group,
             num_expert_group=self.num_expert_group,
-            correction_bias=self.correction_bias,
+            # correction_bias=self.correction_bias,
+            e_score_correction_bias=self.correction_bias,
             custom_routing_function=self.custom_routing_function,
         )
 
