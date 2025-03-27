@@ -142,11 +142,13 @@ class DeepseekV2MoE(nn.Module):
             prefix=f"{prefix}.experts",
             scoring_func=config.scoring_func,
             e_score_correction_bias=self.gate.e_score_correction_bias,
-            num_shared_experts=config.n_shared_experts,
+            num_shared_experts=(
+                config.n_shared_experts if envs.VLLM_USE_CK_MOE and is_hip else 0
+            ),
             routed_scaling_factor=self.routed_scaling_factor,
         )
 
-        if config.n_shared_experts is not None:
+        if config.n_shared_experts is not None and not envs.VLLM_USE_CK_MOE:
             intermediate_size = (config.moe_intermediate_size *
                                  config.n_shared_experts)
             self.shared_experts = DeepseekV2MLP(
@@ -155,6 +157,7 @@ class DeepseekV2MoE(nn.Module):
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
                 reduce_results=False,
+                prefix=f"{prefix}.shared_experts",
             )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -741,12 +744,17 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
         # Params for weights, fp8 weight scales, fp8 activation scales
         # (param_name, weight_name, expert_id, shard_id)
-        expert_params_mapping = FusedMoE.make_expert_params_mapping(
+        MoEImpl = EPMoE if is_hip and envs.VLLM_USE_AITER_EP_MOE else FusedMoE
+        expert_params_mapping = MoEImpl.make_expert_params_mapping(
             ckpt_gate_proj_name="gate_proj",
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="up_proj",
             num_experts=self.config.n_routed_experts,
-            num_shared_experts=self.config.n_shared_experts,
+            num_shared_experts=(
+                self.config.n_shared_experts
+                if envs.VLLM_USE_CK_MOE and is_hip
+                else 0
+            ),
         )
 
         params_dict = dict(self.named_parameters())
