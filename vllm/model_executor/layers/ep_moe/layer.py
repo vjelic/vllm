@@ -476,7 +476,7 @@ class Fp8EPMoEMethod(Fp8MoEMethod):
             token = x.shape[0]
             biased_grouped_topk(
                 router_logits,
-                layer.correction_bias,
+                layer.e_score_correction_bias,
                 layer.ns_topk_weights[:token],
                 layer.ns_topk_ids[:token],
                 num_expert_group,
@@ -542,13 +542,10 @@ class EPMoE(torch.nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         tp_size: Optional[int] = None,
         prefix: str = "",
-        correction_bias: Optional[torch.Tensor] = None,
         custom_routing_function: Optional[Callable] = None,
         activation: str = "silu",
         num_shared_experts: Optional[int] = 0,
         routed_scaling_factor: Optional[float] = 1.0,
-        
-
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
     ):
@@ -578,7 +575,7 @@ class EPMoE(torch.nn.Module):
             assert num_expert_group is not None and topk_group is not None
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
-        self.correction_bias = correction_bias
+        self.e_score_correction_bias = e_score_correction_bias
         self.custom_routing_function = custom_routing_function
         self.activation = activation
 
@@ -655,8 +652,7 @@ class EPMoE(torch.nn.Module):
             renormalize=self.renormalize,
             topk_group=self.topk_group,
             num_expert_group=self.num_expert_group,
-            # correction_bias=self.correction_bias,
-            e_score_correction_bias=self.correction_bias,
+            e_score_correction_bias=self.e_score_correction_bias,
             custom_routing_function=self.custom_routing_function,
         )
 
@@ -809,6 +805,7 @@ class EPMoE(torch.nn.Module):
             hidden_states.size(1),
             BLOCK_SIZE=512,
         )
+
         return output
 
     @classmethod
