@@ -82,6 +82,13 @@ struct packed_t {
   using A = array_t<float, 16 / sizeof(T)>;
 };
 
+// CHAI: custom bfloat16.
+template<>
+struct packed_t<__nv_bfloat16> {
+  using P = array_t<__nv_bfloat16, 8>;
+  using A = array_t<float, 8>;
+}
+
 #define DINLINE __device__ __forceinline__
 
 // scalar cast functions
@@ -293,6 +300,17 @@ DINLINE P packed_reduce(const P* ptrs[], int idx) {
   return downcast<P>(tmp);
 }
 
+//DINLINE nv_bfloat16 packed_reduce(const nv_bfloat16* ptrs[], int idx) {
+//  A tmp = {};
+//#pragma unroll
+//  for (int i=0; i < ngpus; i++) {
+//    A up = upcast(ptrs[i][idx]);
+//    packed_assign_add(tmp, up);
+//  }
+//
+//  return downcast<P>(tmp);
+//}
+
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_1stage(RankData* _dp, RankSignals sg, Signal* self_sg,
@@ -316,6 +334,55 @@ DINLINE P* get_tmp_buf(Signal* sg) {
   return (P*)(((Signal*)sg) + 1);
 }
 
+//template <typename T, int ngpus>
+//__global__ void __launch_bounds__(512, 1)
+//    cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
+//                               T* __restrict__ result, int rank, int size) {
+//  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+//  int stride = gridDim.x * blockDim.x;
+//  using P = typename packed_t<T>::P;
+//  using A = typename packed_t<T>::A;
+//
+//  int part = size / ngpus;
+//  int start = rank * part;
+//  int end = rank == ngpus - 1 ? size : start + part;
+//  int largest_part = part + size % ngpus;
+//  const P* ptrs[ngpus];
+//  P* tmps[ngpus];
+//#pragma unroll
+//  for (int i = 0; i < ngpus; i++) {
+//    int target = (rank + i) % ngpus;
+//    ptrs[i] = (const P*)_dp->ptrs[target];
+//    tmps[i] = get_tmp_buf<P>(sg.signals[target]);
+//  }
+//  auto tmp_out = tmps[0];
+//  barrier_at_start<ngpus>(sg, self_sg, rank);
+//
+//  // stage 1: reduce scatter
+//  for (int idx = start + tid; idx < end; idx += stride) {
+//    tmp_out[idx - start] = packed_reduce<P, ngpus, A>(ptrs, idx);
+//  }
+//  barrier_at_end<ngpus>(sg, self_sg, rank);
+//
+//  // stage 2: allgather. Note: it's important to match the tid between
+//  // the two stages, because visibility across devices is only guaranteed
+//  // between threads that have the same tid. If thread i computes the sum of
+//  // start + i in the first stage, then thread i also gathers start + i from
+//  // all ranks.
+//
+//  for (int idx = tid; idx < largest_part; idx += stride) {
+//#pragma unroll
+//    for (int i = 0; i < ngpus; i++) {
+//      int gather_from_rank = ((rank + i) % ngpus);
+//      if (gather_from_rank == ngpus - 1 || idx < part) {
+//        int dst_idx = gather_from_rank * part + idx;
+//        ((P*)result)[dst_idx] = tmps[i][idx];
+//      }
+//    }
+//  }
+//}
+
+
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1)
     cross_device_reduce_2stage(RankData* _dp, RankSignals sg, Signal* self_sg,
@@ -324,6 +391,7 @@ __global__ void __launch_bounds__(512, 1)
   int stride = gridDim.x * blockDim.x;
   using P = typename packed_t<T>::P;
   using A = typename packed_t<T>::A;
+
   int part = size / ngpus;
   int start = rank * part;
   int end = rank == ngpus - 1 ? size : start + part;
@@ -336,7 +404,7 @@ __global__ void __launch_bounds__(512, 1)
     ptrs[i] = (const P*)_dp->ptrs[target];
     tmps[i] = get_tmp_buf<P>(sg.signals[target]);
   }
-  auto tmp_out = tmps[0];
+  P* tmp_out = tmps[0];
   barrier_at_start<ngpus>(sg, self_sg, rank);
 
   // stage 1: reduce scatter
@@ -351,14 +419,25 @@ __global__ void __launch_bounds__(512, 1)
   // start + i in the first stage, then thread i also gathers start + i from
   // all ranks.
 
+  //for (int idx = tid; idx < largest_part; idx += stride) {
+//#pragma unroll
+  //  for (int i = 0; i < ngpus; i++) {
+  //    int gather_from_rank = ((rank + i) % ngpus);
+  //    if (gather_from_rank == ngpus - 1 || idx < part) {
+  //      int dst_idx = gather_from_rank * part + idx;
+  //      ((P*)result)[dst_idx] = tmps[i][idx];
+  //    }
+  //  }
+  //}
   for (int idx = tid; idx < largest_part; idx += stride) {
-#pragma unroll
-    for (int i = 0; i < ngpus; i++) {
-      int gather_from_rank = ((rank + i) % ngpus);
-      if (gather_from_rank == ngpus - 1 || idx < part) {
-        int dst_idx = gather_from_rank * part + idx;
-        ((P*)result)[dst_idx] = tmps[i][idx];
-      }
+    #pragma unroll
+    for (int i=0; i < ngpus; ++i) {
+        int gather_from_rank = ((rank + i) % ngpus);
+        bool valid = (gather_from_rank == ngpus - 1) ? (idx < end - start) : (idx < part);
+        if (valid) {
+            int dst_idx = gather_from_rank * part + idx;
+            reinterpret_cast<P*>(result)[dst_idx] = tmps[i][idx];
+        }
     }
   }
 }
