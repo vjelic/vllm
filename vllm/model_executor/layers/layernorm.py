@@ -49,22 +49,29 @@ def rocm_aiter_rms_norm(x: torch.Tensor, weight: torch.Tensor,
     return rocm_aiter.rms_norm(x, weight, variance_epsilon)
 
 
+@torch.library.custom_op("aiter::rmsnorm2d_fwd_with_add", mutates_args={})
 def rocm_aiter_fused_add_rms_norm(
-        x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
+        input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
         variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
-
+ 
     import aiter as rocm_aiter
-
-    # Assuming the correct signature for rmsnorm2d_fwd_with_add
+    residual_out = torch.empty_like(residual_in)
+    output = torch.empty_like(input)
     rocm_aiter.rmsnorm2d_fwd_with_add(
-        x,  # output
-        x,  # input
-        residual,  # residual input
-        residual,  # residual output
+        output,  # output
+        input,  # input
+        residual_in,  # residual input
+        residual_out,  # residual output
         weight,
         variance_epsilon,
     )
-    return x, residual
+ 
+    return output, residual_out
+ 
+@rocm_aiter_fused_add_rms_norm.register_fake
+def _(input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
+        variance_epsilon: float):
+    return input.clone(), residual_in.clone()
 
 
 def dispatch_cuda_rmsnorm_func(add_residual: bool):
