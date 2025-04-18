@@ -8,6 +8,7 @@ import torch.nn as nn
 import vllm.envs as envs
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
+import functools
 
 
 def is_rocm_aiter_rmsnorm_enabled() -> bool:
@@ -49,8 +50,9 @@ def rocm_aiter_rms_norm(x: torch.Tensor, weight: torch.Tensor,
     return rocm_aiter.rms_norm(x, weight, variance_epsilon)
 
 
-@torch.library.custom_op("aiter::rmsnorm2d_fwd_with_add", mutates_args={})
+@torch.library.custom_op("aiter::rmsnorm2d_fwd_with_add", mutates_args={}, device_types="cuda")
 def rocm_aiter_fused_add_rms_norm(
+        device: torch.device,
         input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
         variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
  
@@ -69,7 +71,7 @@ def rocm_aiter_fused_add_rms_norm(
     return output, residual_out
  
 @rocm_aiter_fused_add_rms_norm.register_fake
-def _(input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
+def _(device: torch.device, input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
         variance_epsilon: float):
     return input.clone(), residual_in.clone()
 
@@ -77,7 +79,7 @@ def _(input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
 def dispatch_cuda_rmsnorm_func(add_residual: bool):
     if add_residual:
         if is_rocm_aiter_rmsnorm_enabled():
-            return rocm_aiter_fused_add_rms_norm
+            return functools.partial(rocm_aiter_fused_add_rms_norm, torch.device("cuda"))
         return fused_add_rms_norm
 
     if is_rocm_aiter_rmsnorm_enabled():
