@@ -85,8 +85,8 @@ if current_platform.is_rocm():
         value_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
     ) -> None:   
         aiter.reshape_and_cache_flash(
             key,
