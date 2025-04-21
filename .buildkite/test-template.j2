@@ -20,6 +20,7 @@ steps:
           limit: 5
     agents:
       queue: amd-cpu
+    soft_fail: false
 
 {% for step in steps %}
 {% if step.mirror_hardwares and "amd" in step.mirror_hardwares %}
@@ -41,6 +42,6 @@ steps:
     env:
       DOCKER_BUILDKIT: "1"
     priority: 100
-    soft_fail: true
+    soft_fail: false
 {% endif %}
 {% endfor %}
