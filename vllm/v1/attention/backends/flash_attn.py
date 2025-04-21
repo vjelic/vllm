@@ -25,10 +25,10 @@ if TYPE_CHECKING:
 if current_platform.is_cuda():
     from vllm.vllm_flash_attn import flash_attn_varlen_func
 if current_platform.is_rocm():
+    from vllm.utils import direct_register_custom_op
     import aiter
-    @torch.library.custom_op("aiter::flash_attn_varlen_func", mutates_args={}, device_types="cuda")
-    def flash_attn_varlen_func(
-        device: torch.device,
+
+    def _flash_attn_varlen_func(
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
@@ -60,8 +60,7 @@ if current_platform.is_rocm():
         )
         return output
     
-    @flash_attn_varlen_func.register_fake
-    def _(device: torch.device,
+    def flash_attn_varlen_func_fake(
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
@@ -76,9 +75,14 @@ if current_platform.is_rocm():
         output = torch.empty(q.shape[0], q.shape[1], v.shape[2])
         return output
     
-    @torch.library.custom_op("aiter::reshape_and_cache_flash", mutates_args={"key_cache", "value_cache"}, device_types="cuda")
-    def reshape_and_cache_flash(
-        device: torch.device,
+    try:
+        direct_register_custom_op("flash_attn_varlen_func", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
+        flash_attn_varlen_func = torch.ops.vllm.flash_attn_varlen_func
+
+    except AttributeError:
+        flash_attn_varlen_func = _flash_attn_varlen_func
+    
+    def _reshape_and_cache_flash(
         key: torch.Tensor,
         value: torch.Tensor,
         key_cache: torch.Tensor,
@@ -98,6 +102,13 @@ if current_platform.is_rocm():
             k_scale,
             v_scale,
         )
+
+    try:
+        direct_register_custom_op("reshape_and_cache_flash", _reshape_and_cache_flash, ["key_cache", "value_cache"])
+        reshape_and_cache_flash = torch.ops.vllm.reshape_and_cache_flash
+
+    except AttributeError:
+        reshape_and_cache_flash = _reshape_and_cache_flash
 
 logger = init_logger(__name__)
 
@@ -535,7 +546,6 @@ class FlashAttentionImpl(AttentionImpl):
 
         if current_platform.is_rocm():
             reshape_and_cache_flash(
-                torch.device("cuda"),
                 key,
                 value,
                 key_cache,
@@ -589,7 +599,6 @@ class FlashAttentionImpl(AttentionImpl):
             
             if current_platform.is_rocm():
                 output[:num_actual_tokens] = flash_attn_varlen_func(
-                    torch.device("cuda"),
                     q=query[:num_actual_tokens],
                     k=key_cache,
                     v=value_cache,
