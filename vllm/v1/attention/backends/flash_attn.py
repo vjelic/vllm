@@ -41,7 +41,7 @@ if current_platform.is_rocm():
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor
     ) -> torch.Tensor:
-        output, _, _ = aiter.flash_attn_varlen_func(
+        outputs = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
             v=v,
@@ -56,9 +56,8 @@ if current_platform.is_rocm():
             window_size=tuple(window_size),
             block_table=block_table,
             return_lse=True,
-            return_attn_probs=True,
         )
-        return output
+        return outputs[0]
     
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
