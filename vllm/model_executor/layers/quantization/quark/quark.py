@@ -74,7 +74,6 @@ class QuarkConfig(QuantizationConfig):
         # TODO: mixtral defined in mixtral_quant.py does not use FusedMoE, so probably
         # `QuarkMoEMethod` was never actually used?
         if isinstance(layer, FusedMoE):
-            print("CALL QuarkMoEMethod.get_moe_method")
             return QuarkMoEMethod.get_moe_method(self,
                                                  module=layer,
                                                  layer_name=prefix)

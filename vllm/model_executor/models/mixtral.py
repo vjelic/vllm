@@ -76,8 +76,6 @@ class MixtralMoE(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
 
-        print("quant_config", quant_config)
-
         # Gate always runs at half / full precision for now.
 
         self.gate = ReplicatedLinear(hidden_size,
@@ -123,7 +121,6 @@ class MixtralAttention(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
     ) -> None:
-        print("quant_config", quant_config)
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()

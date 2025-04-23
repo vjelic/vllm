@@ -38,8 +38,6 @@ class QuarkMoEMethod(FusedMoEMethodBase):
         weight_config = layer_quant_config.get("weight")
         input_config = layer_quant_config.get("input_tensors")
 
-        print("quant_config._is_mx_fp4(weight_config, input_config)", quant_config._is_mx_fp4(weight_config, input_config))
-
         if quant_config._is_fp8_w8a8(weight_config, input_config):
             return QuarkW8A8Fp8MoEMethod(weight_config, input_config)
         elif quant_config._is_mx_fp4(weight_config, input_config):
@@ -280,7 +278,6 @@ class QuarkW4A4MXFp4MoEMethod(QuarkMoEMethod):
 
         print("set w13_weight", w13_weight.shape, w13_weight.dtype)
 
-        # set_weight_attrs(w13_weight, {"is_transposed": True})
         set_weight_attrs(w13_weight, extra_weight_attrs)
 
         w2_weight = torch.nn.Parameter(torch.empty(
@@ -293,12 +290,9 @@ class QuarkW4A4MXFp4MoEMethod(QuarkMoEMethod):
 
         print("set w2_weight", w2_weight.shape, w2_weight.dtype)
 
-        # set_weight_attrs(w2_weight, {"is_transposed": True})
         set_weight_attrs(w2_weight, extra_weight_attrs)
 
         # WEIGHT_SCALES
-        # Allocate 2 scales for w1 and w3 respectively.
-        # They will be combined to a single scale after weight loading.
         w13_weight_scale = torch.nn.Parameter(
             torch.ones(
                 num_experts,
@@ -326,8 +320,52 @@ class QuarkW4A4MXFp4MoEMethod(QuarkMoEMethod):
         layer.register_parameter("w2_weight_scale", w2_weight_scale)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        raise NotImplementedError("Here")
+        float_dtype = torch.get_default_dtype()
 
+        try:
+            from quark.torch.export.nn.modules import realquantizer
+            from quark.torch.quantization.config.config import (
+                QuantizationSpec)
+        except ImportError as err:
+            raise ImportError(
+                "The package `amd-quark` is required to use AMD Quark "
+                "MX-FP4 models. Please install it with `pip install "
+                "amd-quark`.") from err
+
+        weight_quant_spec = QuantizationSpec.from_dict(self.weight_quant)
+
+        # Unpack and dequantize the weights (the operators are in high-precision, with simulated quantization).
+        w13_quantizer = realquantizer.get_real_quantizer(
+            qspec=weight_quant_spec,
+            quantizer=None,
+            real_quantized=True,
+            reorder=False,  # TODO: load from config
+            float_dtype=float_dtype,
+            scale_shape=layer.w13_weight_scale.shape,
+            zero_point_shape=None,
+        )
+        w13_quantizer.scale.data = layer.w13_weight_scale.data
+
+        layer.w13_weight = torch.nn.Parameter(
+            w13_quantizer(layer.w13_weight.data).to(float_dtype),
+            requires_grad=False,
+        )
+
+        w2_quantizer = realquantizer.get_real_quantizer(
+            qspec=weight_quant_spec,
+            quantizer=None,
+            real_quantized=True,
+            reorder=False,  # TODO: load from config
+            float_dtype=float_dtype,
+            scale_shape=layer.w2_weight_scale.shape,
+            zero_point_shape=None,
+        )
+        w2_quantizer.scale.data = layer.w2_weight_scale.data
+
+        layer.w2_weight = torch.nn.Parameter(
+            w2_quantizer(layer.w2_weight.data).to(float_dtype),
+            requires_grad=False,
+        )
 
     def apply(
         self,
@@ -348,8 +386,6 @@ class QuarkW4A4MXFp4MoEMethod(QuarkMoEMethod):
         activation: str = "silu",
     ) -> torch.Tensor:
         from vllm.model_executor.layers.fused_moe import fused_experts
-
-        print("call quark apply")
 
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -377,4 +413,5 @@ class QuarkW4A4MXFp4MoEMethod(QuarkMoEMethod):
             w1_scale=None,
             w2_scale=None,
             a1_scale=None,
-            a2_scale=None)
+            a2_scale=None,
+            block_shape=None)

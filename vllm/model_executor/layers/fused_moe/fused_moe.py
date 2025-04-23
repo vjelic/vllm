@@ -24,6 +24,8 @@ from vllm.model_executor.layers.quantization.utils.mxfp4_utils import per_token_
 from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
+from vllm.model_executor.layers.quantization.utils.mxfp4_utils import OCP_MX_BLOCK_SIZE
+
 from .rocm_aiter_fused_moe import (is_rocm_aiter_moe_enabled,
                                    rocm_aiter_fused_experts,
                                    rocm_aiter_topk_softmax)
@@ -1107,6 +1109,7 @@ def torch_vllm_outplace_fused_experts(**kwargs) -> torch.Tensor:
 
 def dispatch_fused_experts_func(inplace: bool) -> Callable[..., torch.Tensor]:
     if is_rocm_aiter_moe_enabled():
+        # TODO: support mxfp4 with aiter?
         return rocm_aiter_fused_experts
     if inplace:
         return torch_vllm_inplace_fused_experts
@@ -1168,6 +1171,7 @@ def fused_experts(hidden_states: torch.Tensor,
             use_int8_w8a8=use_int8_w8a8,
             use_int8_w8a16=use_int8_w8a16,
             use_int4_w4a16=use_int4_w4a16,
+            use_mxfp4_w4a4=use_mxfp4_w4a4,
             per_channel_quant=per_channel_quant,
             global_num_experts=global_num_experts,
             expert_map=expert_map,
@@ -1228,12 +1232,9 @@ def moe_kernel_prepare_input(
         assert B_scale is not None
         assert block_shape is None or block_shape[0] == 0
     elif use_mxfp4_w4a4:
-        # We assume B to be fake quantized.
-
-        assert len(block_shape) == 2
-        _, block_k = block_shape[0], block_shape[1]
-        print("block_k")
-        A, A_scale = per_token_group_quant_mxfp4(A, block_k)
+        # We assume B (the weight) to be fake quantized - so only handling the activation here.
+        assert block_shape is None
+        A, A_scale = per_token_group_quant_mxfp4(A, OCP_MX_BLOCK_SIZE)
 
     else:
         assert A_scale is None
@@ -1373,7 +1374,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
                                  global_num_experts, expert_map))
-
+        
         invoke_fused_moe_kernel(qcurr_hidden_states,
                                 w1,
                                 intermediate_cache1,
