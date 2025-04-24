@@ -527,6 +527,8 @@ class MLACommonMetadata(AttentionMetadata):
     context_chunk_max_seq_lens: Optional[List[int]] = None
     # Set by MLAAttentionState in `begin_forward` so it doesn't get broadcasted
     context_chunk_workspace: Optional[torch.Tensor] = None
+    
+    max_context_lens_tensor: int = None
 
     def __post_init__(self):
         supported_head_sizes = MLACommonBackend.get_supported_head_sizes()
@@ -564,7 +566,8 @@ class MLACommonMetadata(AttentionMetadata):
                         self.block_tables[:self.num_prefills])
         input_positions = (None if self.input_positions is None else
                            self.input_positions[:self.num_prefill_tokens])
-
+        max_context_lens_tensor = (None if self.context_lens_tensor is None else self.context_lens_tensor.max().item())
+        
         self._cached_prefill_metadata = self.__class__(
             # Required by ModelRunner
             use_cuda_graph=False,  # Not Attention Related
@@ -595,6 +598,7 @@ class MLACommonMetadata(AttentionMetadata):
             context_chunk_starts=self.context_chunk_starts,
             context_chunk_seq_tot=self.context_chunk_seq_tot,
             context_chunk_max_seq_lens=self.context_chunk_max_seq_lens,
+            max_context_lens_tensor = max_context_lens_tensor
         )
         return self._cached_prefill_metadata
 
@@ -923,7 +927,7 @@ class MLACommonMetadataBuilder(AttentionMetadataBuilder[T], Generic[T]):
                                                   self.runner.pin_memory)
         seq_start_loc_tensor = async_tensor_h2d(seq_start_loc, torch.int32,
                                                 device, self.runner.pin_memory)
-
+        
         context_chunk_cu_seq_lens = None
         context_chunk_starts = None
         context_chunk_seq_tot = None

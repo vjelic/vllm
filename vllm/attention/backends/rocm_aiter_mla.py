@@ -475,7 +475,7 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
         assert prefill_metadata is not None
 
         has_context = prefill_metadata.context_lens_tensor is not None \
-            and prefill_metadata.context_lens_tensor.max() > 0
+            and prefill_metadata.max_context_lens_tensor > 0
 
         kv_nope = self.kv_b_proj(kv_c_normed)[0].view(\
             -1, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
@@ -510,6 +510,8 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
                 suffix_output=suffix_output,
                 suffix_lse=suffix_lse,
             )
+        else:
+            output = output[0]
 
         output = output.reshape(-1, self.num_heads * v.shape[-1])
 
