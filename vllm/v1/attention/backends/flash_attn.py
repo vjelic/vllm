@@ -151,7 +151,7 @@ if current_platform.is_rocm():
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor) -> torch.Tensor:
-        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[2])
+        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[-1])
         return output
     
     try:
