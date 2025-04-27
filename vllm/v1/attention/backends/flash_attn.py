@@ -679,8 +679,8 @@ class FlashAttentionImpl(AttentionImpl):
             if current_platform.is_rocm():
                 output[:num_actual_tokens] = flash_attn_varlen_func(
                     q=query[:num_actual_tokens],
-                    k=key_cache,
-                    v=value_cache,
+                    key_cache=key_cache,
+                    value_cache=value_cache,
                     cu_seqlens_q=cu_seqlens_q,
                     max_seqlen_q=max_seqlen_q,
                     seqlens_k=seqused_k,
