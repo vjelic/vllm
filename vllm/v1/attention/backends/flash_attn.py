@@ -151,7 +151,7 @@ if current_platform.is_rocm():
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor) -> torch.Tensor:
-        output = torch.empty(q.shape[0], q.shape[1], v.shape[2])
+        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[2])
         return output
     
     try:
@@ -678,9 +678,9 @@ class FlashAttentionImpl(AttentionImpl):
             
             if current_platform.is_rocm():
                 output[:num_actual_tokens] = flash_attn_varlen_func(
-                    q=query[:num_actual_tokens],
-                    key_cache=key_cache,
-                    value_cache=value_cache,
+                    query[:num_actual_tokens],
+                    key_cache,
+                    value_cache,
                     cu_seqlens_q=cu_seqlens_q,
                     max_seqlen_q=max_seqlen_q,
                     seqlens_k=seqused_k,
