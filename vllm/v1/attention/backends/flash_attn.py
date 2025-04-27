@@ -141,8 +141,8 @@ if current_platform.is_rocm():
     
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
         cu_seqlens_q: torch.Tensor,
         seqlens_k: torch.Tensor,
         max_seqlen_q: int,
