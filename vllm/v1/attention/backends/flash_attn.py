@@ -62,7 +62,7 @@ if current_platform.is_rocm():
             tl.store(v_values_ptr + kv_values_off, v_vals, mask=block_mask)
 
 
-    def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer):
+    def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer, max_seq_len):
         H_KV = v_buffer.shape[2]
         D = v_buffer.shape[3]
         BLOCK_SIZE = v_buffer.shape[1]
@@ -72,7 +72,7 @@ if current_platform.is_rocm():
         k_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
         v_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
 
-        grid = (block_table.shape[0], block_table.shape[1])
+        grid = (block_table.shape[0], (max_seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE)
 
         _vllm_layout_trans_kernel[grid](
             k_buffer,
@@ -109,7 +109,7 @@ if current_platform.is_rocm():
                      dim=0,
                      dtype=cu_seqlens_k.dtype,
                      out=cu_seqlens_k[1:])
-        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache)
+        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
 
         outputs = aiter.flash_attn_varlen_func(
             q=q,
