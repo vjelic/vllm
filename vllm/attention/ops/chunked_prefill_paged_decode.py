@@ -237,7 +237,7 @@ def chunked_prefill_paged_decode(
         sliding_window = 0
 
     if max_query_len > 1:
-        context_attention_fwd(
+        return context_attention_fwd(
             q=query,
             k=key,
             v=value,
