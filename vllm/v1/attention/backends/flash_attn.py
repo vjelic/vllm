@@ -39,9 +39,7 @@ if current_platform.is_rocm():
         b_seq_lens_loc,
         block_table,
         block_table_stride_0, 
-        X: tl.constexpr, 
-        H_KV: tl.constexpr, 
-        D: tl.constexpr, 
+        E_DIM: tl.constexpr, 
         BLOCK_SIZE: tl.constexpr, 
     ):
         batch_idx = tl.program_id(0)
@@ -49,39 +47,33 @@ if current_platform.is_rocm():
         batch_token_indexes = tl.load(b_seq_lens_loc + batch_idx + tl.arange(0, 2))
         batch_token_start, batch_token_end = tl.split(batch_token_indexes)
         seq_len = batch_token_end - batch_token_start
-
-        DIM0: tl.constexpr = H_KV * D // X
-        DIM1: tl.constexpr = X * BLOCK_SIZE
-        E_DIM: tl.constexpr = H_KV * D
         if block_idx * BLOCK_SIZE < seq_len:
-            k_block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :, None]) < seq_len
-            v_block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]) < seq_len
-
-            kv_idx = tl.load(block_table + batch_idx * block_table_stride_0 + block_idx)
-        
-            k_buffer_off = kv_idx * BLOCK_SIZE * E_DIM+ tl.arange(0, DIM0)[:, None, None] * DIM1 + tl.arange(0, BLOCK_SIZE)[None, :, None] * X + tl.arange(0, X)[None, None, :]
-            v_buffer_off = kv_idx * BLOCK_SIZE * E_DIM + tl.arange(0, E_DIM)[:, None] * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]
-            k_vals = tl.load(k_buffer_ptr + k_buffer_off, mask=k_block_mask, other=0.0)
-            v_vals = tl.load(v_buffer_ptr + v_buffer_off, mask=v_block_mask, other=0.0)
-            k_vals = k_vals.trans(0, 2, 1).view(E_DIM, BLOCK_SIZE)
+            # print("block_idx", block_idx)
             block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[:, None]) < seq_len
 
+            kv_idx = tl.load(block_table + batch_idx * block_table_stride_0 + block_idx)
+
+            kv_buffer_off = kv_idx * BLOCK_SIZE * E_DIM + tl.arange(0, BLOCK_SIZE)[:, None] * E_DIM + tl.arange(0, E_DIM)[None, :]
+            k_vals = tl.load(k_buffer_ptr + kv_buffer_off, mask=block_mask, other=0.0)
+            v_vals = tl.load(v_buffer_ptr + kv_buffer_off, mask=block_mask, other=0.0)
+            
             kv_values_off = batch_token_start * E_DIM + block_idx * BLOCK_SIZE * E_DIM + tl.arange(0, BLOCK_SIZE)[:, None] * E_DIM + tl.arange(0, E_DIM)[None, :]
-            tl.store(k_values_ptr + kv_values_off, k_vals.T, mask=block_mask)
-            tl.store(v_values_ptr + kv_values_off, v_vals.T, mask=block_mask)
+            tl.store(k_values_ptr + kv_values_off, k_vals, mask=block_mask)
+            tl.store(v_values_ptr + kv_values_off, v_vals, mask=block_mask)
 
 
     def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer):
-        H_KV = v_buffer.shape[1]
-        D = v_buffer.shape[2]
-        BLOCK_SIZE = v_buffer.shape[3]
-        X = k_buffer.shape[-1]
+        H_KV = v_buffer.shape[2]
+        D = v_buffer.shape[3]
+        BLOCK_SIZE = v_buffer.shape[1]
         dtype = k_buffer.dtype
-
+        # k_buffer = k_buffer.permute(0, 1, 2, 4, 3).reshape(v_buffer.shape).contiguous()
+        # v_buffer = v_buffer.permute(0, 3, 1, 2).reshape(-1, BLOCK_SIZE, H_KV, D).contiguous()
         k_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
         v_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
 
         grid = (block_table.shape[0], block_table.shape[1])
+
         _vllm_layout_trans_kernel[grid](
             k_buffer,
             v_buffer,
@@ -90,12 +82,8 @@ if current_platform.is_rocm():
             b_seq_lens_loc,
             block_table,
             block_table.stride(0),
-            X=X,
-            H_KV=H_KV,
-            D=D,
-            BLOCK_SIZE=BLOCK_SIZE,
-            num_stages=1,
-            num_warps=4,
+            E_DIM=H_KV * D,
+            BLOCK_SIZE=BLOCK_SIZE
         )
 
         return k_values, v_values
