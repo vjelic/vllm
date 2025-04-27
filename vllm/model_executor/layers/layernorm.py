@@ -70,7 +70,7 @@ def _rocm_aiter_fused_add_rms_norm(
  
 
 def rocm_aiter_fused_add_rms_norm_fake(input: torch.Tensor, residual_in: torch.Tensor, weight: torch.Tensor,
-        variance_epsilon: float):
+        variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
     return input.clone(), residual_in.clone()
 
 try:
