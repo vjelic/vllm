@@ -236,6 +236,7 @@ class FlashAttentionMetadata:
     max_seq_len: int
     seq_lens: torch.Tensor
     cu_seq_lens: torch.Tensor
+    total_tokens: int
     block_table: torch.Tensor
     slot_mapping: torch.Tensor
 
@@ -444,6 +445,7 @@ class FlashAttentionMetadataBuilder:
                                                  dtype=torch.int32,
                                                  non_blocking=True)
         seq_lens_cpu = self.runner.seq_lens_cpu[:num_reqs]
+        total_tokens = torch.sum(seq_lens_cpu).item()
         seq_lens = seq_lens_cpu.to(self.runner.device, non_blocking=True)
         block_table = (
             self.runner.input_batch.block_table.get_device_tensor()[:num_reqs])
@@ -502,6 +504,7 @@ class FlashAttentionMetadataBuilder:
             max_seq_len=max_seq_len,
             seq_lens=seq_lens,
             cu_seq_lens=cu_seq_lens,
+            total_tokens=total_tokens,
             block_table=block_table,
             slot_mapping=slot_mapping,
             use_cascade=use_cascade,

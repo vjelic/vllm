@@ -63,15 +63,15 @@ if current_platform.is_rocm():
             tl.store(v_values_ptr + kv_values_off, v_vals.T, mask=block_mask)
 
 
-    def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer, max_seqlen):
+    def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer, max_seqlen, total_tokens):
         H_KV = v_buffer.shape[1]
         D = v_buffer.shape[2]
         BLOCK_SIZE = v_buffer.shape[3]
         X = k_buffer.shape[-1]
         dtype = k_buffer.dtype
 
-        k_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
-        v_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
+        k_values = torch.empty((total_tokens, H_KV, D), dtype=dtype, device="cuda")
+        v_values = torch.empty((total_tokens, H_KV, D), dtype=dtype, device="cuda")
 
         grid = (block_table.shape[0], (max_seqlen + BLOCK_SIZE - 1) // BLOCK_SIZE)
         # extra_kargs = {"waves_per_eu": 2, "matrix_instr_nonkdim": 16, "kpack": 2}
@@ -102,19 +102,13 @@ if current_platform.is_rocm():
         cu_seqlens_k: torch.Tensor,
         max_seqlen_q: int,
         max_seqlen_k: int,
+        total_tokens: int,
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor
     ) -> torch.Tensor:
-        # cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
-        #                             dtype=torch.int32,
-        #                             device="cuda")
-        # torch.cumsum(seqlens_k,
-        #                 dim=0,
-        #                 dtype=cu_seqlens_k.dtype,
-        #                 out=cu_seqlens_k[1:])
-        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
+        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k, total_tokens)
         outputs = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
@@ -139,6 +133,7 @@ if current_platform.is_rocm():
         cu_seqlens_k: torch.Tensor,
         max_seqlen_q: int,
         max_seqlen_k: int,
+        total_tokens: int,
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
@@ -358,6 +353,7 @@ def chunked_prefill_paged_decode(
     query_start_loc,
     seq_lens,
     cu_seq_lens,
+    total_tokens,
     max_seq_len,
     max_query_len,
     k_scale,
@@ -405,8 +401,9 @@ def chunked_prefill_paged_decode(
             cu_seqlens_k=cu_seq_lens,
             max_seqlen_q=max_query_len,
             max_seqlen_k=max_seq_len,
+            total_tokens=total_tokens,
             softmax_scale=sm_scale,
-            window_size=(-1,-1),
+            window_size=(-1, 0),
             alibi_slopes=alibi_slopes,
             block_table=block_table,
         )

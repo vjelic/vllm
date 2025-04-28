@@ -190,6 +190,7 @@ class TritonAttentionImpl(AttentionImpl):
                                      query_start_loc=cu_seqlens_q,
                                      seq_lens=sequesd_k,
                                      cu_seq_lens=cu_seq_lens,
+                                     total_tokens=attn_metadata.total_tokens,
                                      max_seq_len=max_seqlen_k,
                                      max_query_len=max_seqlen_q,
                                      k_scale=layer._k_scale,
