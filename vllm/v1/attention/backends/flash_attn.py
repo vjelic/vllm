@@ -143,8 +143,8 @@ if current_platform.is_rocm():
         return output
     
     try:
-        direct_register_custom_op("flash_attn_varlen_func", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
-        flash_attn_varlen_func = torch.ops.vllm.flash_attn_varlen_func
+        direct_register_custom_op("flash_attn_varlen_func2", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
+        flash_attn_varlen_func = torch.ops.vllm.flash_attn_varlen_func2
 
     except AttributeError:
         flash_attn_varlen_func = _flash_attn_varlen_func
