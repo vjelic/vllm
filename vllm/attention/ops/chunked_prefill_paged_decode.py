@@ -107,11 +107,6 @@ if current_platform.is_rocm():
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor
     ) -> torch.Tensor:
-        print("k_cache:", k_cache.shape)
-        print("v_cache:", v_cache.shape)
-        print("cu_seqlens_q:", cu_seqlens_q.shape)
-        print("seqlens_k:", seqlens_k.shape)
-        print("max_seqlen_q:", max_seqlen_q)
         cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
                                     dtype=torch.int32,
                                     device="cuda")
@@ -120,9 +115,6 @@ if current_platform.is_rocm():
                         dtype=cu_seqlens_k.dtype,
                         out=cu_seqlens_k[1:])
         k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
-        print("q:", q.shape)
-        print("k:", k.shape)
-        print("v:", v.shape)
         outputs = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
