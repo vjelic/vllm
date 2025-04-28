@@ -99,7 +99,7 @@ if current_platform.is_rocm():
         k_cache: torch.Tensor,
         v_cache: torch.Tensor,
         cu_seqlens_q: torch.Tensor,
-        seqlens_k: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
         max_seqlen_q: int,
         max_seqlen_k: int,
         softmax_scale:float,
@@ -107,13 +107,13 @@ if current_platform.is_rocm():
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor
     ) -> torch.Tensor:
-        cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
-                                    dtype=torch.int32,
-                                    device="cuda")
-        torch.cumsum(seqlens_k,
-                        dim=0,
-                        dtype=cu_seqlens_k.dtype,
-                        out=cu_seqlens_k[1:])
+        # cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
+        #                             dtype=torch.int32,
+        #                             device="cuda")
+        # torch.cumsum(seqlens_k,
+        #                 dim=0,
+        #                 dtype=cu_seqlens_k.dtype,
+        #                 out=cu_seqlens_k[1:])
         k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
         outputs = aiter.flash_attn_varlen_func(
             q=q,
@@ -136,7 +136,7 @@ if current_platform.is_rocm():
         k_cache: torch.Tensor,
         v_cache: torch.Tensor,
         cu_seqlens_q: torch.Tensor,
-        seqlens_k: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
         max_seqlen_q: int,
         max_seqlen_k: int,
         softmax_scale:float,
@@ -357,6 +357,7 @@ def chunked_prefill_paged_decode(
     block_table,
     query_start_loc,
     seq_lens,
+    cu_seq_lens,
     max_seq_len,
     max_query_len,
     k_scale,
@@ -401,7 +402,7 @@ def chunked_prefill_paged_decode(
             k_cache=key_cache,
             v_cache=value_cache,
             cu_seqlens_q=query_start_loc.to(torch.int32),
-            seqlens_k=seq_lens,
+            cu_seqlens_k=cu_seq_lens,
             max_seqlen_q=max_query_len,
             max_seqlen_k=max_seq_len,
             softmax_scale=sm_scale,

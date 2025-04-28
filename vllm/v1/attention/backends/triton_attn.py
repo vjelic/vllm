@@ -173,6 +173,7 @@ class TritonAttentionImpl(AttentionImpl):
         else:
             cu_seqlens_q = attn_metadata.query_start_loc
             sequesd_k = attn_metadata.seq_lens
+            cu_seq_lens = attn_metadata.cu_seq_lens
             max_seqlen_q = attn_metadata.max_query_len
             max_seqlen_k = attn_metadata.max_seq_len
             block_table = attn_metadata.block_table
@@ -188,6 +189,7 @@ class TritonAttentionImpl(AttentionImpl):
                                      block_table=block_table,
                                      query_start_loc=cu_seqlens_q,
                                      seq_lens=sequesd_k,
+                                     cu_seq_lens=cu_seq_lens,
                                      max_seq_len=max_seqlen_k,
                                      max_query_len=max_seqlen_q,
                                      k_scale=layer._k_scale,

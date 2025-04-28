@@ -54,7 +54,14 @@ class EagleProposer:
         # E.g., [b1, b2, c1, c2, c3, c3] -> [a2, b2, b3, c2, c3, c4]
         input_ids[last_token_indices] = next_token_ids
 
-        seq_lens = target_positions[last_token_indices] + 1
+        seq_lens = target_positions[seq_lens] + 1
+        cu_seq_lens = torch.zeros(seq_lens.shape[0] + 1,
+                                    dtype=torch.int32,
+                                    device="cuda")
+        torch.cumsum(seq_lens,
+                        dim=0,
+                        dtype=cu_seq_lens.dtype,
+                        out=cu_seq_lens[1:])
         # FIXME(woosuk): The below two ops cause synchronization. Optimize.
         max_seq_len = seq_lens.max().item()
         max_num_tokens = (cu_num_tokens[1:] - cu_num_tokens[:-1]).max().item()
@@ -66,6 +73,7 @@ class EagleProposer:
             seq_lens=seq_lens,
             block_table=block_table,
             slot_mapping=target_slot_mapping,
+            cu_seq_lens=cu_seq_lens,
             # TODO(woosuk): Support cascade attention.
             use_cascade=False,
             common_prefix_len=0,
