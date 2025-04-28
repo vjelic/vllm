@@ -17,6 +17,8 @@ from vllm.platforms.rocm import use_rocm_custom_paged_attention
 from .prefix_prefill import context_attention_fwd
 from vllm.platforms import current_platform
 
+import vllm.envs as envs
+
 if current_platform.is_rocm():
     from vllm.utils import direct_register_custom_op
     import aiter
@@ -372,42 +374,44 @@ def chunked_prefill_paged_decode(
         sliding_window = 0
 
     if max_query_len > 1:
-        # return context_attention_fwd(
-        #     q=query,
-        #     k=key,
-        #     v=value,
-        #     o=output,
-        #     kv_cache_dtype=kv_cache_dtype,
-        #     k_cache=key_cache,
-        #     v_cache=value_cache,
-        #     b_loc=block_table,
-        #     b_start_loc=query_start_loc,
-        #     b_seq_len=seq_lens,
-        #     max_seq_len=max_seq_len,
-        #     max_input_len=max_query_len,
-        #     k_scale=k_scale,
-        #     v_scale=v_scale,
-        #     alibi_slopes=alibi_slopes,
-        #     sliding_window=sliding_window,
-        #     sm_scale=sm_scale,
-        #     skip_decode=True,
-        #     fp8_out_scale=fp8_out_scale,
-        # )
-        output = flash_attn_varlen_func(
+        if envs.VLLM_ROCM_USE_AITER:
+            output = flash_attn_varlen_func(
+                q=query,
+                k_cache=key_cache,
+                v_cache=value_cache,
+                cu_seqlens_q=query_start_loc,
+                cu_seqlens_k=cu_seq_lens,
+                max_seqlen_q=max_query_len,
+                max_seqlen_k=max_seq_len,
+                total_tokens=total_tokens,
+                softmax_scale=sm_scale,
+                window_size=(-1, 0),
+                alibi_slopes=alibi_slopes,
+                block_table=block_table,
+            )
+            return 
+        return context_attention_fwd(
             q=query,
+            k=key,
+            v=value,
+            o=output,
+            kv_cache_dtype=kv_cache_dtype,
             k_cache=key_cache,
             v_cache=value_cache,
-            cu_seqlens_q=query_start_loc,
-            cu_seqlens_k=cu_seq_lens,
-            max_seqlen_q=max_query_len,
-            max_seqlen_k=max_seq_len,
-            total_tokens=total_tokens,
-            softmax_scale=sm_scale,
-            window_size=(-1, 0),
+            b_loc=block_table,
+            b_start_loc=query_start_loc,
+            b_seq_len=seq_lens,
+            max_seq_len=max_seq_len,
+            max_input_len=max_query_len,
+            k_scale=k_scale,
+            v_scale=v_scale,
             alibi_slopes=alibi_slopes,
-            block_table=block_table,
+            sliding_window=sliding_window,
+            sm_scale=sm_scale,
+            skip_decode=True,
+            fp8_out_scale=fp8_out_scale,
         )
-        return 
+
 
     block_size = value_cache.shape[3]
     num_seqs = len(seq_lens)
