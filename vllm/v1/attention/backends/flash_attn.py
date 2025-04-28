@@ -441,6 +441,7 @@ class FlashAttentionMetadataBuilder:
         max_seq_len = self.runner.seq_lens_np[:num_reqs].max()
         query_start_loc_cpu = self.runner.query_start_loc_cpu[:num_reqs + 1]
         query_start_loc = query_start_loc_cpu.to(self.runner.device,
+                                                 dtype=torch.int32,
                                                  non_blocking=True)
         seq_lens_cpu = self.runner.seq_lens_cpu[:num_reqs]
         seq_lens = seq_lens_cpu.to(self.runner.device, non_blocking=True)
@@ -448,7 +449,13 @@ class FlashAttentionMetadataBuilder:
             self.runner.input_batch.block_table.get_device_tensor()[:num_reqs])
         slot_mapping = self.runner.slot_mapping_cpu[:num_actual_tokens].to(
             self.runner.device, non_blocking=True).long()
-
+        cu_seq_lens = torch.zeros(seq_lens.shape[0] + 1,
+                                    dtype=torch.int32,
+                                    device="cuda")
+        torch.cumsum(seq_lens,
+                        dim=0,
+                        dtype=cu_seq_lens.dtype,
+                        out=cu_seq_lens[1:])
         # for local attention
         local_attn_metadata = None
         if self.runner.attention_chunk_size is not None:
@@ -494,6 +501,7 @@ class FlashAttentionMetadataBuilder:
             query_start_loc=query_start_loc,
             max_seq_len=max_seq_len,
             seq_lens=seq_lens,
+            cu_seq_lens=cu_seq_lens,
             block_table=block_table,
             slot_mapping=slot_mapping,
             use_cascade=use_cascade,

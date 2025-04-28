@@ -401,7 +401,7 @@ def chunked_prefill_paged_decode(
             q=query,
             k_cache=key_cache,
             v_cache=value_cache,
-            cu_seqlens_q=query_start_loc.to(torch.int32),
+            cu_seqlens_q=query_start_loc,
             cu_seqlens_k=cu_seq_lens,
             max_seqlen_q=max_query_len,
             max_seqlen_k=max_seq_len,
