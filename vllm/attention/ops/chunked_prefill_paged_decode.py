@@ -63,20 +63,12 @@ if current_platform.is_rocm():
             tl.store(v_values_ptr + kv_values_off, v_vals.T, mask=block_mask)
 
 
-    def vllm_layout_trans(seq_lens, block_table, k_buffer, v_buffer, max_seqlen):
+    def vllm_layout_trans(b_seq_lens_loc, block_table, k_buffer, v_buffer, max_seqlen):
         H_KV = v_buffer.shape[1]
         D = v_buffer.shape[2]
         BLOCK_SIZE = v_buffer.shape[3]
         X = k_buffer.shape[-1]
         dtype = k_buffer.dtype
-
-        b_seq_lens_loc = torch.zeros(seq_lens.shape[0] + 1,
-                                    dtype=torch.int32,
-                                    device="cuda")
-        torch.cumsum(seq_lens,
-                    dim=0,
-                    dtype=b_seq_lens_loc.dtype,
-                    out=b_seq_lens_loc[1:])
 
         k_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
         v_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
@@ -391,41 +383,41 @@ def chunked_prefill_paged_decode(
         sliding_window = 0
 
     if max_query_len > 1:
-        return context_attention_fwd(
-            q=query,
-            k=key,
-            v=value,
-            o=output,
-            kv_cache_dtype=kv_cache_dtype,
-            k_cache=key_cache,
-            v_cache=value_cache,
-            b_loc=block_table,
-            b_start_loc=query_start_loc,
-            b_seq_len=seq_lens,
-            max_seq_len=max_seq_len,
-            max_input_len=max_query_len,
-            k_scale=k_scale,
-            v_scale=v_scale,
-            alibi_slopes=alibi_slopes,
-            sliding_window=sliding_window,
-            sm_scale=sm_scale,
-            skip_decode=True,
-            fp8_out_scale=fp8_out_scale,
-        )
-        # output = flash_attn_varlen_func(
+        # return context_attention_fwd(
         #     q=query,
+        #     k=key,
+        #     v=value,
+        #     o=output,
+        #     kv_cache_dtype=kv_cache_dtype,
         #     k_cache=key_cache,
         #     v_cache=value_cache,
-        #     cu_seqlens_q=query_start_loc.to(torch.int32),
-        #     seqlens_k=seq_lens,
-        #     max_seqlen_q=max_query_len,
-        #     max_seqlen_k=max_seq_len,
-        #     softmax_scale=sm_scale,
-        #     window_size=(-1,-1),
+        #     b_loc=block_table,
+        #     b_start_loc=query_start_loc,
+        #     b_seq_len=seq_lens,
+        #     max_seq_len=max_seq_len,
+        #     max_input_len=max_query_len,
+        #     k_scale=k_scale,
+        #     v_scale=v_scale,
         #     alibi_slopes=alibi_slopes,
-        #     block_table=block_table,
+        #     sliding_window=sliding_window,
+        #     sm_scale=sm_scale,
+        #     skip_decode=True,
+        #     fp8_out_scale=fp8_out_scale,
         # )
-        # return 
+        output = flash_attn_varlen_func(
+            q=query,
+            k_cache=key_cache,
+            v_cache=value_cache,
+            cu_seqlens_q=query_start_loc.to(torch.int32),
+            seqlens_k=seq_lens,
+            max_seqlen_q=max_query_len,
+            max_seqlen_k=max_seq_len,
+            softmax_scale=sm_scale,
+            window_size=(-1,-1),
+            alibi_slopes=alibi_slopes,
+            block_table=block_table,
+        )
+        return 
 
     block_size = value_cache.shape[3]
     num_seqs = len(seq_lens)
