@@ -391,41 +391,41 @@ def chunked_prefill_paged_decode(
         sliding_window = 0
 
     if max_query_len > 1:
-        # return context_attention_fwd(
-        #     q=query,
-        #     k=key,
-        #     v=value,
-        #     o=output,
-        #     kv_cache_dtype=kv_cache_dtype,
-        #     k_cache=key_cache,
-        #     v_cache=value_cache,
-        #     b_loc=block_table,
-        #     b_start_loc=query_start_loc,
-        #     b_seq_len=seq_lens,
-        #     max_seq_len=max_seq_len,
-        #     max_input_len=max_query_len,
-        #     k_scale=k_scale,
-        #     v_scale=v_scale,
-        #     alibi_slopes=alibi_slopes,
-        #     sliding_window=sliding_window,
-        #     sm_scale=sm_scale,
-        #     skip_decode=True,
-        #     fp8_out_scale=fp8_out_scale,
-        # )
-        output = flash_attn_varlen_func(
+        return context_attention_fwd(
             q=query,
+            k=key,
+            v=value,
+            o=output,
+            kv_cache_dtype=kv_cache_dtype,
             k_cache=key_cache,
             v_cache=value_cache,
-            cu_seqlens_q=query_start_loc.to(torch.int32),
-            seqlens_k=seq_lens,
-            max_seqlen_q=max_query_len,
-            max_seqlen_k=max_seq_len,
-            softmax_scale=sm_scale,
-            window_size=(-1,-1),
+            b_loc=block_table,
+            b_start_loc=query_start_loc,
+            b_seq_len=seq_lens,
+            max_seq_len=max_seq_len,
+            max_input_len=max_query_len,
+            k_scale=k_scale,
+            v_scale=v_scale,
             alibi_slopes=alibi_slopes,
-            block_table=block_table,
+            sliding_window=sliding_window,
+            sm_scale=sm_scale,
+            skip_decode=True,
+            fp8_out_scale=fp8_out_scale,
         )
-        return 
+        # output = flash_attn_varlen_func(
+        #     q=query,
+        #     k_cache=key_cache,
+        #     v_cache=value_cache,
+        #     cu_seqlens_q=query_start_loc.to(torch.int32),
+        #     seqlens_k=seq_lens,
+        #     max_seqlen_q=max_query_len,
+        #     max_seqlen_k=max_seq_len,
+        #     softmax_scale=sm_scale,
+        #     window_size=(-1,-1),
+        #     alibi_slopes=alibi_slopes,
+        #     block_table=block_table,
+        # )
+        # return 
 
     block_size = value_cache.shape[3]
     num_seqs = len(seq_lens)
