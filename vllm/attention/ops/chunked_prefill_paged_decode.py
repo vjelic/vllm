@@ -9,11 +9,158 @@
 import torch
 import triton
 import triton.language as tl
+from typing import Optional
 
 from vllm import _custom_ops as ops
 from vllm.platforms.rocm import use_rocm_custom_paged_attention
 
 from .prefix_prefill import context_attention_fwd
+from vllm.platforms import current_platform
+
+if current_platform.is_rocm():
+    from vllm.utils import direct_register_custom_op
+    import aiter
+
+    @triton.jit
+    def _vllm_layout_trans_kernel(
+        k_buffer_ptr, 
+        v_buffer_ptr, 
+        k_values_ptr, 
+        v_values_ptr,
+        b_seq_lens_loc,
+        block_table,
+        block_table_stride_0, 
+        X: tl.constexpr,
+        H_KV: tl.constexpr, 
+        D: tl.constexpr, 
+        BLOCK_SIZE: tl.constexpr, 
+    ):
+        batch_idx = tl.program_id(0)
+        block_idx = tl.program_id(1)
+        batch_token_indexes = tl.load(b_seq_lens_loc + batch_idx + tl.arange(0, 2))
+        batch_token_start, batch_token_end = tl.split(batch_token_indexes)
+        seq_len = batch_token_end - batch_token_start
+
+        DIM0: tl.constexpr = H_KV * D // X
+        DIM1: tl.constexpr = X * BLOCK_SIZE
+        E_DIM: tl.constexpr = H_KV * D
+        if block_idx * BLOCK_SIZE < seq_len:
+            # print("block_idx", block_idx)
+            k_block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :, None]) < seq_len
+            v_block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]) < seq_len
+
+            kv_idx = tl.load(block_table + batch_idx * block_table_stride_0 + block_idx)
+        
+            k_buffer_off = kv_idx * BLOCK_SIZE * E_DIM+ tl.arange(0, DIM0)[:, None, None] * DIM1 + tl.arange(0, BLOCK_SIZE)[None, :, None] * X + tl.arange(0, X)[None, None, :]
+            v_buffer_off = kv_idx * BLOCK_SIZE * E_DIM + tl.arange(0, E_DIM)[:, None] * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]
+            k_vals = tl.load(k_buffer_ptr + k_buffer_off, mask=k_block_mask, other=0.0)
+            v_vals = tl.load(v_buffer_ptr + v_buffer_off, mask=v_block_mask, other=0.0)
+            k_vals = k_vals.trans(0, 2, 1).view(E_DIM, BLOCK_SIZE)
+            block_mask = (block_idx * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[:, None]) < seq_len
+
+            kv_values_off = batch_token_start * E_DIM + block_idx * BLOCK_SIZE * E_DIM + tl.arange(0, BLOCK_SIZE)[:, None] * E_DIM + tl.arange(0, E_DIM)[None, :]
+            tl.store(k_values_ptr + kv_values_off, k_vals.T, mask=block_mask)
+            tl.store(v_values_ptr + kv_values_off, v_vals.T, mask=block_mask)
+
+
+    def vllm_layout_trans(seq_lens, block_table, k_buffer, v_buffer, max_seqlen):
+        H_KV = v_buffer.shape[1]
+        D = v_buffer.shape[2]
+        BLOCK_SIZE = v_buffer.shape[3]
+        X = k_buffer.shape[-1]
+        dtype = k_buffer.dtype
+
+        b_seq_lens_loc = torch.zeros(seq_lens.shape[0] + 1,
+                                    dtype=torch.int32,
+                                    device="cuda")
+        torch.cumsum(seq_lens,
+                    dim=0,
+                    dtype=b_seq_lens_loc.dtype,
+                    out=b_seq_lens_loc[1:])
+
+        k_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
+        v_values = torch.empty((b_seq_lens_loc[-1], H_KV, D), dtype=dtype, device="cuda")
+
+        grid = (block_table.shape[0], (max_seqlen + BLOCK_SIZE - 1) // BLOCK_SIZE)
+        # extra_kargs = {"waves_per_eu": 2, "matrix_instr_nonkdim": 16, "kpack": 2}
+        _vllm_layout_trans_kernel[grid](
+            k_buffer,
+            v_buffer,
+            k_values,
+            v_values,
+            b_seq_lens_loc,
+            block_table,
+            block_table.stride(0),
+            X=X,
+            H_KV=H_KV,
+            D=D,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_stages=1,
+            num_warps=4,
+        )
+
+        return k_values, v_values
+
+
+    def _flash_attn_varlen_func(
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        seqlens_k: torch.Tensor,
+        max_seqlen_q: int,
+        max_seqlen_k: int,
+        softmax_scale:float,
+        window_size: Optional[list[int]],  # -1 means infinite context window
+        alibi_slopes: Optional[list[float]],
+        block_table: torch.Tensor
+    ) -> torch.Tensor:
+        cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
+                                    dtype=torch.int32,
+                                    device="cuda")
+        torch.cumsum(seqlens_k,
+                        dim=0,
+                        dtype=cu_seqlens_k.dtype,
+                        out=cu_seqlens_k[1:])
+        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
+
+        outputs = aiter.flash_attn_varlen_func(
+            q=q,
+            k=k,
+            v=v,
+            cu_seqlens_q=cu_seqlens_q,
+            max_seqlen_q=max_seqlen_q,
+            cu_seqlens_k=cu_seqlens_k,
+            seqlens_k=None,
+            max_seqlen_k=max_seqlen_k,
+            softmax_scale=softmax_scale,
+            causal=True,
+            alibi_slopes=alibi_slopes,
+            window_size=tuple(window_size),
+        )
+        return outputs[0]
+
+    def flash_attn_varlen_func_fake(
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        seqlens_k: torch.Tensor,
+        max_seqlen_q: int,
+        max_seqlen_k: int,
+        softmax_scale:float,
+        window_size: Optional[list[int]],  # -1 means infinite context window
+        alibi_slopes: Optional[list[float]],
+        block_table: torch.Tensor) -> torch.Tensor:
+        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[-1])
+        return output
+
+    try:
+        direct_register_custom_op("flash_attn_varlen_func", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
+        flash_attn_varlen_func = torch.ops.vllm.flash_attn_varlen_func
+
+    except AttributeError:
+        flash_attn_varlen_func = _flash_attn_varlen_func
 
 
 @triton.jit
@@ -237,27 +384,41 @@ def chunked_prefill_paged_decode(
         sliding_window = 0
 
     if max_query_len > 1:
-        return context_attention_fwd(
+        # return context_attention_fwd(
+        #     q=query,
+        #     k=key,
+        #     v=value,
+        #     o=output,
+        #     kv_cache_dtype=kv_cache_dtype,
+        #     k_cache=key_cache,
+        #     v_cache=value_cache,
+        #     b_loc=block_table,
+        #     b_start_loc=query_start_loc,
+        #     b_seq_len=seq_lens,
+        #     max_seq_len=max_seq_len,
+        #     max_input_len=max_query_len,
+        #     k_scale=k_scale,
+        #     v_scale=v_scale,
+        #     alibi_slopes=alibi_slopes,
+        #     sliding_window=sliding_window,
+        #     sm_scale=sm_scale,
+        #     skip_decode=True,
+        #     fp8_out_scale=fp8_out_scale,
+        # )
+        output = flash_attn_varlen_func(
             q=query,
-            k=key,
-            v=value,
-            o=output,
-            kv_cache_dtype=kv_cache_dtype,
             k_cache=key_cache,
             v_cache=value_cache,
-            b_loc=block_table,
-            b_start_loc=query_start_loc,
-            b_seq_len=seq_lens,
-            max_seq_len=max_seq_len,
-            max_input_len=max_query_len,
-            k_scale=k_scale,
-            v_scale=v_scale,
+            cu_seqlens_q=query_start_loc.to(torch.int32),
+            seqlens_k=seq_lens,
+            max_seqlen_q=max_query_len,
+            max_seqlen_k=max_seq_len,
+            softmax_scale=sm_scale,
+            window_size=(-1,-1),
             alibi_slopes=alibi_slopes,
-            sliding_window=sliding_window,
-            sm_scale=sm_scale,
-            skip_decode=True,
-            fp8_out_scale=fp8_out_scale,
+            block_table=block_table,
         )
+        return 
 
     block_size = value_cache.shape[3]
     num_seqs = len(seq_lens)
