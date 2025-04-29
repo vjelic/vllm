@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import fnmatch
-import re
 from typing import Any, Dict, List, Optional, cast
 
 import torch
@@ -71,8 +70,8 @@ class QuarkConfig(QuantizationConfig):
         if isinstance(layer, Attention):
             return QuarkKVCacheMethod(self)
 
-        # TODO: mixtral defined in mixtral_quant.py does not use FusedMoE, so probably
-        # `QuarkMoEMethod` was never actually used?
+        # TODO: mixtral defined in mixtral_quant.py does not use FusedMoE,
+        # so probably `QuarkMoEMethod` was never actually used?
         if isinstance(layer, FusedMoE):
             return QuarkMoEMethod.get_moe_method(self,
                                                  module=layer,
@@ -131,6 +130,13 @@ class QuarkConfig(QuantizationConfig):
             for q_config in q_configs:
                 q_config["output_tensors"] = None
 
+            # In case q_proj output is also quantized, remove the configuration
+            # to keep qkv consistency.
+            q_proj_q_config = cast(Dict[str, Any],
+                                   layer_quant_config.get("*q_proj"))
+            if q_proj_q_config is not None:
+                q_proj_q_config["output_tensors"] = None
+
         return cls(quant_config=config,
                    kv_cache_group=kv_cache_group,
                    kv_cache_config=kv_cache_config,
@@ -169,7 +175,7 @@ class QuarkConfig(QuantizationConfig):
         is_static_weight = not weight_quant.get("is_dynamic")
         is_per_tensor_or_channel_weight = (weight_quant.get("qscheme")
                                            in ["per_tensor", "per_channel"])
-        
+
         if not (is_fp8_dtype and is_static_weight
                 and is_per_tensor_or_channel_weight):
             return False
@@ -345,26 +351,14 @@ class QuarkConfig(QuantizationConfig):
         :param name: param name
         :return: matching param name for KV cache scale in vLLM
         """
-        if self.kv_cache_group is None or len(self.kv_cache_group) == 0:
-            return None
-
-        kv_proj_names = [
-            re.split(r"[*.]", kv_cache)[-1] for kv_cache in self.kv_cache_group
-        ]
-
-        if name.endswith(".output_scale"):
-            if len(kv_proj_names) == 1 and kv_proj_names[0] in name:
-                kv_output_scale_name = "." + kv_proj_names[0] + ".output_scale"
-                return name.replace(kv_output_scale_name, ".attn.k_scale")
-
-            elif len(kv_proj_names) == 2:
-                for kv_proj_name in kv_proj_names:
-                    if kv_proj_name in name and kv_proj_name == "k_proj":
-                        return name.replace(".k_proj.output_scale",
-                                            ".attn.k_scale")
-                    elif kv_proj_name in name and kv_proj_name == "v_proj":
-                        return name.replace(".v_proj.output_scale",
-                                            ".attn.v_scale")
+        if name.endswith(".output_scale") and ".k_proj" in name:
+            return name.replace(".k_proj.output_scale", ".attn.k_scale")
+        if name.endswith(".output_scale") and ".v_proj" in name:
+            return name.replace(".v_proj.output_scale", ".attn.v_scale")
+        if name.endswith(".output_scale") and ".q_proj" in name:
+            return name.replace(".q_proj.output_scale", ".attn.q_scale")
+        if name.endswith("self_attn.prob_output_scale"):
+            return name.replace(".prob_output_scale", ".attn.prob_scale")
 
         # If no matches, return None
         return None
