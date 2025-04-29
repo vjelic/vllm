@@ -53,7 +53,7 @@ if current_platform.is_rocm():
 
             kv_idx = tl.load(block_table + batch_idx * block_table_stride_0 + block_idx)
         
-            k_buffer_off = kv_idx * BLOCK_SIZE * E_DIM+ tl.arange(0, DIM0)[:, None, None] * DIM1 + tl.arange(0, BLOCK_SIZE)[None, :, None] * X + tl.arange(0, X)[None, None, :]
+            k_buffer_off = kv_idx * BLOCK_SIZE * E_DIM + tl.arange(0, DIM0)[:, None, None] * DIM1 + tl.arange(0, BLOCK_SIZE)[None, :, None] * X + tl.arange(0, X)[None, None, :]
             v_buffer_off = kv_idx * BLOCK_SIZE * E_DIM + tl.arange(0, E_DIM)[:, None] * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]
             k_vals = tl.load(k_buffer_ptr + k_buffer_off, mask=k_block_mask, other=0.0)
             v_vals = tl.load(v_buffer_ptr + v_buffer_off, mask=v_block_mask, other=0.0)
@@ -125,7 +125,7 @@ if current_platform.is_rocm():
             alibi_slopes=alibi_slopes,
             window_size=tuple(window_size),
         )
-        return outputs[0]
+        return outputs
 
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
@@ -375,7 +375,7 @@ def chunked_prefill_paged_decode(
 
     if max_query_len > 1:
         if envs.VLLM_ROCM_USE_AITER:
-            output = flash_attn_varlen_func(
+            results = flash_attn_varlen_func(
                 q=query,
                 k_cache=key_cache,
                 v_cache=value_cache,
@@ -385,10 +385,11 @@ def chunked_prefill_paged_decode(
                 max_seqlen_k=max_seq_len,
                 total_tokens=total_tokens,
                 softmax_scale=sm_scale,
-                window_size=(-1, 0),
+                window_size=(-1, -1),
                 alibi_slopes=alibi_slopes,
                 block_table=block_table,
             )
+            output.copy_(results)
             return 
         return context_attention_fwd(
             q=query,
