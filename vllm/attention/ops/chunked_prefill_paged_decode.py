@@ -23,6 +23,7 @@ if current_platform.is_rocm():
     from vllm.utils import direct_register_custom_op
     import aiter
 
+
     @triton.jit
     def _vllm_layout_trans_kernel(
         k_buffer_ptr, 
@@ -113,6 +114,11 @@ if current_platform.is_rocm():
         fp8_out_scale: Optional[torch.Tensor]
     ) -> torch.Tensor:
         k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k, total_tokens)
+        out_dtype = out.dtype
+        if fp8_out_scale is not None:
+            output = torch.empty_like(out, dtype=q.dtype)
+        else:
+            output = out
         output = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
@@ -126,14 +132,18 @@ if current_platform.is_rocm():
             causal=True,
             alibi_slopes=alibi_slopes,
             window_size=tuple(window_size),
-            out=None,
+            out=output,
         )
         if fp8_out_scale is not None:
             output = output / fp8_out_scale
-        return output.to(out.dtype)
+            output.to(out_dtype)
+            out.copy_(output)
+        return out
 
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
         k_cache: torch.Tensor,
         v_cache: torch.Tensor,
         cu_seqlens_q: torch.Tensor,
@@ -383,7 +393,7 @@ def chunked_prefill_paged_decode(
 
     if max_query_len > 1:
         if envs.VLLM_ROCM_USE_AITER:
-            result = flash_attn_varlen_func(
+            flash_attn_varlen_func(
                 q=query,
                 k_cache=key_cache,
                 v_cache=value_cache,
@@ -399,7 +409,6 @@ def chunked_prefill_paged_decode(
                 out = output,
                 fp8_out_scale=fp8_out_scale.data if fp8_out_scale is not None else None
             )
-            output.copy_(result)
             return
         
         context_attention_fwd(
