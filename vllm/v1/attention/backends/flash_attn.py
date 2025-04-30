@@ -100,7 +100,7 @@ if current_platform.is_rocm():
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
-        block_table: torch.Tensor
+        block_table: torch.Tensor,
     ) -> torch.Tensor:
         cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
                                     dtype=torch.int32,
@@ -110,8 +110,7 @@ if current_platform.is_rocm():
                      dtype=cu_seqlens_k.dtype,
                      out=cu_seqlens_k[1:])
         k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
-
-        outputs = aiter.flash_attn_varlen_func(
+        output = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
             v=v,
@@ -125,7 +124,7 @@ if current_platform.is_rocm():
             alibi_slopes=alibi_slopes,
             window_size=tuple(window_size),
         )
-        return outputs[0]
+        return output.to(torch.float8_e4m3fnuz)
     
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
@@ -138,9 +137,9 @@ if current_platform.is_rocm():
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
-        block_table: torch.Tensor) -> torch.Tensor:
-        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[-1])
-        return output
+        block_table: torch.Tensor,
+    ) -> torch.Tensor:
+        return torch.empty(q.shape[0], q.shape[1], v_cache.shape[-2], dtype=torch.float8_e4m3fnuz, device="cuda")
     
     try:
         direct_register_custom_op("flash_attn_varlen_func2", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
