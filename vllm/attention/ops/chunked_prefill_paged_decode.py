@@ -108,10 +108,12 @@ if current_platform.is_rocm():
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
-        block_table: torch.Tensor
+        block_table: torch.Tensor,
+        out: torch.Tensor,
+        fp8_out_scale: Optional[torch.Tensor]
     ) -> torch.Tensor:
         k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k, total_tokens)
-        outputs = aiter.flash_attn_varlen_func(
+        output = aiter.flash_attn_varlen_func(
             q=q,
             k=k,
             v=v,
@@ -124,8 +126,11 @@ if current_platform.is_rocm():
             causal=True,
             alibi_slopes=alibi_slopes,
             window_size=tuple(window_size),
+            out=None,
         )
-        return outputs
+        if fp8_out_scale is not None:
+            output = output / fp8_out_scale
+        return output.to(out.dtype)
 
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
@@ -139,9 +144,11 @@ if current_platform.is_rocm():
         softmax_scale:float,
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
-        block_table: torch.Tensor) -> torch.Tensor:
-        output = torch.empty(q.shape[0], q.shape[1], v_cache.shape[-2])
-        return output
+        block_table: torch.Tensor,
+        out: torch.Tensor,
+        fp8_out_scale: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        return torch.empty(q.shape[0], q.shape[1], v_cache.shape[-2], dtype=out.dtype, device="cuda")
 
     try:
         direct_register_custom_op("flash_attn_varlen_func", _flash_attn_varlen_func, [], flash_attn_varlen_func_fake)
@@ -365,6 +372,7 @@ def chunked_prefill_paged_decode(
     sm_scale=None,
     fp8_out_scale=None,
 ):
+  
     if sm_scale is None:
         sm_scale = 1.0 / (query.shape[1]**0.5)
 
@@ -375,7 +383,7 @@ def chunked_prefill_paged_decode(
 
     if max_query_len > 1:
         if envs.VLLM_ROCM_USE_AITER:
-            results = flash_attn_varlen_func(
+            result = flash_attn_varlen_func(
                 q=query,
                 k_cache=key_cache,
                 v_cache=value_cache,
@@ -388,10 +396,13 @@ def chunked_prefill_paged_decode(
                 window_size=(-1, -1),
                 alibi_slopes=alibi_slopes,
                 block_table=block_table,
+                out = output,
+                fp8_out_scale=fp8_out_scale.data if fp8_out_scale is not None else None
             )
-            output.copy_(results)
-            return 
-        return context_attention_fwd(
+            output.copy_(result)
+            return
+        
+        context_attention_fwd(
             q=query,
             k=key,
             v=value,
@@ -412,6 +423,7 @@ def chunked_prefill_paged_decode(
             skip_decode=True,
             fp8_out_scale=fp8_out_scale,
         )
+        return 
 
 
     block_size = value_cache.shape[3]

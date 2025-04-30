@@ -438,12 +438,13 @@ class FlashAttentionMetadataBuilder:
 
     def build(self, num_reqs: int, num_actual_tokens: int, max_query_len: int,
               common_prefix_len: int):
-        max_seq_len = self.runner.seq_lens_np[:num_reqs].max()
+        # max_seq_len = self.runner.seq_lens_np[:num_reqs].max()
         query_start_loc_cpu = self.runner.query_start_loc_cpu[:num_reqs + 1]
         query_start_loc = query_start_loc_cpu.to(self.runner.device,
                                                  dtype=torch.int32,
                                                  non_blocking=True)
         seq_lens_cpu = self.runner.seq_lens_cpu[:num_reqs]
+        max_seq_len = torch.max(seq_lens_cpu).item()
         total_tokens = torch.sum(seq_lens_cpu).item()
         seq_lens = seq_lens_cpu.to(self.runner.device, non_blocking=True)
         block_table = (
