@@ -126,7 +126,6 @@ if current_platform.is_rocm():
             cu_seqlens_q=cu_seqlens_q,
             max_seqlen_q=max_seqlen_q,
             cu_seqlens_k=cu_seqlens_k,
-            seqlens_k=None,
             max_seqlen_k=max_seqlen_k,
             softmax_scale=softmax_scale,
             causal=True,
