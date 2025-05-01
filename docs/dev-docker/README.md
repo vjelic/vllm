@@ -11,8 +11,8 @@ This documentation includes information for running the popular Llama 3.1 series
 The pre-built image includes:
 
 - ROCm™ 6.3.1
-- HipblasLT 0.13
-- vLLM 0.7.3
+- HipblasLT 0.15
+- vLLM 0.8.3
 - PyTorch 2.7dev (nightly)
 
 ## Pull latest Docker Image
@@ -25,6 +25,9 @@ Pull the most recent validated docker image with `docker pull rocm/vllm-dev:main
 - Initial Gemma-3 enablement
 - Detokenizer disablement
 - Torch.compile support
+
+## Known Issues and Workarounds
+- Mem fault encountered when running the model meta 405 fp8. To workaround this issue, set PYTORCH_TUNABLEOP_ENABLED=0
 
 ## Performance Results
 
