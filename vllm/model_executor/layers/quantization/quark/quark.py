@@ -9,6 +9,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
                                                UnquantizedLinearMethod)
+from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (  # noqa: E501
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
@@ -50,7 +51,7 @@ class QuarkConfig(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 70
 
-    def get_name(self) -> str:
+    def get_name(self) -> QuantizationMethods:
         return "quark"
 
     def get_quant_method(self, layer: torch.nn.Module,
