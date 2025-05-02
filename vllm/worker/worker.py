@@ -2,6 +2,7 @@
 """A GPU worker class."""
 import gc
 import os
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
@@ -24,7 +25,7 @@ from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
                            SequenceGroupMetadata, SequenceGroupMetadataDelta)
 from vllm.utils import (GiB_bytes, MemorySnapshot, bind_kv_cache,
-                        memory_profiling)
+                        memory_profiling, rpd_trace)
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.enc_dec_model_runner import EncoderDecoderModelRunner
 from vllm.worker.model_runner import GPUModelRunnerBase, ModelRunner
@@ -112,18 +113,40 @@ class Worker(LocalOrDistributedWorkerBase):
                 with_stack=True,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
                     torch_profiler_trace_dir, use_gzip=True))
+        elif envs.VLLM_RPD_PROFILER_DIR:
+            rpd_profiler_trace_dir = Path(envs.VLLM_RPD_PROFILER_DIR)
+            if rpd_profiler_trace_dir.suffix != ".rpd":
+                rpd_profiler_trace_dir = rpd_profiler_trace_dir / "trace.rpd"
+
+            rpd_profiler_trace_dir.parent.mkdir(parents=True, exist_ok=True)
+
+            logger.info("Profiling enabled. Traces will be saved to: %s",
+                        rpd_profiler_trace_dir)
+
+            if self.rank == 0:
+                rpd_trace.create_file(filename=str(rpd_profiler_trace_dir))
+
+            self.profiler = rpd_trace(filename=str(rpd_profiler_trace_dir),
+                                      name='Worker RPD Enabled',
+                                      nvtx=True)
         else:
             self.profiler = None
 
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        self.profiler.start()
+        if envs.VLLM_RPD_PROFILER_DIR:
+            self.profiler.__enter__()
+        else:
+            self.profiler.start()
 
     def stop_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        self.profiler.stop()
+        if envs.VLLM_RPD_PROFILER_DIR:
+            self.profiler.__exit__()
+        else:
+            self.profiler.stop()
 
     def sleep(self, level: int = 1) -> None:
         free_bytes_before_sleep = torch.cuda.mem_get_info()[0]

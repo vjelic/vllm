@@ -111,6 +111,7 @@ if TYPE_CHECKING:
     VLLM_USE_DEEP_GEMM: bool = False
     VLLM_XGRAMMAR_CACHE_MB: int = 0
     VLLM_MSGPACK_ZERO_COPY_THRESHOLD: int = 256
+    VLLM_RPD_PROFILER_DIR: Optional[str] = None
 
 
 def get_default_cache_root():
@@ -139,6 +140,12 @@ def maybe_convert_int(value: Optional[str]) -> Optional[int]:
 # begin-env-vars-definition
 
 environment_variables: dict[str, Callable[[], Any]] = {
+
+    # Enables rpd profiler if set. Path to the directory where torch profiler
+    # traces are saved. Note that it must be an absolute path.
+    "VLLM_RPD_PROFILER_DIR":
+    lambda: (None if os.getenv("VLLM_RPD_PROFILER_DIR", None) is None else os.
+             path.expanduser(os.getenv("VLLM_RPD_PROFILER_DIR", "."))),
 
     # ================== Installation Time Env Vars ==================
 
