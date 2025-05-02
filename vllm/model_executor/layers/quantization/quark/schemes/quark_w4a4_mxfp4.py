@@ -13,6 +13,12 @@ from vllm.model_executor.parameter import (GroupQuantScaleParameter,
                                            PackedvLLMParameter)
 from vllm.platforms import current_platform
 
+try:
+    from aiter.ops.triton.quant import dynamic_mxfp4_quant
+    from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4
+except ImportError:
+    dynamic_mxfp4_quant = gemm_afp4wfp4 = None
+
 __all__ = ["QuarkW4A4MXFP4"]
 
 
@@ -122,4 +128,8 @@ class QuarkW4A4MXFP4(QuarkScheme):
             qdq_x, _ = per_token_group_quant_mxfp4(x, OCP_MX_BLOCK_SIZE)
             return F.linear(qdq_x, dq_w, bias)
         else:
-            raise NotImplementedError()
+            assert dynamic_mxfp4_quant is not None and gemm_afp4wfp4 is not None
+            x_q, x_s = dynamic_mxfp4_quant(x)
+            y = gemm_afp4wfp4(x_q, layer.weight.T, x_s, layer.weight_scale,
+                              self.out_dtype)
+            return y
