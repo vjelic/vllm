@@ -39,6 +39,10 @@ class QuarkW4A4MXFP4(QuarkScheme):
                 "for non-emulation mode! Please refer to "
                 "https://github.com/ROCm/aiter for installation details.")
 
+        from quark.torch.kernel.hw_emulation.extensions import kernel_ext
+
+        self.kernel_ext = kernel_ext
+
     @classmethod
     def get_min_capability(cls) -> int:
         return 70
@@ -79,12 +83,12 @@ class QuarkW4A4MXFP4(QuarkScheme):
                     weight_quantizer(layer.weight.data).to(self.out_dtype),
                     requires_grad=False,
                 )
+                layer.weight_scale = None
+
+                # This call is necessary to release the scales memory.
+                torch.cuda.empty_cache()
             else:
                 self.weight_quantizer = weight_quantizer
-            layer.weight_scale = None
-
-            # This call is necessary to release the scales memory.
-            torch.cuda.empty_cache()
 
     def create_weights(self, layer: torch.nn.Module,
                        output_partition_sizes: List[int],
@@ -129,11 +133,18 @@ class QuarkW4A4MXFP4(QuarkScheme):
 
         if self.emulate:
             if envs.VLLM_QUARK_EMU_MEM_OPT:
-                dq_w = self.weight_quantizer(layer.weight).to(self.out_dtype)
+                # dq_w = self.weight_quantizer(layer.weight).to(self.out_dtype)
+
+                dequant_weight_shape = (*layer.weight.shape[:-1], layer.weight.shape[-1] * 2)
+                dq_w = torch.empty(dequant_weight_shape, device=layer.weight.device, dtype=x.dtype)
+
+                self.kernel_ext.dq_uint8_mxfp4_to_half(layer.weight, layer.weight_scale, dq_w, OCP_MX_BLOCK_SIZE)
             else:
                 dq_w = layer.weight
-            qdq_x, _ = per_token_group_quant_mxfp4(x, OCP_MX_BLOCK_SIZE)
-            return F.linear(qdq_x, dq_w, bias)
+            # qdq_x, _ = per_token_group_quant_mxfp4(x, OCP_MX_BLOCK_SIZE)
+            self.kernel_ext.qdq_mxfp4(x, OCP_MX_BLOCK_SIZE)
+
+            return F.linear(x, dq_w, bias)
         else:
             x_q, x_s = dynamic_mxfp4_quant(x)
             y = torch.empty(x_q.shape[0],
