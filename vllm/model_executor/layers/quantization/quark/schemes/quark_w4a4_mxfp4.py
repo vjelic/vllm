@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 import vllm.envs as envs
 from vllm.model_executor.layers.quantization.quark.schemes import QuarkScheme
-from vllm.model_executor.layers.quantization.utils.mxfp4_utils import OCP_MX_BLOCK_SIZE, per_token_group_quant_mxfp4, per_token_group_dequant_mxfp4
+from vllm.model_executor.layers.quantization.utils.mxfp4_utils import OCP_MX_BLOCK_SIZE, per_token_group_quant_mxfp4, per_token_group_dequant_mxfp4, SUPPORTED_IMPLEMS
 from vllm.model_executor.parameter import (GroupQuantScaleParameter,
                                            PackedvLLMParameter)
 from vllm.platforms import current_platform
@@ -37,6 +37,9 @@ class QuarkW4A4MXFP4(QuarkScheme):
                 f"{self.__class__.__name__} requires AITER to be installed "
                 "for non-emulation mode! Please refer to "
                 "https://github.com/ROCm/aiter for installation details.")
+
+        if envs.VLLM_QUARK_MXFP4_Q_DQ_QDQ_IMPLEM not in SUPPORTED_IMPLEMS:
+            raise ValueError(f"VLLM_QUARK_MXFP4_Q_DQ_QDQ_IMPLEM='{envs.VLLM_QUARK_MXFP4_Q_DQ_QDQ_IMPLEM}' is not supported, only {SUPPORTED_IMPLEMS} are.")
 
     @classmethod
     def get_min_capability(cls) -> int:
