@@ -12,6 +12,8 @@ from vllm.platforms import current_platform
 
 from vllm.model_executor.layers.quantization.utils.mxfp4_utils import OCP_MX_BLOCK_SIZE
 
+from aiter.ops.triton.quant import dynamic_mxfp4_quant
+from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4
 __all__ = ["QuarkW4A4MXFP4"]
 
 
@@ -135,4 +137,6 @@ class QuarkW4A4MXFP4(QuarkScheme):
             qdq_x = self.input_quantizer(x)
             return F.linear(qdq_x, layer.weight, bias)
         else:
-            raise NotImplementedError()
+            qinput, scale = dynamic_mxfp4_quant(x)
+            out = gemm_afp4wfp4(qinput, layer.weight.t(), scale, layer.weight_scale, x.dtype)
+            return out
