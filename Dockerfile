@@ -1,5 +1,6 @@
 FROM rocm/vllm:rocm6.3.1_instinct_vllm0.8.3_20250410
-
+ENV GO111MODULE on
+ENV GOPROXY https://goproxy.cn
 RUN pip uninstall -y vllm aiter
 RUN git clone -b aiter https://github.com/ROCm/vllm.git vllm-develop
 RUN cd vllm-develop && MAX_JOBS=128 python setup.py develop
