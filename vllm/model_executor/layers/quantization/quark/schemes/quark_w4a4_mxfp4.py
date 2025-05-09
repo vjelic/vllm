@@ -46,8 +46,8 @@ class QuarkW4A4MXFP4(QuarkScheme):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         layer.weight = torch.nn.Parameter(layer.weight.data,
                                           requires_grad=False)
-        layer.weight_scale = torch.nn.Parameter(layer.weight_scale.data,
-                                                requires_grad=False)
+        layer.weight_scale = torch.nn.Parameter(
+            layer.weight_scale.data.T.contiguous(), requires_grad=False)
 
         if self.emulate:
             try:
@@ -136,6 +136,10 @@ class QuarkW4A4MXFP4(QuarkScheme):
             return F.linear(qdq_x, dq_w, bias)
         else:
             x_q, x_s = dynamic_mxfp4_quant(x)
-            y = gemm_afp4wfp4(x_q, layer.weight.T, x_s, layer.weight_scale,
-                              self.out_dtype)
+            y = torch.empty(x_q.shape[0],
+                            layer.weight.shape[0],
+                            device=x_q.device,
+                            dtype=self.out_dtype)
+            gemm_afp4wfp4(x_q, layer.weight.T, y, x_s, layer.weight_scale.T,
+                          self.out_dtype)
             return y
