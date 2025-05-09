@@ -18,7 +18,7 @@
   #define __HIP__MI300_MI250__
 #endif
 
-#if defined(__HIPCC__) && defined(__gfx942__)
+#if defined(__HIPCC__) && defined(__gfx942__) || defined(__gfx950__)
   #define __HIP__MI300__
 #endif
 
