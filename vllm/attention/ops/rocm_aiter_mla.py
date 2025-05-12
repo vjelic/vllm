@@ -25,6 +25,8 @@ def aiter_mla_decode_fwd(
     kv_buffer: torch.Tensor,
     o: torch.Tensor,
     sm_scale: float,
+    qo_indptr: torch.Tensor,
+    max_seqlen_qo: int,
     kv_indptr: Optional[torch.Tensor] = None,
     kv_indices: Optional[torch.Tensor] = None,
     kv_last_page_lens: Optional[torch.Tensor] = None,
@@ -32,11 +34,15 @@ def aiter_mla_decode_fwd(
 ):
     from aiter.mla import mla_decode_fwd
 
-    mla_decode_fwd(q,
-                   kv_buffer.view(-1, 1, 1, q.shape[-1]),
-                   o,
-                   kv_indptr,
-                   kv_indices,
-                   kv_last_page_lens,
-                   sm_scale=sm_scale,
-                   logit_cap=logit_cap)
+    mla_decode_fwd(
+        q,
+        kv_buffer.view(-1, 1, 1, q.shape[-1]),
+        o,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        kv_last_page_lens,
+        max_seqlen_qo,
+        sm_scale=sm_scale,
+        logit_cap=logit_cap,
+    )
