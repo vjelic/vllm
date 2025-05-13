@@ -247,6 +247,14 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
                                                    1,
                                                    device=device,
                                                    dtype=torch.int)
+            num_draft_tokens=1 # for None mtp
+            qo_indptr = qo_indptr = torch.arange(
+                0,
+                (1 + batch_size) * num_draft_tokens,
+                step=num_draft_tokens,
+                dtype=torch.int,
+                device=device,
+            )
         else:
             paged_kv_indices_tensor = None
             paged_kv_indptr_tensor = None
@@ -396,7 +404,7 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
         B = q_nope.shape[0]
 
         q = torch.cat([q_nope, q_pe], dim=-1)
-        o = torch.zeros(B,
+        o = torch.empty(B,
                         self.num_heads,
                         self.kv_lora_rank,
                         dtype=q.dtype,
@@ -404,9 +412,16 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
 
         kv_buffer = kv_c_and_k_pe_cache.unsqueeze(2)
 
-        aiter_mla_decode_fwd(q, kv_buffer, o, self.scale,
-                             attn_metadata.paged_kv_indptr,
-                             attn_metadata.paged_kv_indices,
-                             attn_metadata.paged_kv_last_page_lens)
+        aiter_mla_decode_fwd(
+            q,
+            kv_buffer,
+            o,
+            self.scale,
+            attn_metadata.qo_indptr,
+            attn_metadata.max_query_len,
+            attn_metadata.paged_kv_indptr,
+            attn_metadata.paged_kv_indices,
+            attn_metadata.paged_kv_last_page_lens,
+        )
 
         return self._v_up_proj_and_o_proj(o)

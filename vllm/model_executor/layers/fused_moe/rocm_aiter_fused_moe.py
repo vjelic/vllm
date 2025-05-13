@@ -31,25 +31,23 @@ def rocm_aiter_asm_moe_tkw1_impl(
         expert_mask: Optional[torch.Tensor] = None,
         activation_str: str = "silu") -> torch.Tensor:
 
-    from aiter import ActivationType
-    from aiter.fused_moe_bf16_asm import asm_moe_tkw1
+    from aiter import ActivationType, QuantType
+    from aiter.fused_moe import fused_moe
 
     activation = \
         ActivationType.Gelu if activation_str == "gelu" else ActivationType.Silu
 
-    return asm_moe_tkw1(hidden_states,
-                        w1,
-                        w2,
-                        topk_weight,
-                        topk_ids,
-                        fc1_scale=fc1_scale,
-                        fc2_scale=fc2_scale,
-                        fc1_smooth_scale=fc1_smooth_scale,
-                        fc2_smooth_scale=fc2_smooth_scale,
-                        a16=a16,
-                        per_tensor_quant_scale=per_tensor_quant_scale,
-                        expert_mask=expert_mask,
-                        activation=activation)
+    return fused_moe(
+        hidden_states,
+        w1,
+        w2,
+        topk_weight,
+        topk_ids,
+        w1_scale=fc1_scale,
+        w2_scale=fc2_scale,
+        quant_type=QuantType.per_Token,
+        activation=activation,
+    )
 
 
 def rocm_aiter_asm_moe_tkw1_fake(

@@ -843,7 +843,7 @@ def context_attention_fwd(q,
     max_seq_len = 0 if max_seq_len is None else max_seq_len
     extra_kargs = {}
     if current_platform.is_rocm():
-        extra_kargs = {"kpack": 2, "waves_per_eu": 2}
+        extra_kargs = {"kpack": 1, "waves_per_eu": 2}
 
     grid = lambda META: (batch, head,
                          triton.cdiv(max_input_len, META["BLOCK_M"]))
