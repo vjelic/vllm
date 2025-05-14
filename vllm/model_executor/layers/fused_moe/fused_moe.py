@@ -510,12 +510,10 @@ def invoke_fused_moe_kernel(A: torch.Tensor,
     if use_mxfp4_w4a4:
         assert fused_moe_mxfp4 is not None
         # Need dummy scales for MoE MXFP4 kernel
-        _a_scale = torch.ones(1, dtype=torch.float32, device=C.device)
-        _b_scale = torch.ones(B.shape[0], dtype=torch.float32, device=C.device)
-        fused_moe_mxfp4(A, B, C, _a_scale, _b_scale, A_scale, B_scale,
-                        topk_weights, sorted_token_ids, expert_ids,
-                        num_tokens_post_padded, mul_routed_weight, top_k,
-                        False, False, config, compute_type)
+        fused_moe_mxfp4(A, B, C, None, None, A_scale, B_scale, topk_weights,
+                        sorted_token_ids, expert_ids, num_tokens_post_padded,
+                        mul_routed_weight, top_k, False, False, config,
+                        compute_type)
 
     elif (use_int8_w8a16 or use_int4_w4a16) and \
             block_shape is not None and block_shape[1] > 0:
