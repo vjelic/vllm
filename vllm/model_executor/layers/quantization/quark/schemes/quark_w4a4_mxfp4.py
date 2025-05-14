@@ -46,10 +46,10 @@ class QuarkW4A4MXFP4(QuarkScheme):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         layer.weight = torch.nn.Parameter(layer.weight.data,
                                           requires_grad=False)
-        layer.weight_scale = torch.nn.Parameter(
-            layer.weight_scale.data.T.contiguous(), requires_grad=False)
 
         if self.emulate:
+            layer.weight_scale = torch.nn.Parameter(layer.weight_scale.data,
+                                                    requires_grad=False)
             try:
                 from quark.torch.export.nn.modules import realquantizer
                 from quark.torch.quantization.config.config import (
@@ -85,6 +85,9 @@ class QuarkW4A4MXFP4(QuarkScheme):
 
             # This call is necessary to release the scales memory.
             torch.cuda.empty_cache()
+        else:
+            layer.weight_scale = torch.nn.Parameter(
+                layer.weight_scale.data.T.contiguous(), requires_grad=False)
 
     def create_weights(self, layer: torch.nn.Module,
                        output_partition_sizes: List[int],
