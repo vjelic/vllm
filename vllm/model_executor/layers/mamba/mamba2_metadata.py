@@ -5,10 +5,17 @@ from dataclasses import dataclass
 import torch
 
 from vllm.attention.backends.abstract import AttentionMetadata
-from vllm.attention.backends.flash_attn import FlashAttentionMetadata
+from vllm.platforms import current_platform
+
+if current_platform.is_cuda():
+    from vllm.attention.backends.flash_attn import FlashAttentionMetadata
+    from vllm.attention.backends.xformers import XFormersMetadata
+else:
+    from vllm.attention.backends.rocm_flash_attn import (
+        ROCmFlashAttentionMetadata as FlashAttentionMetadata)
+    XFormersMetadata = FlashAttentionMetadata
 from vllm.attention.backends.placeholder_attn import (
     PlaceholderAttentionMetadata)
-from vllm.attention.backends.xformers import XFormersMetadata
 
 
 @dataclass
