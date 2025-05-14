@@ -26,6 +26,12 @@ from vllm.utils import direct_register_custom_op
 
 from .rocm_aiter_fused_moe import is_rocm_aiter_moe_enabled
 
+try:
+    from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
+    from aiter.ops.triton.quant import dynamic_mxfp4_quant
+except ImportError:
+    fused_moe_mxfp4 = fused_moe_mxfp4 = None
+
 logger = init_logger(__name__)
 
 
@@ -480,6 +486,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor,
                             use_int8_w8a8: bool,
                             use_int8_w8a16: bool,
                             use_int4_w4a16: bool,
+                            use_mxfp4_w4a4: bool,
                             per_channel_quant: bool,
                             block_shape: Optional[list[int]] = None) -> None:
     assert topk_weights is not None or not mul_routed_weight
@@ -500,7 +507,17 @@ def invoke_fused_moe_kernel(A: torch.Tensor,
     grid = lambda META: (triton.cdiv(EM, META['BLOCK_SIZE_M']) * triton.cdiv(
         B.shape[1], META['BLOCK_SIZE_N']), )
 
-    if (use_int8_w8a16 or use_int4_w4a16) and \
+    if use_mxfp4_w4a4:
+        assert fused_moe_mxfp4 is not None
+        # Need dummy scales for MoE MXFP4 kernel
+        _a_scale = torch.ones(1, dtype=torch.float32, device=C.device)
+        _b_scale = torch.ones(B.shape[0], dtype=torch.float32, device=C.device)
+        fused_moe_mxfp4(A, B, C, _a_scale, _b_scale, A_scale, B_scale,
+                        topk_weights, sorted_token_ids, expert_ids,
+                        num_tokens_post_padded, mul_routed_weight, top_k,
+                        False, False, config, compute_type)
+
+    elif (use_int8_w8a16 or use_int4_w4a16) and \
             block_shape is not None and block_shape[1] > 0:
         assert B_scale is not None and B_scale.ndim == 3
         assert B_zp is None or B_zp.ndim == 3
@@ -1234,7 +1251,8 @@ def moe_kernel_prepare_input(
         if not current_platform.supports_mx():
             A = quant_dequant_mxfp4(A)
         else:
-            raise NotImplementedError()
+            assert dynamic_mxfp4_quant is not None
+            A, A_scale = dynamic_mxfp4_quant(A)
     else:
         assert A_scale is None
         assert B_scale is None
@@ -1303,15 +1321,28 @@ def fused_experts_impl(hidden_states: torch.Tensor,
                                         use_int8_w8a16=use_int8_w8a16,
                                         use_int4_w4a16=use_int4_w4a16,
                                         dtype=hidden_states.dtype)
-
-    get_config_func = functools.partial(
-        try_get_optimal_moe_config,
-        w1.shape,
-        w2.shape,
-        top_k_num,
-        config_dtype,
-        block_shape=block_shape,
-    )
+    if not use_mxfp4_w4a4:
+        get_config_func = functools.partial(
+            try_get_optimal_moe_config,
+            w1.shape,
+            w2.shape,
+            top_k_num,
+            config_dtype,
+            block_shape=block_shape,
+        )
+    else:
+        # [WIP] For now we only return a single config for MXFP4 MoE
+        get_config_func = lambda *args, **kwargs: {
+            "BLOCK_SIZE_M": 128,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 128,
+            "GROUP_SIZE_M": 4,
+            "num_warps": 8,
+            "num_stages": 2,
+            "waves_per_eu": 0,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 1
+        }
 
     config = get_config_func(M)
 
@@ -1410,6 +1441,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
                                 use_int8_w8a8=use_int8_w8a8,
                                 use_int8_w8a16=use_int8_w8a16,
                                 use_int4_w4a16=use_int4_w4a16,
+                                use_mxfp4_w4a4=use_mxfp4_w4a4,
                                 per_channel_quant=per_channel_quant,
                                 block_shape=block_shape)
 
@@ -1454,6 +1486,7 @@ def fused_experts_impl(hidden_states: torch.Tensor,
                                 use_int8_w8a8=use_int8_w8a8,
                                 use_int8_w8a16=use_int8_w8a16,
                                 use_int4_w4a16=use_int4_w4a16,
+                                use_mxfp4_w4a4=use_mxfp4_w4a4,
                                 per_channel_quant=per_channel_quant,
                                 block_shape=block_shape)
 
