@@ -6,8 +6,6 @@ import os
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
-import triton
-import triton.language as tl
 
 import vllm.envs as envs
 from vllm import _custom_ops as ops
@@ -21,6 +19,7 @@ from vllm.model_executor.layers.quantization.utils.fp8_utils import (
 from vllm.model_executor.layers.quantization.utils.int8_utils import (
     per_token_group_quant_int8, per_token_quant_int8)
 from vllm.platforms import current_platform
+from vllm.triton_utils import tl, triton
 from vllm.utils import direct_register_custom_op
 
 from .rocm_aiter_fused_moe import is_rocm_aiter_moe_enabled
@@ -482,20 +481,6 @@ def invoke_fused_moe_kernel(A: torch.Tensor,
                             per_channel_quant: bool,
                             block_shape: Optional[List[int]] = None) -> None:
     assert topk_weights is not None or not mul_routed_weight
-    if current_platform.is_rocm() and topk_weights is not None:
-        # This is to handle the bug https://github.com/ROCm/pytorch/issues/2020
-        # where the In the HIPGraph, it could occur that the `topk_weights`
-        # tensor has the following properties:
-        # .shape: ([1024, 1])
-        # .is_contiguous(): True
-        # .stride() : [1,1024]
-        # .is_contiguous(memory_format=torch.channels_last) is False
-        # .is_contiguous(memory_format=torch.contiguous_format) is True
-        # This only happens when using V1 Engine on ROCm with HIPGraph
-        # with torch.compile Dynamo.
-        # V1 Engine on ROCm with eager mode is fine.
-        # V0 Engine on ROCm with HIPGraph is fine.
-        topk_weights = topk_weights.view(-1).reshape(topk_weights.shape)
     assert topk_weights is None or topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
 
@@ -868,7 +853,7 @@ def fused_topk(
     gating_output: torch.Tensor,
     topk: int,
     renormalize: bool,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.shape[0] == gating_output.shape[0], (
         "Number of tokens mismatch")
 
@@ -882,20 +867,19 @@ def fused_topk(
                            topk,
                            dtype=torch.int32,
                            device=hidden_states.device)
-    token_expert_indicies = torch.empty(M,
-                                        topk,
-                                        dtype=torch.int32,
-                                        device=hidden_states.device)
+    token_expert_indices = torch.empty(M,
+                                       topk,
+                                       dtype=torch.int32,
+                                       device=hidden_states.device)
 
     gating_output_float = gating_output.float()  # TODO(woosuk): Optimize this.
 
     topk_func = dispatch_topk_func()
     topk_weights, topk_ids = topk_func(topk_weights, topk_ids,
-                                       token_expert_indicies,
+                                       token_expert_indices,
                                        gating_output_float, renormalize)
 
-    del token_expert_indicies  # Not used. Will be used in the future.
-    return topk_weights, topk_ids
+    return topk_weights, topk_ids, token_expert_indices
 
 
 # This is used by the Deepseek-V2 and Deepseek-V3 model
@@ -1524,8 +1508,8 @@ def fused_moe(
                                               topk, renormalize,
                                               num_expert_group, topk_group)
     elif custom_routing_function is None:
-        topk_weights, topk_ids = fused_topk(hidden_states, gating_output, topk,
-                                            renormalize)
+        topk_weights, topk_ids, token_expert_indices = fused_topk(
+            hidden_states, gating_output, topk, renormalize)
     else:
         topk_weights, topk_ids = custom_routing_function(
             hidden_states, gating_output, topk, renormalize)
