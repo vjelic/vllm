@@ -86,6 +86,16 @@ class FusedMoEMethodBase(QuantizeMethodBase):
 class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     """MoE method without quantization."""
 
+    def __init__(self):
+        super().__init__()
+
+        self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
+        if self.rocm_aiter_moe_enabled:
+            from .rocm_aiter_fused_moe import rocm_aiter_fused_experts
+            self.rocm_aiter_fused_experts = rocm_aiter_fused_experts
+        else:
+            self.rocm_aiter_fused_experts = None  # type: ignore
+
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
@@ -128,18 +138,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         layer.w2_weight.data = self._maybe_pad_weight(layer.w2_weight.data)
         # Lazy import to avoid importing triton.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
-            is_rocm_aiter_2stage_moe_enabled, is_rocm_aiter_moe_enabled,
             shuffle_weights)
-        self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
-        self.rocm_aiter_2stage_moe_enabled = is_rocm_aiter_2stage_moe_enabled()
-        if self.rocm_aiter_moe_enabled:
-            # reshaping weights is required for aiter moe kernel.
-            layout = (32, 32) if self.rocm_aiter_2stage_moe_enabled else (16,
-                                                                          16)
 
+        if self.rocm_aiter_moe_enabled:
+            # use 2stage ck moe layout
             shuffled_w13, shuffled_w2 = shuffle_weights(layer.w13_weight.data,
                                                         layer.w2_weight.data,
-                                                        layout=layout)
+                                                        layout=(32, 32))
 
             layer.w13_weight.data = shuffled_w13
             layer.w2_weight.data = shuffled_w2
@@ -221,18 +226,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             e_score_correction_bias=e_score_correction_bias)
 
         if self.rocm_aiter_moe_enabled:
-            return rocm_aiter_fused_experts(
+            return self.rocm_aiter_fused_experts(
                 hidden_states=x,
                 w1=layer.w13_weight,
                 w2=layer.w2_weight,
                 topk_weights=topk_weights,
                 topk_ids=topk_ids,
-                inplace=True,
                 activation=activation,
-                apply_router_weight_on_input=apply_router_weight_on_input,
-                global_num_experts=global_num_experts,
-                expert_map=expert_map,
-                use_ck_moe_2stages=self.rocm_aiter_2stage_moe_enabled)
+                apply_router_weight_on_input=apply_router_weight_on_input)
 
         return fused_experts(
             hidden_states=x,

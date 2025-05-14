@@ -466,6 +466,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 logger.warning_once(
                     "DeepGemm not supported on the current platform.")
 
+        from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
+            is_rocm_aiter_moe_enabled)
+
+        self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
+
     def _maybe_pad_rocm_aiter_block_scaled_fused_moe_weights(
             self,
             w2_weight,
@@ -704,11 +709,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def process_weights_after_loading(self, layer: Module) -> None:
         # Lazy import to avoid importing triton too early.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
-            expand_weights, is_rocm_aiter_2stage_moe_enabled,
-            is_rocm_aiter_moe_enabled, shuffle_weights)
-
-        self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
-        self.rocm_aiter_2stage_moe_enabled = is_rocm_aiter_2stage_moe_enabled()
+            expand_weights, shuffle_weights)
 
         # TODO (rob): refactor block quant into separate class.
         if self.block_quant:
@@ -806,17 +807,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 layer.w2_weight_scale = torch.nn.Parameter(
                     w2_scales.contiguous(), requires_grad=False)
 
-                if self.rocm_aiter_2stage_moe_enabled:
-                    logger.warning_once(
-                        "VLLM_ROCM_USE_AITER_2STAGE_MOE=1."
-                        "However,dynamic FP8 quantization do not support"
-                        " AITER 2 stage moe, fallback to asm_moe")
-                    # override the rocm_aiter_2stage_moe_enabled
-                    self.rocm_aiter_2stage_moe_enabled = False
-                layout = (16, 16)
                 shuffled_w13, shuffled_w2 = shuffle_weights(layer.w13_weight,
                                                             layer.w2_weight,
-                                                            layout=layout)
+                                                            layout=(16, 16))
 
                 layer.w13_weight = torch.nn.Parameter(shuffled_w13,
                                                       requires_grad=False)
@@ -898,12 +891,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     expansion_dims=expansion_dims)
                 layer.w2_weight_scale = torch.nn.Parameter(
                     w2_scales.contiguous(), requires_grad=False)
-                layout = (32,
-                          32) if self.rocm_aiter_2stage_moe_enabled else (16,
-                                                                          16)
+
                 shuffled_w13, shuffled_w2 = shuffle_weights(layer.w13_weight,
                                                             layer.w2_weight,
-                                                            layout=layout)
+                                                            layout=(32, 32))
 
                 layer.w13_weight = torch.nn.Parameter(shuffled_w13,
                                                       requires_grad=False)
@@ -961,21 +952,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 layer.w2_weight,
                 topk_weights=topk_weights,
                 topk_ids=topk_ids,
-                inplace=True,
                 activation=activation,
                 use_fp8_w8a8=True,
-                global_num_experts=global_num_experts,
                 apply_router_weight_on_input=apply_router_weight_on_input,
-                expert_map=expert_map,
                 w1_scale=(layer.w13_weight_scale_inv
                           if self.block_quant else layer.w13_weight_scale),
                 w2_scale=(layer.w2_weight_scale_inv
                           if self.block_quant else layer.w2_weight_scale),
                 a1_scale=layer.w13_input_scale,
                 a2_scale=layer.w2_input_scale,
-                block_shape=self.quant_config.weight_block_size,
-                use_ck_moe_2stages=self.rocm_aiter_2stage_moe_enabled,
-            )
+                block_shape=self.quant_config.weight_block_size)
+
         if self.use_marlin:
             return torch.ops.vllm.fused_marlin_moe(
                 x,
