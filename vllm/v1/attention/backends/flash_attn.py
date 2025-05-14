@@ -30,6 +30,44 @@ if current_platform.is_rocm():
     import triton
     import triton.language as tl
 
+    def convert_vllm_block_table_to_sglang_kv_index(
+        block_table: torch.Tensor,
+        block_size: int,
+    ) -> [torch.Tensor, torch.Tensor]:
+
+        batches, pages = block_table.shape
+
+        kv_indptr = torch.empty([batches + 1], dtype=torch.int32, device="cuda")
+        kv_indptr[0] = 0
+        all_token_positions = []
+
+
+        for b_idx in range(batches):
+            real_pages = 0
+            for p_idx in range(pages):
+                if block_table[b_idx, p_idx] == 0:
+                    break
+                start_token = p_idx * block_size
+                end_token = (p_idx + 1) * block_size
+
+                token_positions = torch.arange(
+                    start_token, end_token, dtype=torch.int32
+                )
+
+                block_start_pos = block_table[b_idx, p_idx] * block_size
+                kv_positions = torch.arange(
+                    block_start_pos, block_start_pos + block_size, dtype=torch.int32, device="cuda"
+                )
+
+                all_token_positions.extend(kv_positions)
+                real_pages += 1
+
+            kv_indptr[b_idx + 1] = real_pages * block_size + kv_indptr[b_idx]
+
+        kv_page_indices = torch.tensor(all_token_positions, dtype=torch.int32, device="cuda")
+
+        return kv_indptr, kv_page_indices 
+
     @triton.jit
     def _vllm_layout_trans_kernel(
         k_buffer_ptr, 
@@ -101,6 +139,8 @@ if current_platform.is_rocm():
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor,
+        kv_indptr: torch.Tensor,
+        kv_page_indices: torch.Tensor,
     ) -> torch.Tensor:
         cu_seqlens_k = torch.zeros(seqlens_k.shape[0] + 1,
                                     dtype=torch.int32,
@@ -109,14 +149,32 @@ if current_platform.is_rocm():
                      dim=0,
                      dtype=cu_seqlens_k.dtype,
                      out=cu_seqlens_k[1:])
-        k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
-        output = aiter.flash_attn_varlen_func(
+        # k, v = vllm_layout_trans(cu_seqlens_k, block_table, k_cache, v_cache, max_seqlen_k)
+        # output = aiter.flash_attn_varlen_func(
+        #     q=q,
+        #     k=k,
+        #     v=v,
+        #     cu_seqlens_q=cu_seqlens_q,
+        #     max_seqlen_q=max_seqlen_q,
+        #     cu_seqlens_k=cu_seqlens_k,
+        #     max_seqlen_k=max_seqlen_k,
+        #     softmax_scale=softmax_scale,
+        #     causal=True,
+        #     alibi_slopes=alibi_slopes,
+        #     window_size=tuple(window_size),
+        # )
+
+        # block_size = k_cache.shape[-3]
+        # kv_indptr, kv_page_indices = convert_vllm_block_table_to_sglang_kv_index(block_table, block_size)
+
+        output = aiter.mha_batch_prefill_func(
             q=q,
-            k=k,
-            v=v,
+            k=k_cache,
+            v=v_cache,
             cu_seqlens_q=cu_seqlens_q,
+            kv_indptr=kv_indptr,
+            kv_page_indices=kv_page_indices,
             max_seqlen_q=max_seqlen_q,
-            cu_seqlens_k=cu_seqlens_k,
             max_seqlen_k=max_seqlen_k,
             softmax_scale=softmax_scale,
             causal=True,
@@ -124,6 +182,7 @@ if current_platform.is_rocm():
             window_size=tuple(window_size),
         )
         return output.to(torch.float8_e4m3fnuz)
+
     
     def flash_attn_varlen_func_fake(
         q: torch.Tensor,
@@ -137,6 +196,8 @@ if current_platform.is_rocm():
         window_size: Optional[list[int]],  # -1 means infinite context window
         alibi_slopes: Optional[list[float]],
         block_table: torch.Tensor,
+        kv_indptr: torch.Tensor,
+        kv_page_indices: torch.Tensor,
     ) -> torch.Tensor:
         return torch.empty(q.shape[0], q.shape[1], v_cache.shape[-2], dtype=torch.float8_e4m3fnuz, device="cuda")
     
@@ -236,6 +297,8 @@ class FlashAttentionMetadata:
     cu_seq_lens: torch.Tensor
     total_tokens: int
     block_table: torch.Tensor
+    kv_indptr: torch.Tensor
+    kv_page_indices: torch.Tensor
     slot_mapping: torch.Tensor
 
     # For cascade attention.
@@ -496,6 +559,7 @@ class FlashAttentionMetadataBuilder:
             prefix_kv_lens = None
             suffix_kv_lens = None
 
+        kv_indptr, kv_page_indices = convert_vllm_block_table_to_sglang_kv_index(block_table, self.runner.block_size)
         attn_metadata = FlashAttentionMetadata(
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
@@ -512,6 +576,8 @@ class FlashAttentionMetadataBuilder:
             prefix_kv_lens=prefix_kv_lens,
             suffix_kv_lens=suffix_kv_lens,
             local_attn_metadata=local_attn_metadata,
+            kv_indptr=kv_indptr,
+            kv_page_indices=kv_page_indices,
         )
         return attn_metadata
 
@@ -688,6 +754,8 @@ class FlashAttentionImpl(AttentionImpl):
                     alibi_slopes=self.alibi_slopes,
                     window_size=list(self.sliding_window),
                     block_table=block_table,
+                    kv_indptr=attn_metadata.kv_indptr,
+                    kv_page_indices=attn_metadata.kv_page_indices,
                 )
             else:
                 descale_shape = (cu_seqlens_q.shape[0] - 1, key.shape[1])

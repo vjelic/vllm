@@ -198,6 +198,8 @@ class TritonAttentionImpl(AttentionImpl):
                                      alibi_slopes=self.alibi_slopes,
                                      sliding_window=self.sliding_window[0],
                                      sm_scale=self.scale,
-                                     fp8_out_scale=fp8_out_scale)
+                                     fp8_out_scale=fp8_out_scale,
+                                     kv_indptr=attn_metadata.kv_indptr,
+                                     kv_page_indices=attn_metadata.kv_page_indices)
 
         return output
