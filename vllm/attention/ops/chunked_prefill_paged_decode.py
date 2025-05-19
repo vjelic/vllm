@@ -7,11 +7,11 @@
 #  - Thomas Parnell <tpa@zurich.ibm.com>
 
 import torch
-import triton
-import triton.language as tl
 
 from vllm import _custom_ops as ops
+from vllm.platforms import current_platform
 from vllm.platforms.rocm import use_rocm_custom_paged_attention
+from vllm.triton_utils import tl, triton
 
 from .prefix_prefill import context_attention_fwd
 
@@ -23,44 +23,43 @@ def cdiv_fn(x, y):
 
 @triton.jit
 def kernel_paged_attention_2d(
-    output_ptr,  # [num_tokens, num_query_heads, head_size]
-    query_ptr,  # [num_tokens, num_query_heads, head_size]
-    key_cache_ptr,  # [num_blks, num_kv_heads, head_size // x, blk_size, x]
-    value_cache_ptr,  # [num_blks, num_kv_heads, head_size, blk_size]
-    block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
-    seq_lens_ptr,  # [num_seqs]
-    alibi_slopes_ptr,  # [num_query_heads]
-    scale,  # float32
-    k_scale,  # float32
-    v_scale,  # float32
-    out_scale,
-    num_query_heads: tl.constexpr,  # int
-    num_queries_per_kv: tl.constexpr,  # int
-    num_queries_per_kv_padded: tl.constexpr,  # int
-    block_table_stride: tl.int64,  # int
-    query_stride_0: tl.int64,  # int
-    query_stride_1: tl.int64,  # int, should be equal to head_size
-    output_stride_0: tl.int64,  # int
-    output_stride_1: tl.int64,  # int, should be equal to head_size
-    BLOCK_SIZE: tl.constexpr,  # int
-    HEAD_SIZE: tl.constexpr,  # int
-    HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
-    USE_ALIBI_SLOPES: tl.constexpr,  # bool
-    SLIDING_WINDOW: tl.constexpr,  # int
-    x: tl.constexpr,  # int
-    stride_k_cache_0: tl.int64,  # int
-    stride_k_cache_1: tl.int64,  # int
-    stride_k_cache_2: tl.int64,  # int
-    stride_k_cache_3: tl.int64,  # int
-    stride_k_cache_4: tl.int64,  # int
-    stride_v_cache_0: tl.int64,  # int
-    stride_v_cache_1: tl.int64,  # int
-    stride_v_cache_2: tl.int64,  # int
-    stride_v_cache_3: tl.int64,  # int
-    filter_by_query_len: tl.constexpr,  # bool
-    query_start_len_ptr,  # [num_seqs+1]
-    USE_FP8: tl.constexpr,
-):
+        output_ptr,  # [num_tokens, num_query_heads, head_size]
+        query_ptr,  # [num_tokens, num_query_heads, head_size]
+        key_cache_ptr,  # [num_blks, num_kv_heads, head_size // x, blk_size, x]
+        value_cache_ptr,  # [num_blks, num_kv_heads, head_size, blk_size]
+        block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
+        seq_lens_ptr,  # [num_seqs]
+        alibi_slopes_ptr,  # [num_query_heads]
+        scale,  # float32
+        k_scale,  # float32
+        v_scale,  # float32
+        out_scale,
+        num_query_heads: tl.constexpr,  # int
+        num_queries_per_kv: tl.constexpr,  # int
+        num_queries_per_kv_padded: tl.constexpr,  # int
+        block_table_stride: tl.int64,  # int
+        query_stride_0: tl.int64,  # int
+        query_stride_1: tl.int64,  # int, should be equal to head_size
+        output_stride_0: tl.int64,  # int
+        output_stride_1: tl.int64,  # int, should be equal to head_size
+        BLOCK_SIZE: tl.constexpr,  # int
+        HEAD_SIZE: tl.constexpr,  # int
+        HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
+        USE_ALIBI_SLOPES: tl.constexpr,  # bool
+        SLIDING_WINDOW: tl.constexpr,  # int
+        x: tl.constexpr,  # int
+        stride_k_cache_0: tl.int64,  # int
+        stride_k_cache_1: tl.int64,  # int
+        stride_k_cache_2: tl.int64,  # int
+        stride_k_cache_3: tl.int64,  # int
+        stride_k_cache_4: tl.int64,  # int
+        stride_v_cache_0: tl.int64,  # int
+        stride_v_cache_1: tl.int64,  # int
+        stride_v_cache_2: tl.int64,  # int
+        stride_v_cache_3: tl.int64,  # int
+        filter_by_query_len: tl.constexpr,  # bool
+        query_start_len_ptr,  # [num_seqs+1]
+        USE_FP8: tl.constexpr):
     seq_idx = tl.program_id(0)
     kv_head_idx = tl.program_id(1)
 
@@ -228,6 +227,7 @@ def chunked_prefill_paged_decode(
     sm_scale=None,
     fp8_out_scale=None,
 ):
+
     if sm_scale is None:
         sm_scale = 1.0 / (query.shape[1]**0.5)
 
@@ -269,11 +269,11 @@ def chunked_prefill_paged_decode(
     # Conversion of FP8 Tensor from uint8 storage to
     # appropriate torch.dtype for interpretation by Triton
     if "fp8" in kv_cache_dtype:
-        assert key_cache.dtype == torch.uint8
-        assert value_cache.dtype == torch.uint8
+        assert key_cache.dtype in [torch.uint8, current_platform.fp8_dtype()]
+        assert value_cache.dtype in [torch.uint8, current_platform.fp8_dtype()]
 
         if kv_cache_dtype in ("fp8", "fp8_e4m3"):
-            target_dtype = torch.float8_e4m3fn
+            target_dtype = current_platform.fp8_dtype()
         elif kv_cache_dtype == "fp8_e5m2":
             target_dtype = torch.float8_e5m2
         else:
@@ -294,7 +294,7 @@ def chunked_prefill_paged_decode(
         max_num_partitions = ((max_seq_len + _PARTITION_SIZE_ROCM - 1) //
                               _PARTITION_SIZE_ROCM)
         assert _PARTITION_SIZE_ROCM % block_size == 0
-        total_num_seq = query.shape[0]
+        total_num_seq = block_table.shape[0]
         tmp_output = torch.empty(
             size=(total_num_seq, num_query_heads, max_num_partitions,
                   head_size),
