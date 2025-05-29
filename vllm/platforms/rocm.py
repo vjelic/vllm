@@ -98,7 +98,7 @@ def with_amdsmi_context(fn):
 @cache
 def on_mi250_mi300() -> bool:
     GPU_ARCH = torch.cuda.get_device_properties("cuda").gcnArchName
-    return any(arch in GPU_ARCH for arch in ["gfx90a", "gfx942"])
+    return any(arch in GPU_ARCH for arch in ["gfx90a", "gfx942", "gfx950"])
 
 
 @cache
@@ -118,17 +118,15 @@ def use_rocm_custom_paged_attention(
 
     # custom paged attn always supported on V0. On V1, requires sliding window
     # disabled due to observed numerical discrepancy.
-    if ON_GFX9:
-        return ((not envs.VLLM_USE_V1 or sliding_window == 0
-                 or sliding_window == (-1, -1))
-                and (qtype == torch.half or qtype == torch.bfloat16)
-                and (head_size == 64 or head_size == 128)
-                and (block_size == 16 or block_size == 32)
-                and (gqa_ratio >= 1 and gqa_ratio <= 16)
-                and max_seq_len <= 128 * 1024
-                and (envs.VLLM_ROCM_CUSTOM_PAGED_ATTN)
-                and not (envs.VLLM_ROCM_USE_AITER_PAGED_ATTN
-                         and envs.VLLM_ROCM_USE_AITER))
+    return (ON_GFX9 and (not envs.VLLM_USE_V1 or sliding_window == 0
+                         or sliding_window == (-1, -1))
+            and (qtype == torch.half or qtype == torch.bfloat16)
+            and (head_size == 64 or head_size == 128)
+            and (block_size == 16 or block_size == 32)
+            and (gqa_ratio >= 1 and gqa_ratio <= 16) and max_seq_len <= 131072
+            and (envs.VLLM_ROCM_CUSTOM_PAGED_ATTN)
+            and not (envs.VLLM_ROCM_USE_AITER_PAGED_ATTN
+                     and envs.VLLM_ROCM_USE_AITER))
 
     else:
         return (ON_GFX11_GFX12 and (not envs.VLLM_USE_V1 or sliding_window == 0
