@@ -162,19 +162,6 @@ class QuarkConfig(QuantizationConfig):
         else:
             return False
 
-    def is_fp8_w8a8(self) -> bool:
-        # Returns True if all quantized layers in model are fp8 w8a8
-        global_quant_config = cast(
-            dict[str, Any], self.quant_config.get("global_quant_config"))
-        layer_quant_configs = cast(dict[str, Any],
-                                   self.quant_config.get("layer_quant_config"))
-        for config in (global_quant_config, *layer_quant_configs.values()):
-            weight_config = cast(dict[str, Any], config.get("weight"))
-            input_config = cast(dict[str, Any], config.get("input_tensors"))
-            if not self._is_fp8_w8a8(weight_config, input_config):
-                return False
-        return True
-
     def _is_fp8_w8a8(self, weight_quant: Optional[dict[str, Any]],
                      input_quant: Optional[dict[str, Any]]) -> bool:
         # Confirm weights and input quantized.
@@ -407,7 +394,8 @@ class QuarkLinearMethod(LinearMethodBase):
     def apply(self,
               layer: torch.nn.Module,
               x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None):
+              bias: Optional[torch.Tensor] = None,
+              x_scales: torch.Tensor = None):
         """
         Use the output of create_weights and the CompressedTensorsScheme
         associated with the layer to apply the forward pass with the
@@ -417,7 +405,7 @@ class QuarkLinearMethod(LinearMethodBase):
         scheme = layer.scheme
         if scheme is None:
             raise ValueError("A scheme must be defined for each layer")
-        return scheme.apply_weights(layer, x, bias=bias)
+        return scheme.apply_weights(layer, x, bias=bias, x_scales=x_scales)
 
 
 class QuarkKVCacheMethod(BaseKVCacheMethod):

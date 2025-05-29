@@ -29,8 +29,6 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
-import vllm.envs as envs
-from vllm import _custom_ops as ops
 from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
@@ -42,15 +40,12 @@ from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
-from vllm.model_executor.layers.quantization.fp8 import Fp8Config
-from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsLoRA, SupportsPP
@@ -58,6 +53,8 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
+import os
+VLLM_USE_AITER_TRITON_SILU_MUL = (os.environ.get("VLLM_USE_AITER_TRITON_SILU_MUL", "0") == "1")
 
 
 class LlamaMLP(nn.Module):
@@ -88,29 +85,19 @@ class LlamaMLP(nn.Module):
             reduce_results=reduce_results,
             prefix=f"{prefix}.down_proj",
         )
-        self.use_fp8 = (isinstance(quant_config, Fp8Config) or
-                        (isinstance(quant_config, QuarkConfig)
-                         and quant_config.is_fp8_w8a8())
-                        if current_platform.is_fp8_fnuz() else False)
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        if current_platform.is_rocm() and x.shape[0] == 1 and x.shape[1] == 1:
-            out = torch.empty(x.shape[0],
-                              self.gate_up_proj.weight.shape[0] // 2,
-                              dtype=x.dtype,
-                              device=x.device)
-            ops.LLMM_Silu(self.gate_up_proj.weight, x.view(-1, x.size(-1)),
-                          out, 8)
-            x = out.view(x.shape[0], x.shape[1], out.shape[1])
+        x, _ = self.gate_up_proj(x)
+        if VLLM_USE_AITER_TRITON_SILU_MUL:
+            x, x_scales = self.act_fn(x)
+            x, _ = self.down_proj(x, x_scales)
         else:
-            x, _ = self.gate_up_proj(x)
-            x = self.act_fn(
-                x, self.down_proj.input_scale if self.use_fp8 else None)
-        x, _ = self.down_proj(x)
+            x = self.act_fn(x)
+            x, _ = self.down_proj(x)
         return x
 
 
@@ -181,9 +168,20 @@ class LlamaAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
-        self._init_rotary_emb(config,
-                              rope_scaling=rope_scaling,
-                              quant_config=quant_config)
+        is_neox_style = True
+        is_gguf = quant_config and quant_config.get_name() == "gguf"
+        if is_gguf and config.model_type == "llama":
+            is_neox_style = False
+
+        self.rotary_emb = get_rope(
+            self.head_dim,
+            rotary_dim=self.head_dim,
+            max_position=max_position_embeddings,
+            base=rope_theta,
+            rope_scaling=rope_scaling,
+            is_neox_style=is_neox_style,
+            partial_rotary_factor=self.partial_rotary_factor,
+        )
 
         if hasattr(config, "interleaved_sliding_window"):
             interleaved_sliding_window = config.interleaved_sliding_window
@@ -197,16 +195,6 @@ class LlamaAttention(nn.Module):
                     f"{type(interleaved_sliding_window)} is not supported.")
         else:
             sliding_window = None
-
-        # For CUDA devices and Navi4x, attn_fp8 will be set to false.
-        use_fp8 = isinstance(
-            quant_config, Fp8Config) or (isinstance(quant_config, QuarkConfig)
-                                         and quant_config.is_fp8_w8a8())
-        self.attn_fp8_out = (envs.VLLM_USE_ROCM_CUSTOM_PAGED_ATTN_FP8_OUT
-                             and envs.VLLM_USE_TRITON_FLASH_ATTN
-                             and current_platform.is_fp8_fnuz() and use_fp8)
-        if envs.VLLM_USE_V1 and not envs.VLLM_V1_USE_PREFILL_DECODE_ATTENTION:
-            self.attn_fp8_out = False
 
         self.attn = Attention(
             self.num_heads,
@@ -232,24 +220,6 @@ class LlamaAttention(nn.Module):
         output, _ = self.o_proj(attn_output)
         return output
 
-    def _init_rotary_emb(self, config: LlamaConfig,
-                         rope_scaling: Optional[dict[str, Any]],
-                         quant_config: Optional[QuantizationConfig]) -> None:
-        is_neox_style = True
-        is_gguf = quant_config and quant_config.get_name() == "gguf"
-        if is_gguf and config.model_type == "llama":
-            is_neox_style = False
-
-        self.rotary_emb = get_rope(
-            self.head_dim,
-            rotary_dim=self.head_dim,
-            max_position=self.max_position_embeddings,
-            base=self.rope_theta,
-            rope_scaling=rope_scaling,
-            is_neox_style=is_neox_style,
-            partial_rotary_factor=self.partial_rotary_factor,
-        )
-
 
 class LlamaDecoderLayer(nn.Module):
 
@@ -262,10 +232,6 @@ class LlamaDecoderLayer(nn.Module):
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.use_fp8 = (isinstance(quant_config, Fp8Config) or
-                        (isinstance(quant_config, QuarkConfig)
-                         and quant_config.is_fp8_w8a8())
-                        if current_platform.is_fp8_fnuz() else False)
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
         if rope_scaling is not None and getattr(
@@ -328,21 +294,18 @@ class LlamaDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
-        scale = None if not self.use_fp8 else \
-            self.self_attn.qkv_proj.input_scale
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states, None, scale)
+            hidden_states = self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual, scale)
+                hidden_states, residual)
         hidden_states = self.self_attn(positions=positions,
                                        hidden_states=hidden_states)
 
         # Fully Connected
-        scale = None if not self.use_fp8 else self.mlp.gate_up_proj.input_scale
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual, scale)
+            hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
@@ -677,10 +640,3 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 name = name.replace(item, mapping[item])
 
         return name, loaded_weight
-
-    def process_weights_after_loading(self) -> None:
-        for layer in self.model.layers:
-            assert isinstance(layer, LlamaDecoderLayer)
-            if layer.self_attn.attn_fp8_out:
-                layer.self_attn.attn._out_scale = \
-                    layer.self_attn.o_proj.input_scale
