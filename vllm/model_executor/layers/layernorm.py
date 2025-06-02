@@ -45,25 +45,30 @@ def fused_add_rms_norm(
 def rocm_aiter_rms_norm(x: torch.Tensor, weight: torch.Tensor,
                         variance_epsilon: float) -> torch.Tensor:
 
-    import aiter as rocm_aiter
+    # import aiter as rocm_aiter
+    from aiter.ops.triton.rmsnorm import rms_norm
     if x.dim() > 2:
         x_original_shape = x.shape
         x = x.reshape(-1, x_original_shape[-1])
-        x = rocm_aiter.rms_norm(x, weight, variance_epsilon)
+        # x = rocm_aiter.rms_norm(x, weight, variance_epsilon)
+        x = rms_norm(x, weight, variance_epsilon)
         return x.reshape(x_original_shape)
 
-    return rocm_aiter.rms_norm(x, weight, variance_epsilon)
+    # return rocm_aiter.rms_norm(x, weight, variance_epsilon)
+    return rms_norm(x, weight, variance_epsilon)
 
 
 def rocm_aiter_fused_add_rms_norm(
         x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
         variance_epsilon: float) -> tuple[torch.Tensor, torch.Tensor]:
 
-    import aiter as rocm_aiter
+    # import aiter as rocm_aiter
+    from aiter.ops.triton.rmsnorm import rmsnorm2d_fwd_with_add
 
     residual_out = torch.empty_like(residual)
     output = torch.empty_like(x)
-    rocm_aiter.rmsnorm2d_fwd_with_add(
+    # rocm_aiter.rmsnorm2d_fwd_with_add(
+    rmsnorm2d_fwd_with_add(
         output,  # output
         x,  # input
         residual,  # residual input
