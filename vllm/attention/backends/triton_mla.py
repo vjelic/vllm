@@ -102,7 +102,7 @@ class TritonMLAImpl(MLACommonImpl[MLACommonMetadata]):
             dtype=torch.float32,
             device=q.device,
         )
-        key=(32, B, self.num_heads, attn_metadata.num_kv_splits, self.kv_lora_rank+2)
+        key=(32, B, self.num_heads, num_kv_splits, self.kv_lora_rank+2)
         global attn_buf_cache
         if key in attn_buf_cache:
             attn_buf=attn_buf_cache[key]
