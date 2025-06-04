@@ -72,9 +72,8 @@ class SiluAndMul(CustomOp):
         super().__init__()
         if current_platform.is_cuda_alike() or current_platform.is_cpu():
             if VLLM_USE_AITER_TRITON_SILU_MUL:
-                import aiter.ops.triton.activation as ops
-                self.op = lambda x: ops.act_mul_and_mxfp4_quant(x, "silu")
-                self.op_shfl = lambda x: ops.act_mul_and_mxfp4_quant_shuffle_scales(
+                self.op = lambda x: torch.ops.vllm.act_mul_and_mxfp4_quant(x, "silu")
+                self.op_shfl = lambda x: torch.ops.vllm.act_mul_and_mxfp4_quant_shuffle_scales(
                     x, "silu")
             else:
                 self.op = torch.ops._C.silu_and_mul
@@ -115,6 +114,45 @@ class SiluAndMul(CustomOp):
         result = s * x_reshaped[:, d:]
         return result.view(*x.shape[:-1], d)
 
+
+if current_platform.is_rocm():
+    import math
+    from vllm.utils import direct_register_custom_op
+    import aiter.ops.triton.activation as ops
+
+    def act_mul_and_mxfp4_quant_shuffle_scales_fake(
+        x: torch.Tensor,
+        activation: str = "silu",
+        scaling_mode: str = "even",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        M, N = x.shape
+        N_half = N // 2
+        return torch.empty((M, N_half // 2), dtype=torch.uint8, device=x.device),\
+            torch.empty((math.ceil(M / 256) * 256, \
+                        math.ceil(math.ceil(N_half / 32) / 8) * 8), \
+                            dtype=torch.uint8, device=x.device)
+
+    direct_register_custom_op(op_name="act_mul_and_mxfp4_quant_shuffle_scales",
+                            op_func=ops.act_mul_and_mxfp4_quant_shuffle_scales,
+                            mutates_args=[],
+                            fake_impl=act_mul_and_mxfp4_quant_shuffle_scales_fake,
+                            dispatch_key=current_platform.dispatch_key)
+
+    def act_mul_and_mxfp4_quant_fake(
+        x: torch.Tensor,
+        activation: str = "silu",
+        scaling_mode: str = "even",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        M, N = x.shape
+        N_half = N // 2
+        return torch.empty((M, N_half // 2), dtype=torch.uint8, device=x.device),\
+            torch.empty((math.ceil(N_half / 32), math.ceil(M / 256) * 256), dtype=torch.uint8, device=x.device)
+
+    direct_register_custom_op(op_name="act_mul_and_mxfp4_quant",
+                            op_func=ops.act_mul_and_mxfp4_quant,
+                            mutates_args=[],
+                            fake_impl=act_mul_and_mxfp4_quant_fake,
+                            dispatch_key=current_platform.dispatch_key)
 
 @CustomOp.register("mul_and_silu")
 class MulAndSilu(CustomOp):

@@ -95,8 +95,8 @@ class LlamaMLP(nn.Module):
     def forward(self, x):
         x, _ = self.gate_up_proj(x)
         if VLLM_USE_AITER_TRITON_SILU_MUL:
-            x, x_scales = self.act_fn(x)
-            x, _ = self.down_proj(x, x_scales)
+            # x, x_scales = self.act_fn(x)
+            # x, _ = self.down_proj(x, x_scales)
         else:
             x = self.act_fn(x)
             x, _ = self.down_proj(x)
@@ -215,12 +215,13 @@ class LlamaAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v)
-        output, _ = self.o_proj(attn_output)
-        return output
+        # qkv, _ = self.qkv_proj(hidden_states)
+        # q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        # q, k = self.rotary_emb(positions, q, k)
+        # attn_output = self.attn(q, k, v)
+        # output, _ = self.o_proj(attn_output)
+        # return output
+        return hidden_states
 
 
 class LlamaDecoderLayer(nn.Module):
