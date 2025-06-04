@@ -840,6 +840,11 @@ def try_get_optimal_moe_config(
             # Else use the default config
             config = get_default_config(M, E, N, w1_shape[2], top_k, dtype,
                                         is_marlin, block_shape)
+    config = config.copy()
+    BLOCK_SIZE_K = config.pop("BLOCK_SIZE_K")
+    if block_shape is not None:
+        BLOCK_SIZE_K = min(BLOCK_SIZE_K, min(block_shape[0], block_shape[1]))
+    config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
     return config
 
 
@@ -1339,7 +1344,7 @@ def fused_experts_impl(
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
                                  global_num_experts, expert_map))
-
+        print("invoke_fused_moe_kernel", config)
         invoke_fused_moe_kernel(qcurr_hidden_states,
                                 w1,
                                 intermediate_cache1,
