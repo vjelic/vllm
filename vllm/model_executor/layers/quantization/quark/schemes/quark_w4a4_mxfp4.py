@@ -19,12 +19,33 @@ try:
     from aiter.ops.triton.gemm_afp4wfp4 import (
         gemm_afp4wfp4, gemm_afp4wfp4_preshuffled_scales)
     from aiter.ops.triton.quant import dynamic_mxfp4_quant
+    
     VLLM_TRITON_FP4_GEMM_USE_ASM = (os.environ.get(
         "VLLM_TRITON_FP4_GEMM_USE_ASM", "0") == "1")
     if VLLM_TRITON_FP4_GEMM_USE_ASM:
         from aiter import gemm_a4w4_asm
         from aiter.utility.fp4_utils import (
             dynamic_mxfp4_quant as dynamic_mxfp4_quant_asm)
+    
+        from vllm.utils import direct_register_custom_op
+
+        def gemm_a4w4_asm_fake(
+            A: torch.Tensor,  # A:[M, K/2] f4x2
+            B: torch.Tensor,  # B:[N, K/2] f4x2
+            A_scale: torch.Tensor,  # A_scale:[M, K/32] e8m0 paded
+            B_scale: torch.Tensor,  # B_scale:[N, K/32] e8m0 paded
+            out: torch.Tensor,  # Out:[M, N] bf16
+            bias: torch.Tensor,  # bias:[1, N] f32
+            alpha: Optional[float] = 1.0,
+            beta: Optional[float] = 0.0,
+        ) -> torch.Tensor:
+            pass
+
+        direct_register_custom_op(op_name="gemm_a4w4_asm",
+                                op_func=gemm_a4w4_asm,
+                                mutates_args=["out"],
+                                fake_impl=gemm_a4w4_asm_fake,
+                                dispatch_key=current_platform.dispatch_key,)
 except ImportError:
     dynamic_mxfp4_quant = gemm_afp4wfp4 = None
 
@@ -215,23 +236,3 @@ class QuarkW4A4MXFP4(QuarkScheme):
 
 
 
-if current_platform.is_rocm():
-    from vllm.utils import direct_register_custom_op
-
-    def gemm_a4w4_asm_fake(
-        A: torch.Tensor,  # A:[M, K/2] f4x2
-        B: torch.Tensor,  # B:[N, K/2] f4x2
-        A_scale: torch.Tensor,  # A_scale:[M, K/32] e8m0 paded
-        B_scale: torch.Tensor,  # B_scale:[N, K/32] e8m0 paded
-        out: torch.Tensor,  # Out:[M, N] bf16
-        bias: torch.Tensor,  # bias:[1, N] f32
-        alpha: Optional[float] = 1.0,
-        beta: Optional[float] = 0.0,
-    ) -> torch.Tensor:
-        pass
-
-    direct_register_custom_op(op_name="gemm_a4w4_asm",
-                            op_func=gemm_a4w4_asm,
-                            mutates_args=["out"],
-                            fake_impl=gemm_a4w4_asm_fake,
-                            dispatch_key=current_platform.dispatch_key,)
