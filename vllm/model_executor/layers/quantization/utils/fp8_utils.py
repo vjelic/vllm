@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 
 from vllm import _custom_ops as ops
+from vllm.envs import envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     scaled_dequantize)
@@ -54,6 +55,17 @@ def rocm_aiter_gemm_w8a8_blockscale_impl(
 
     return rocm_aiter.gemm_a8w8_blockscale_CK(A, B, As, Bs, dtype=output_dtype)
 
+def rocm_aiter_gemm_w8a8_blockscale_wpreshuffle_impl(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    As: torch.Tensor,
+    Bs: torch.Tensor,
+    block_size: list[int],
+    output_dtype: torch.dtype = torch.float16,
+) -> torch.Tensor:
+    import aiter as rocm_aiter
+    return rocm_aiter.gemm_a8w8_blockscale_wpreshuffle_CK(A, B, As, Bs, dtype=output_dtype)
+
 
 def rocm_aiter_gemm_w8a8_blockscale_fake(
     A: torch.Tensor,
@@ -78,6 +90,13 @@ if current_platform.is_rocm():
         fake_impl=rocm_aiter_gemm_w8a8_blockscale_fake,
         dispatch_key=current_platform.dispatch_key,
     )
+    direct_register_custom_op(
+        op_name="rocm_aiter_gemm_w8a8_blockscale_wpreshuffle",
+        op_func=rocm_aiter_gemm_w8a8_blockscale_wpreshuffle_impl,
+        mutates_args=[],
+        fake_impl=rocm_aiter_gemm_w8a8_blockscale_fake,
+        dispatch_key=current_platform.dispatch_key,
+    )
 
 
 def dispatch_w8a8_blockscale_func(
@@ -93,7 +112,10 @@ def dispatch_w8a8_blockscale_func(
     if use_cutlass:
         return cutlass_scaled_mm
     if (use_aiter_and_is_supported):
-        return torch.ops.vllm.rocm_aiter_gemm_w8a8_blockscale
+        if envs.VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE:
+            return torch.ops.vllm.rocm_aiter_gemm_w8a8_blockscale_wpreshuffle
+        else:
+            return torch.ops.vllm.rocm_aiter_gemm_w8a8_blockscale
     return w8a8_block_fp8_matmul
 
 

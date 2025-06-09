@@ -330,6 +330,9 @@ class Fp8LinearMethod(LinearMethodBase):
             layer.weight = Parameter(weight, requires_grad=False)
             layer.weight_scale_inv = Parameter(weight_scale_inv,
                                                requires_grad=False)
+            if envs.VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE:
+                from aiter.ops.shuffle import shuffle_weight
+                layer.weight.data = shuffle_weight(layer.weight.contiguous(), (16, 16))
 
         # If checkpoint not serialized fp8, quantize the weights.
         elif not self.quant_config.is_checkpoint_fp8_serialized:

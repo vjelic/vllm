@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_USE_AITER_RMSNORM: bool = True
     VLLM_ROCM_USE_AITER_MOE: bool = True
     VLLM_ROCM_USE_AITER_LINEAR: bool = True
+    VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE: bool = False
     VLLM_ROCM_USE_AITER_MLA: bool = True
     VLLM_ROCM_USE_SKINNY_GEMM: bool = True
     VLLM_ROCM_FP8_PADDING: bool = True
@@ -670,6 +671,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - scaled_mm (per-tensor / rowwise)
     "VLLM_ROCM_USE_AITER_LINEAR":
     lambda: (os.getenv("VLLM_ROCM_USE_AITER_LINEAR", "True").lower() in
+             ("true", "1")),
+
+    # use aiter linear preshuffle op if aiter ops are enabled
+    # default: False
+    "VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE":
+    lambda: (os.getenv("VLLM_ROCM_USE_AITER_LINEAR", "False").lower() in
              ("true", "1")),
 
     # Whether to use aiter mla ops.
