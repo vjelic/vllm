@@ -676,7 +676,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # use aiter linear preshuffle op if aiter ops are enabled
     # default: False
     "VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE":
-    lambda: (os.getenv("VLLM_ROCM_USE_AITER_LINEAR", "False").lower() in
+    lambda: (os.getenv("VLLM_ROCM_USE_AITER_LINEAR_PRESHUFFLE", "False").lower() in
              ("true", "1")),
 
     # Whether to use aiter mla ops.
