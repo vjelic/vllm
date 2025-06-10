@@ -8,8 +8,8 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 
+import vllm.envs as envs
 from vllm import _custom_ops as ops
-from vllm.envs import envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     scaled_dequantize)
