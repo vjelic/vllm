@@ -146,8 +146,8 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
                          alibi_slopes, sliding_window, kv_cache_dtype,
                          blocksparse_params, logits_soft_cap, attn_type,
                          kv_sharing_target_layer_name, **mla_args)
-        assert (num_heads == 16 or num_heads == 128), (
-            f"Aiter MLA only supports 16 or 128 number of heads.\n"
+        assert num_heads in (16, 32, 64, 128), (
+            f"Aiter MLA only supports 16 or 32 or 64 or 128 number of heads.\n"
             f"Provided {num_heads} number of heads.\n"
             "Try adjusting tensor_parallel_size value.")
         unsupported_features = [
@@ -200,7 +200,8 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
                         device=q.device)
 
         kv_buffer = kv_c_and_k_pe_cache.unsqueeze(2)
-
+        max_seqlen_qo = 1
+        """
         if self.num_heads == 16:
             # AITER MLA decode kernel only supports
             # max_seqlen_q=1 when using 16 heads.
@@ -210,7 +211,7 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
             # max_seqlen_q values when using 128 heads.
             assert attn_metadata.prefill is not None
             max_seqlen_qo = attn_metadata.prefill.max_query_len
-
+        """
         aiter_mla_decode_fwd(q, kv_buffer, o, self.scale,
                              attn_metadata.decode.qo_indptr, max_seqlen_qo,
                              attn_metadata.decode.paged_kv_indptr,
