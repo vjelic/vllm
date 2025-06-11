@@ -458,16 +458,21 @@ def _get_seq_len_block_table_args(
 import functools
 
 
-@functools.lru_cache
-def get_static_kvscale(k_scale_float: float, v_scale_float: float,
-                       num_kv_heads: int, num_blocks: int, block_size: int,
-                       device):
-    k_scale = torch.empty((num_kv_heads, num_blocks * block_size),
-                          dtype=torch.float32,
-                          device=device)
-    v_scale = torch.empty((num_kv_heads, num_blocks * block_size),
-                          dtype=torch.float32,
-                          device=device)
+@functools.lru_cache(maxsize=1)
+def get_static_kvscale(
+    k_scale_float: float,
+    v_scale_float: float,
+    num_kv_heads: int,
+    num_blocks: int,
+    block_size: int,
+    device,
+):
+    k_scale = torch.empty(
+        (num_kv_heads, num_blocks * block_size), dtype=torch.float32, device=device
+    )
+    v_scale = torch.empty(
+        (num_kv_heads, num_blocks * block_size), dtype=torch.float32, device=device
+    )
     k_scale.fill_(k_scale_float)
     v_scale.fill_(v_scale_float)
     return k_scale, v_scale
