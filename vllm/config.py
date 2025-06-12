@@ -4453,9 +4453,14 @@ class VllmConfig:
             # FIXME(rob): Add function to set all of these.
             if not self.compilation_config.custom_ops:
                 self.compilation_config.custom_ops = ["none"]
+            if current_platform.is_rocm():
+                if "none" in self.compilation_config.custom_ops:
+                    self.compilation_config.custom_ops.remove("none")
+                self.compilation_config.custom_ops.append("+rms_norm")
+                self.compilation_config.custom_ops.append("+silu_and_mul")
             self.compilation_config.cudagraph_num_of_warmups = 1
-            self.compilation_config.pass_config.enable_fusion = False
-            self.compilation_config.pass_config.enable_noop = False
+            self.compilation_config.pass_config.enable_fusion = True
+            self.compilation_config.pass_config.enable_noop = True
             self.compilation_config.level = CompilationLevel.PIECEWISE
             self.compilation_config.set_splitting_ops_for_v1()
 
