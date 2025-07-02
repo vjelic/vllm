@@ -8,6 +8,7 @@ import torch.nn as nn
 import vllm.envs as envs
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
+from vllm.utils import direct_register_custom_op
 
 
 def is_rocm_aiter_rmsnorm_enabled() -> bool:
@@ -42,39 +43,76 @@ def fused_add_rms_norm(
     return x, residual
 
 
-def rocm_aiter_rms_norm(x: torch.Tensor, weight: torch.Tensor,
-                        variance_epsilon: float) -> torch.Tensor:
+def rocm_aiter_rms_norm_impl(x: torch.Tensor, weight: torch.Tensor,
+                             variance_epsilon: float) -> torch.Tensor:
 
     import aiter as rocm_aiter
+    if x.dim() > 2:
+        x_original_shape = x.shape
+        x = x.reshape(-1, x_original_shape[-1])
+        x = rocm_aiter.rms_norm(x, weight, variance_epsilon)
+        return x.reshape(x_original_shape)
+
     return rocm_aiter.rms_norm(x, weight, variance_epsilon)
 
 
-def rocm_aiter_fused_add_rms_norm(
+def rocm_aiter_rms_norm_fake(x: torch.Tensor, weight: torch.Tensor,
+                             variance_epsilon: float) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+def rocm_aiter_rmsnorm2d_fwd_with_add_impl(
         x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
-        variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        variance_epsilon: float) -> tuple[torch.Tensor, torch.Tensor]:
 
     import aiter as rocm_aiter
 
-    # Assuming the correct signature for rmsnorm2d_fwd_with_add
+    residual_out = torch.zeros_like(residual)
+    output = torch.zeros_like(x)
     rocm_aiter.rmsnorm2d_fwd_with_add(
-        x,  # output
+        output,  # output
         x,  # input
         residual,  # residual input
-        residual,  # residual output
+        residual_out,  # residual output
         weight,
         variance_epsilon,
     )
-    return x, residual
+    return output, residual_out
 
 
-def dispatch_cuda_rmsnorm_func(add_residual: bool):
+def rocm_aiter_rmsnorm2d_fwd_with_add_fake(
+        x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
+        variance_epsilon: float) -> tuple[torch.Tensor, torch.Tensor]:
+    return torch.empty_like(x), torch.empty_like(residual)
+
+
+if current_platform.is_rocm():
+
+    direct_register_custom_op(
+        op_name="rocm_aiter_rms_norm",
+        op_func=rocm_aiter_rms_norm_impl,
+        mutates_args=[],
+        fake_impl=rocm_aiter_rms_norm_fake,
+        dispatch_key=current_platform.dispatch_key,
+    )
+
+    direct_register_custom_op(
+        op_name="rocm_aiter_rmsnorm2d_fwd_with_add",
+        op_func=rocm_aiter_rmsnorm2d_fwd_with_add_impl,
+        mutates_args=[],
+        fake_impl=rocm_aiter_rmsnorm2d_fwd_with_add_fake,
+        dispatch_key=current_platform.dispatch_key,
+    )
+
+
+def dispatch_cuda_rmsnorm_func(add_residual: bool, dtype: torch.dtype):
     if add_residual:
-        if is_rocm_aiter_rmsnorm_enabled():
-            return rocm_aiter_fused_add_rms_norm
+        if is_rocm_aiter_rmsnorm_enabled() and dtype != torch.float32:
+            return torch.ops.vllm.rocm_aiter_rmsnorm2d_fwd_with_add
         return fused_add_rms_norm
 
-    if is_rocm_aiter_rmsnorm_enabled():
-        return rocm_aiter_rms_norm
+    if is_rocm_aiter_rmsnorm_enabled() and dtype != torch.float32:
+        return torch.ops.vllm.rocm_aiter_rms_norm
     return rms_norm
 
 
@@ -107,6 +145,8 @@ class RMSNorm(CustomOp):
             self.weight = torch.ones(hidden_size)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
+
+        self.dtype = self.weight.data.dtype
 
     def forward_native(
         self,
@@ -155,7 +195,7 @@ class RMSNorm(CustomOp):
             return self.forward_native(x, residual)
 
         add_residual = residual is not None
-        norm_func = dispatch_cuda_rmsnorm_func(add_residual)
+        norm_func = dispatch_cuda_rmsnorm_func(add_residual, self.dtype)
 
         if add_residual:
             return norm_func(x, residual, self.weight.data,
