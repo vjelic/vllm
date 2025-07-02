@@ -24,7 +24,6 @@ from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
 from .rocm_aiter_fused_moe import (is_rocm_aiter_moe_enabled,
-                                   rocm_aiter_fused_experts,
                                    rocm_aiter_topk_softmax)
 
 logger = init_logger(__name__)
@@ -1101,8 +1100,6 @@ def torch_vllm_outplace_fused_experts(**kwargs) -> torch.Tensor:
 
 
 def dispatch_fused_experts_func(inplace: bool) -> Callable[..., torch.Tensor]:
-    if is_rocm_aiter_moe_enabled():
-        return rocm_aiter_fused_experts
     if inplace:
         return torch_vllm_inplace_fused_experts
     return torch_vllm_outplace_fused_experts
