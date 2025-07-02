@@ -1,16 +1,16 @@
-ARG BASE_IMAGE=compute-artifactory.amd.com:5000/rocm-plus-docker/framework/compute-rocm-npi-mi350-develop:40_ubuntu22.04_py3.10_pytorch_rocm6.5_internal_testing_gfx950_74091a9
+ARG BASE_IMAGE=registry-sc-harbor.amd.com/framework/compute-rocm-dkms-component-baas:1353_ubuntu22.04_py3.10_pytorch_rocm7.0_internal_testing_gfx950_6ecaa9f
 # ARG HIPBLASLT_BRANCH="aa0bda7b"
 # ARG HIPBLAS_COMMON_BRANCH="9b80ba8e"
 # ARG LEGACY_HIPBLASLT_OPTION=
-ARG TRITON_BRANCH="916969ae"
-ARG TRITON_REPO="https://github.com/ROCm/triton.git"
-ARG PYTORCH_BRANCH="8de5ce71"
-ARG PYTORCH_VISION_BRANCH="5dc9e7de"
-ARG PYTORCH_REPO="https://github.com/pytorch/pytorch.git"
-ARG PYTORCH_VISION_REPO="https://github.com/pytorch/vision.git"
-ARG FA_BRANCH="8ede036"
+# ARG TRITON_BRANCH="916969ae"
+# ARG TRITON_REPO="https://github.com/ROCm/triton.git"
+# ARG PYTORCH_BRANCH="8de5ce71"
+# ARG PYTORCH_VISION_BRANCH="5dc9e7de"
+# ARG PYTORCH_REPO="https://github.com/pytorch/pytorch.git"
+# ARG PYTORCH_VISION_REPO="https://github.com/pytorch/vision.git"
+ARG FA_BRANCH="3222ea3"
 ARG FA_REPO="https://github.com/Dao-AILab/flash-attention.git"
-ARG AITER_BRANCH="4012b317"
+ARG AITER_BRANCH="906e504"
 ARG AITER_REPO="https://github.com/ROCm/aiter.git"
 
 FROM ${BASE_IMAGE} AS base
@@ -69,15 +69,15 @@ RUN pip install -U packaging 'cmake<4' ninja wheel 'setuptools<80' pybind11 Cyth
 #     && make package
 # RUN mkdir -p /app/install && cp /app/hipBLASLt/build/release/*.deb /app/hipBLAS-common/build/*.deb /app/install
 
-FROM base AS build_triton
-ARG TRITON_BRANCH
-ARG TRITON_REPO
-RUN git clone ${TRITON_REPO}
-RUN cd triton \
-    && git checkout ${TRITON_BRANCH} \
-    # && cd python \
-    && python3 setup.py bdist_wheel --dist-dir=python/dist
-RUN mkdir -p /app/install && cp /app/triton/python/dist/*.whl /app/install
+# FROM base AS build_triton
+# ARG TRITON_BRANCH
+# ARG TRITON_REPO
+# RUN git clone ${TRITON_REPO}
+# RUN cd triton \
+#     && git checkout ${TRITON_BRANCH} \
+#     # && cd python \
+#     && python3 setup.py bdist_wheel --dist-dir=python/dist
+# RUN mkdir -p /app/install && cp /app/triton/python/dist/*.whl /app/install
 
 FROM base AS build_amdsmi
 RUN cd /opt/rocm/share/amd_smi \
@@ -91,23 +91,24 @@ ARG PYTORCH_REPO
 ARG PYTORCH_VISION_REPO
 ARG FA_BRANCH
 ARG FA_REPO
-RUN git clone ${PYTORCH_REPO} pytorch
-RUN cd pytorch && git checkout ${PYTORCH_BRANCH} && \
-    pip install -r requirements.txt && git submodule update --init --recursive \
-    && python3 tools/amd_build/build_amd.py \
-    && CMAKE_PREFIX_PATH=$(python3 -c 'import sys; print(sys.prefix)') python3 setup.py bdist_wheel --dist-dir=dist \
-    && pip install dist/*.whl
-RUN git clone ${PYTORCH_VISION_REPO} vision
-RUN cd vision && git checkout ${PYTORCH_VISION_BRANCH} \
-    && python3 setup.py bdist_wheel --dist-dir=dist \
-    && pip install dist/*.whl
+# RUN git clone ${PYTORCH_REPO} pytorch
+# RUN cd pytorch && git checkout ${PYTORCH_BRANCH} && \
+#     pip install -r requirements.txt && git submodule update --init --recursive \
+#     && python3 tools/amd_build/build_amd.py \
+#     && CMAKE_PREFIX_PATH=$(python3 -c 'import sys; print(sys.prefix)') python3 setup.py bdist_wheel --dist-dir=dist \
+#     && pip install dist/*.whl
+# RUN git clone ${PYTORCH_VISION_REPO} vision
+# RUN cd vision && git checkout ${PYTORCH_VISION_BRANCH} \
+#     && python3 setup.py bdist_wheel --dist-dir=dist \
+#     && pip install dist/*.whl
 RUN git clone ${FA_REPO}
 RUN cd flash-attention \
     && git checkout ${FA_BRANCH} \
     && git submodule update --init \
     && GPU_ARCHS=$(echo ${PYTORCH_ROCM_ARCH} | sed -e 's/;gfx1[0-9]\{3\}//g') python3 setup.py bdist_wheel --dist-dir=dist
-RUN mkdir -p /app/install && cp /app/pytorch/dist/*.whl /app/install \
-    && cp /app/vision/dist/*.whl /app/install \
+RUN mkdir -p /app/install \
+    # && cp /app/pytorch/dist/*.whl /app/install \
+    # && cp /app/vision/dist/*.whl /app/install \
     && cp /app/flash-attention/dist/*.whl /app/install
 RUN mkdir -p /app/install && cp /app/flash-attention/dist/*.whl /app/install
 
@@ -128,12 +129,12 @@ FROM base AS debs
 RUN mkdir /app/debs
 # RUN --mount=type=bind,from=build_hipblaslt,src=/app/install/,target=/install \
 #     cp /install/*.deb /app/debs
-RUN --mount=type=bind,from=build_triton,src=/app/install/,target=/install \
-    cp /install/*.whl /app/debs
+# RUN --mount=type=bind,from=build_triton,src=/app/install/,target=/install \
+#     cp /install/*.whl /app/debs
 RUN --mount=type=bind,from=build_amdsmi,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
-RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
-    cp /install/*.whl /app/debs
+# RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
+#     cp /install/*.whl /app/debs
 RUN --mount=type=bind,from=build_aiter,src=/app/install/,target=/install \
     cp /install/*.whl /app/debs
 
@@ -143,12 +144,12 @@ FROM base AS final
 #     && perl -p -i -e 's/, hipblas-common-dev \([^)]*?\), /, /g' /var/lib/dpkg/status \
 #     && perl -p -i -e 's/, hipblaslt-dev \([^)]*?\), /, /g' /var/lib/dpkg/status \
 #     && perl -p -i -e 's/, hipblaslt \([^)]*?\), /, /g' /var/lib/dpkg/status
-RUN --mount=type=bind,from=build_triton,src=/app/install/,target=/install \
-    pip install /install/*.whl
+# RUN --mount=type=bind,from=build_triton,src=/app/install/,target=/install \
+#     pip install /install/*.whl
 RUN --mount=type=bind,from=build_amdsmi,src=/app/install/,target=/install \
     pip install /install/*.whl
-RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
-    pip install /install/*.whl
+# RUN --mount=type=bind,from=build_pytorch,src=/app/install/,target=/install \
+#     pip install /install/*.whl
 RUN --mount=type=bind,from=build_aiter,src=/app/install/,target=/install \
     pip install /install/*.whl
 
@@ -170,12 +171,12 @@ RUN echo "BASE_IMAGE: ${BASE_IMAGE}" > /app/versions.txt \
     # && echo "HIPBLAS_COMMON_BRANCH: ${HIPBLAS_COMMON_BRANCH}" >> /app/versions.txt \
     # && echo "HIPBLASLT_BRANCH: ${HIPBLASLT_BRANCH}" >> /app/versions.txt \
     # && echo "LEGACY_HIPBLASLT_OPTION: ${LEGACY_HIPBLASLT_OPTION}" >> /app/versions.txt \
-    && echo "TRITON_BRANCH: ${TRITON_BRANCH}" >> /app/versions.txt \
-    && echo "TRITON_REPO: ${TRITON_REPO}" >> /app/versions.txt \
-    && echo "PYTORCH_BRANCH: ${PYTORCH_BRANCH}" >> /app/versions.txt \
-    && echo "PYTORCH_VISION_BRANCH: ${PYTORCH_VISION_BRANCH}" >> /app/versions.txt \
-    && echo "PYTORCH_REPO: ${PYTORCH_REPO}" >> /app/versions.txt \
-    && echo "PYTORCH_VISION_REPO: ${PYTORCH_VISION_REPO}" >> /app/versions.txt \
+    # && echo "TRITON_BRANCH: ${TRITON_BRANCH}" >> /app/versions.txt \
+    # && echo "TRITON_REPO: ${TRITON_REPO}" >> /app/versions.txt \
+    # && echo "PYTORCH_BRANCH: ${PYTORCH_BRANCH}" >> /app/versions.txt \
+    # && echo "PYTORCH_VISION_BRANCH: ${PYTORCH_VISION_BRANCH}" >> /app/versions.txt \
+    # && echo "PYTORCH_REPO: ${PYTORCH_REPO}" >> /app/versions.txt \
+    # && echo "PYTORCH_VISION_REPO: ${PYTORCH_VISION_REPO}" >> /app/versions.txt \
     && echo "FA_BRANCH: ${FA_BRANCH}" >> /app/versions.txt \
     && echo "AITER_BRANCH: ${AITER_BRANCH}" >> /app/versions.txt \
     && echo "AITER_REPO: ${AITER_REPO}" >> /app/versions.txt
