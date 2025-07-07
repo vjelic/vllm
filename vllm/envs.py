@@ -546,13 +546,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: (os.getenv("VLLM_ROCM_USE_AITER_MOE", "True").lower() in
              ("true", "1")),
 
-
     # Whether to use aiter asm moe ops.
     # By default is enabled.
     "VLLM_ROCM_USE_AITER_ASMMOE":
     lambda: (os.getenv("VLLM_ROCM_USE_AITER_ASMMOE", "False").lower() in
              ("true", "1")),
-
 
     # use aiter rms norm op if aiter ops are enabled.
     "VLLM_ROCM_USE_AITER_RMSNORM":

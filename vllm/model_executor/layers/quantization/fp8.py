@@ -174,6 +174,13 @@ class Fp8LinearMethod(LinearMethodBase):
         if current_platform.is_rocm():
             self.use_marlin = False
 
+        # AITER is only supported on ROCm and only for FP8_FNUZ
+        # and at the moment are MI300 series
+        self.use_aiter_and_is_supported = (current_platform.is_rocm()
+                                           and envs.VLLM_ROCM_USE_AITER
+                                           and envs.VLLM_ROCM_USE_AITER_LINEAR
+                                           and current_platform.is_fp8_fnuz())
+
         self.block_quant = self.quant_config.weight_block_size is not None
         if self.block_quant:
             # Marlin doesn't support block-wise fp8
@@ -411,6 +418,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 input_scale=layer.input_scale,
                 bias=bias,
                 cutlass_block_fp8_supported=self.cutlass_block_fp8_supported,
+                use_aiter_and_is_supported=self.use_aiter_and_is_supported,
             )
 
         return self.fp8_linear.apply(input=x,
@@ -576,14 +584,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # Lazy import to avoid importing triton too early.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             is_rocm_aiter_moe_enabled, shuffle_weights)
-        
+
         self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
         self.rocm_aiter_use_asm = (self.rocm_aiter_moe_enabled
                                    and envs.VLLM_ROCM_USE_AITER_ASMMOE)
 
-        print(f"rocm_aiter_moe_enabled: {self.rocm_aiter_moe_enabled}")
-        print(f"rocm_aiter_use_asm: {self.rocm_aiter_use_asm}")
-        
         # TODO (rob): refactor block quant into separate class.
         if self.block_quant:
             assert self.quant_config.activation_scheme == "dynamic"
@@ -780,7 +785,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             e_score_correction_bias=e_score_correction_bias,
         )
 
-	
         if self.rocm_aiter_moe_enabled:
             from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (  # noqa: E501
                 rocm_aiter_fused_experts)
