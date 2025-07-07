@@ -573,8 +573,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     "`VLLM_USE_TRITON_FLASH_ATTN=0`")
 
             from aiter.ops.triton.mha import flash_attn_varlen_func
-            from aiter.ops.triton.mha import (mha_set_use_int64_strides as
-                                              set_triton_fa_strides)
+            from aiter.ops.triton.mha import (
+                mha_set_use_int64_strides as set_triton_fa_strides)
             set_triton_fa_strides(True)
             self.triton_attn_func = flash_attn_varlen_func
             logger.debug("Using Triton FA in ROCmBackend")
