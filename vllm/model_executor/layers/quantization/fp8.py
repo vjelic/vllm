@@ -958,6 +958,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        routed_scaling_factor: float = 1.,
+        num_fused_shared_experts: int = 0,
     ) -> torch.Tensor:
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -970,6 +972,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             custom_routing_function=custom_routing_function,
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
+            routed_scaling_factor=routed_scaling_factor,
+            num_fused_shared_experts=num_fused_shared_experts,
         )
 
         if self.rocm_aiter_moe_enabled:

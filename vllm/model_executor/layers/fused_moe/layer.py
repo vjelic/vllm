@@ -762,6 +762,8 @@ class FusedMoE(torch.nn.Module):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        routed_scaling_factor: float = 1.,
+        num_fused_shared_experts: int = 0,
     ):
         super().__init__()
 
@@ -815,6 +817,8 @@ class FusedMoE(torch.nn.Module):
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
         self.apply_router_weight_on_input = apply_router_weight_on_input
+        self.routed_scaling_factor = routed_scaling_factor
+        self.num_fused_shared_experts = num_fused_shared_experts
         self.activation = activation
 
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
@@ -1193,7 +1197,9 @@ class FusedMoE(torch.nn.Module):
                        custom_routing_function: Optional[Callable] = None,
                        scoring_func: str = "softmax",
                        e_score_correction_bias: Optional[torch.Tensor] = None,
-                       indices_type: Optional[torch.dtype] = None):
+                       indices_type: Optional[torch.dtype] = None,
+                       routed_scaling_factor: float = 1.,
+                       num_fused_shared_experts: int = 0):
         from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk
 
         # DeekSeekv2 uses grouped_top_k
@@ -1208,7 +1214,9 @@ class FusedMoE(torch.nn.Module):
                 num_expert_group=num_expert_group,
                 topk_group=topk_group,
                 scoring_func=scoring_func,
-                e_score_correction_bias=e_score_correction_bias)
+                e_score_correction_bias=e_score_correction_bias,
+                routed_scaling_factor=routed_scaling_factor,
+                num_fused_shared_experts=num_fused_shared_experts)
             if indices_type is not None:
                 topk_ids = topk_ids.to(dtype=indices_type)
         elif custom_routing_function is None:
@@ -1288,6 +1296,8 @@ class FusedMoE(torch.nn.Module):
                 scoring_func=self.scoring_func,
                 e_score_correction_bias=self.e_score_correction_bias,
                 activation=self.activation,
+                routed_scaling_factor=self.routed_scaling_factor,
+                num_fused_shared_experts=self.num_fused_shared_experts,
             )
 
             if not skip_result_store:
@@ -1340,6 +1350,8 @@ class FusedMoE(torch.nn.Module):
             e_score_correction_bias=self.e_score_correction_bias,
             activation=self.activation,
             apply_router_weight_on_input=self.apply_router_weight_on_input,
+            routed_scaling_factor=self.routed_scaling_factor,
+            num_fused_shared_experts=self.num_fused_shared_experts,
         )
 
         if self.dp_size > 1:

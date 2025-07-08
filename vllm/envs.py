@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_FP8_PADDING: bool = True
     VLLM_ROCM_MOE_PADDING: bool = True
     VLLM_ROCM_CUSTOM_PAGED_ATTN: bool = True
+    VLLM_ENABLE_SHARED_EXPERTS_FUSION: bool = False
     VLLM_QUARK_EMU_MEM_OPT: bool = False
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = True
     VLLM_LOG_BATCHSIZE_INTERVAL: float = -1
@@ -707,6 +708,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # custom paged attention kernel for MI3* cards
     "VLLM_ROCM_CUSTOM_PAGED_ATTN":
     lambda: (os.getenv("VLLM_ROCM_CUSTOM_PAGED_ATTN", "True").lower() in
+             ("true", "1")),
+
+    # enable shared experts fusion
+    "VLLM_ENABLE_SHARED_EXPERTS_FUSION":
+    lambda: (os.getenv("VLLM_ENABLE_SHARED_EXPERTS_FUSION", "False").lower() in
              ("true", "1")),
 
     # If set, when running in Quark emulation mode, do not dequantize the

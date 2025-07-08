@@ -4288,10 +4288,10 @@ class VllmConfig:
             self.compilation_config.custom_ops = ["none"]
 
             # TODO: check if we follow this ROCm/vllm
-            # if current_platform.is_rocm():
-            #     self.compilation_config.custom_ops = [
-            #         "+rms_norm", "+silu_and_mul"
-            #     ]
+            if current_platform.is_rocm():
+                self.compilation_config.custom_ops = [
+                    "+rms_norm", "+silu_and_mul"
+                ]
             # TODO: check if we follow this vllm upstream
             if not self.compilation_config.custom_ops:
                 self.compilation_config.custom_ops = ["none"]
