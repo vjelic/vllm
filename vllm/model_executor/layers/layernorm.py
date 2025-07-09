@@ -67,8 +67,8 @@ def rocm_aiter_rmsnorm2d_fwd_with_add_impl(
 
     import aiter as rocm_aiter
 
-    residual_out = torch.zeros_like(residual)
-    output = torch.zeros_like(x)
+    residual_out = torch.empty_like(residual)
+    output = torch.empty_like(x)
     rocm_aiter.rmsnorm2d_fwd_with_add(
         output,  # output
         x,  # input
