@@ -910,8 +910,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             use_custom = custom_enabled and (batch_size <= bacth_size_thresh or
                                              (batch_size > bacth_size_thresh
                                               and not aiter_enabled))
-            print(bacth_size_thresh)
-            print("********")
+
             if use_custom:
                 if layer._k_scale.dim() > 0:
                     k_scale = layer._k_scale[:1]
