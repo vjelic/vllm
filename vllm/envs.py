@@ -93,6 +93,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_USE_AITER_MLA: bool = True
     VLLM_ROCM_USE_AITER_MHA: bool = True
     VLLM_ROCM_USE_SKINNY_GEMM: bool = True
+    VLLM_ROCM_BATCH_SIZE_THRESHOLD: int = 64
     VLLM_ROCM_FP8_PADDING: bool = True
     VLLM_ROCM_MOE_PADDING: bool = True
     VLLM_ROCM_CUSTOM_PAGED_ATTN: bool = True
@@ -699,6 +700,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Pad the weights for the moe kernel
     "VLLM_ROCM_MOE_PADDING":
     lambda: bool(int(os.getenv("VLLM_ROCM_MOE_PADDING", "1"))),
+    "VLLM_ROCM_BATCH_SIZE_THRESHOLD":
+    lambda: int(os.getenv("VLLM_ROCM_BATCH_SIZE_THRESHOLD", "64")),
 
     # custom paged attention kernel for MI3* cards
     "VLLM_ROCM_CUSTOM_PAGED_ATTN":

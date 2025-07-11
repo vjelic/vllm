@@ -32,7 +32,17 @@ _PARTITION_SIZE_ROCM = 256
 @cache
 def is_rocm_aiter_paged_attn_enabled() -> bool:
     return envs.VLLM_ROCM_USE_AITER_PAGED_ATTN \
-        and envs.VLLM_ROCM_USE_AITER \
+        and envs.VLLM_ROCM_USE_AITER
+
+
+@cache
+def get_rocm_batch_size_threshold() -> int:
+    """
+    Returns the batch size threshold for ROCm Flash Attention.
+    This is used to determine whether to use custom paged attention
+    or the original paged attention implementation.
+    """
+    return envs.VLLM_ROCM_BATCH_SIZE_THRESHOLD
 
 
 @cache
@@ -888,12 +898,28 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             num_seqs, num_heads, head_size = decode_query.shape
             block_size = value_cache.shape[3]
             gqa_ratio = num_heads // self.num_kv_heads
-            use_custom = use_rocm_custom_paged_attention(
+
+            batch_size = decode_meta.seq_lens_tensor.shape[0]
+            custom_enabled = use_rocm_custom_paged_attention(
                 decode_query.dtype, head_size, block_size, gqa_ratio,
                 decode_meta.max_decode_seq_len, self.sliding_window,
                 self.kv_cache_dtype, self.alibi_slopes)
 
+            aiter_enabled = is_rocm_aiter_paged_attn_enabled()
+            bacth_size_thresh = get_rocm_batch_size_threshold()
+            use_custom = custom_enabled and (batch_size <= bacth_size_thresh or
+                                             (batch_size > bacth_size_thresh
+                                              and not aiter_enabled))
+            print(bacth_size_thresh)
+            print("********")
             if use_custom:
+                if layer._k_scale.dim() > 0:
+                    k_scale = layer._k_scale[:1]
+                    v_scale = layer._v_scale[:1]
+                else:
+                    k_scale = layer._k_scale
+                    v_scale = layer._v_scale
+
                 max_seq_len = (decode_meta.max_decode_seq_len if self.attn_type
                                != AttentionType.ENCODER_DECODER else
                                decode_meta.max_encoder_seq_len)
@@ -936,11 +962,11 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     max_seq_len,
                     self.alibi_slopes,
                     self.kv_cache_dtype,
-                    layer._k_scale,
-                    layer._v_scale,
+                    k_scale,
+                    v_scale,
                     output_scale,
                 )
-            elif is_rocm_aiter_paged_attn_enabled():
+            elif aiter_enabled:
                 if output_scale is not None:
                     raise NotImplementedError(
                         "fused output quantization only supported for Triton"
