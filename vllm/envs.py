@@ -135,6 +135,7 @@ if TYPE_CHECKING:
     VLLM_MQ_MAX_CHUNK_BYTES_MB: int = 16
     VLLM_KV_CACHE_LAYOUT: Optional[str] = None
     VLLM_COMPUTE_NANS_IN_LOGITS: bool = False
+    VLLM_ENABLE_DSV3: bool = True
 
 
 def get_default_cache_root():
@@ -930,6 +931,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # or bad hardware but it may add compute overhead.
     "VLLM_COMPUTE_NANS_IN_LOGITS":
     lambda: bool(int(os.getenv("VLLM_COMPUTE_NANS_IN_LOGITS", "0"))),
+
+    # Control wether enable deepseek workaround solution
+    # We will solve this issue in future PRs
+    "VLLM_ENABLE_DSV3":
+    lambda: bool(int(os.getenv("VLLM_ENABLE_DSV3", "1"))),
+
 }
 
 # --8<-- [end:env-vars-definition]

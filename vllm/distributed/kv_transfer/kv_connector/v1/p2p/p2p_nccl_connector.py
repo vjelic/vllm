@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import regex as re
 import torch
 
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
@@ -142,7 +143,7 @@ class P2pNcclConnector(KVConnectorBase_V1):
                 request_id (str): request id for log
             """
             dst_kv_cache_layer_shape = dst_kv_cache_layer.shape
-            if isinstance(attn_metadata, MLACommonMetadata):
+            if isinstance(attn_metadata, MLACommonMetadata) or envs.VLLM_ENABLE_DSV3:
                 num_pages = dst_kv_cache_layer_shape[0]
                 page_size = dst_kv_cache_layer_shape[1]
                 dst_kv_cache_layer = dst_kv_cache_layer.reshape(
@@ -192,6 +193,7 @@ class P2pNcclConnector(KVConnectorBase_V1):
         # Load the KV for each request each layer
         for request in metadata.requests:
             for layer_name in forward_context.no_compile_layers:
+                if envs.VLLM_ENABLE_DSV3 and 'experts' in layer_name:continue
                 attn_layer = forward_context.no_compile_layers[layer_name]
                 kv_cache_layer = attn_layer.kv_cache[ \
                     forward_context.virtual_engine]
@@ -246,7 +248,7 @@ class P2pNcclConnector(KVConnectorBase_V1):
             Assume the shape of the layer is (2, num_pages, page_size, xxx)
             if MLA is not used, and (num_pages, page_size, xxx) otherwise.
             """
-            if isinstance(attn_metadata, MLACommonMetadata):
+            if isinstance(attn_metadata, MLACommonMetadata) or envs.VLLM_ENABLE_DSV3:
                 num_pages, page_size = layer.shape[0], layer.shape[1]
                 return layer.reshape(num_pages * page_size, -1)[slot_mapping,
                                                                 ...]
