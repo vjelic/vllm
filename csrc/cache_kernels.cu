@@ -272,10 +272,30 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
+      /*
       key_cache[tgt_key_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 1.0f);
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 125.0f/7.5f);
       value_cache[tgt_value_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 1.0f);
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 125.0f/7.5);
+          */
+      auto float_key =
+          static_cast<float>(*reinterpret_cast<__hip_bfloat16*>(&tgt_key));
+      auto float_value =
+          static_cast<float>(*reinterpret_cast<__hip_bfloat16*>(&tgt_value));
+      auto scaled_float_key = float_key / *k_scale;
+      auto scaled_float_value = float_value / *v_scale;
+ 
+      __hip_fp6_storage_t static_cast<__hip_fp6_storage_t>(fp6_key{scaled_float_key});
+      __hip_fp6_storage_t static_cast<__hip_fp6_storage_t>(fp6_value{scaled_float_value});
+ 
+      __half_raw bfr_key =  __hip_cvt_fp6_to_halfraw(fp6_key, __HIP_E2M3);
+      __half_raw bfr_value = __hip_cvt_fp6_to_halfraw(fp6_value, __HIP_E2M3);
+ 
+      __hip_bfloat16 bf_key{bfr_key};
+      __hip_bfloat16 bf_value{bfr_value};
+ 
+      key_cache[tgt_key_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key), 1.0);
+      value_cache[tgt_value_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value), 1.0);
     }
   }
 }
@@ -409,7 +429,7 @@ void reshape_and_cache(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  DISPATCH_BY_KV_CACHE_DTYPE_FP6(key.dtype(), kv_cache_dtype,
+  DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
                              CALL_RESHAPE_AND_CACHE)
 }
 
