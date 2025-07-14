@@ -273,9 +273,9 @@ __global__ void reshape_and_cache_kernel(
       value_cache[tgt_value_idx] = tgt_value;
     } else {
       key_cache[tgt_key_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 1.0f);
       value_cache[tgt_value_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 1.0f);
     }
   }
 }
