@@ -298,8 +298,11 @@ __global__ void reshape_and_cache_kernel(
       __hip_bfloat16  bf_key_out{bf16r_key};
       __hip_bfloat16  bf_value_out{bf16r_value};
       */
-      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 125.0f/7.5f);
-      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 125.0f/7.5f);
+      
+
+      //almost sure the non-dynamic SF is not the issue, as the round trip works with one (when hardcoded into kv_cache.py), but might be useful to eventually improve accuracy?
+      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 120.0f/7.5f);
+      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 120.0f/7.5f);
     }
   }
 }

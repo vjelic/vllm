@@ -124,7 +124,7 @@ __inline__ __device__ uint8_t vec_conversion<uint8_t, __hip_bfloat16>(const __hi
   }
 
   //printf("test1\n");
-  //TODO make return uint_8
+  
   return fp6_val.__x;
 }
 
