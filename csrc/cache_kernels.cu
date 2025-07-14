@@ -25,6 +25,7 @@
 #include <fstream>
 
 #ifdef USE_ROCM
+  #include "quantization/fp6/amd/quant_utils.cuh"
   #include "quantization/fp8/amd/quant_utils.cuh"
 #else
   #include "quantization/fp8/nvidia/quant_utils.cuh"
