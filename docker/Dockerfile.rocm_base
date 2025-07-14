@@ -74,7 +74,7 @@ RUN git clone ${TRITON_REPO}
 RUN cd triton \
     && git checkout ${TRITON_BRANCH} \
     && python3 setup.py bdist_wheel --dist-dir=dist
-RUN mkdir -p /app/install && cp /app/triton/python/dist/*.whl /app/install
+RUN mkdir -p /app/install && cp /app/triton/dist/*.whl /app/install
 
 FROM base AS build_amdsmi
 RUN cd /opt/rocm/share/amd_smi \
