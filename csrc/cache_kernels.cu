@@ -272,12 +272,16 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
+      __hip_bfloat16  bf_key_in   = *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
+      __hip_bfloat16  bf_value_in = *reinterpret_cast<const __hip_bfloat16*>(&value[src_value_idx]);
       /*
       key_cache[tgt_key_idx] =
           fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 125.0f/7.5f);
       value_cache[tgt_value_idx] =
           fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 125.0f/7.5);
           */
+
+      /*
       __hip_fp6_e2m3 fp6_key = __hip_fp6_e2m3(bf_key_in);
       __hip_fp6_e2m3 fp6_value = __hip_fp6_e2m3(bf_value_in);
       
@@ -293,8 +297,9 @@ __global__ void reshape_and_cache_kernel(
 
       __hip_bfloat16  bf_key_out{bf16r_key};
       __hip_bfloat16  bf_value_out{bf16r_value};
-      key_cache[tgt_key_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_out), 1.0);
-      value_cache[tgt_value_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_out), 1.0);
+      */
+      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 240.0f/7.5f);
+      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 240.0f/7.5f);
     }
   }
 }
