@@ -6,6 +6,24 @@
 #include "cuda_compat.h"
 #include "dispatch_utils.h"
 
+
+
+#include <iostream>
+
+//#include </opt/rocm/include/hip/amd_detail/amd_hip_fp4.h>
+
+#include </opt/rocm/include/hip/amd_detail/amd_hip_fp6.h>
+
+#include </opt/rocm/include/hip/amd_detail/amd_hip_fp8.h>
+
+#include </opt/rocm/include/hip/amd_detail/amd_hip_fp16.h>
+
+#include </opt/rocm/include/hip/amd_detail/amd_hip_bf16.h>
+
+//#include </opt/rocm/include/hip/amd_detail/amd_hip_ocp_fp.hpp>
+
+#include <fstream>
+
 #ifdef USE_ROCM
   #include "quantization/fp8/amd/quant_utils.cuh"
 #else
