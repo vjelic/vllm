@@ -407,10 +407,9 @@ __inline__ __device__ __hip_bfloat16 scaled_vec_conversion<__hip_bfloat16, uint8
   __hip_bfloat16_raw bf16r_value = __hip_fp6_e2m3(a);
   __hip_bfloat16  bf_value_out{bf16r_value};
   
-  //apply scale here too?
   //printf("test2\n");
   
-  return bf_value_out;
+  return static_cast<__hip_bfloat16>(static_cast<float>(bf_value_out) * scale);
 }
 
 
