@@ -298,8 +298,8 @@ __global__ void reshape_and_cache_kernel(
       __hip_bfloat16  bf_key_out{bf16r_key};
       __hip_bfloat16  bf_value_out{bf16r_value};
       */
-      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 240.0f/7.5f);
-      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 240.0f/7.5f);
+      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 125.0f/7.5f);
+      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 125.0f/7.5f);
     }
   }
 }
@@ -433,7 +433,7 @@ void reshape_and_cache(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
+  DISPATCH_BY_KV_CACHE_DTYPE_FP6(key.dtype(), kv_cache_dtype,
                              CALL_RESHAPE_AND_CACHE)
 }
 

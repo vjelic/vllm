@@ -28,6 +28,7 @@
 #ifdef USE_ROCM
   #include <hip/hip_bf16.h>
   #include "../quantization/fp8/amd/quant_utils.cuh"
+  #include "../quantization/fp6/amd/quant_utils.cuh"
 typedef __hip_bfloat16 __nv_bfloat16;
 #else
   #include "../quantization/fp8/nvidia/quant_utils.cuh"
@@ -284,8 +285,8 @@ __device__ void paged_attention_kernel(
           // Vector conversion from Quant_vec to K_vec.
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
-          k_vecs[j] = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
-              k_vec_quant, *k_scale);
+          k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
+              k_vec_quant, 125.0f/7.5f);
         }
       }
 
@@ -414,8 +415,8 @@ __device__ void paged_attention_kernel(
           V_quant_vec v_quant_vec =
               *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           // Vector conversion from V_quant_vec to V_vec.
-          v_vec = fp8::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
-                                                                    *v_scale);
+          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
+                                                                    125.0f/7.5f);
         }
         if (block_idx == num_seq_blocks - 1) {
           // NOTE(woosuk): When v_vec contains the tokens that are out of the
