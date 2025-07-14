@@ -293,8 +293,8 @@ __global__ void reshape_and_cache_kernel(
 
       __hip_bfloat16  bf_key_out{bf16r_key};
       __hip_bfloat16  bf_value_out{bf16r_value};
-      key_cache[tgt_key_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key), 1.0);
-      value_cache[tgt_value_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value), 1.0);
+      key_cache[tgt_key_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_out), 1.0);
+      value_cache[tgt_value_idx] = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_out), 1.0);
     }
   }
 }
