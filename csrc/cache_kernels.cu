@@ -6,11 +6,9 @@
 #include "cuda_compat.h"
 #include "dispatch_utils.h"
 
-
-
 #include <iostream>
 
-//#include </opt/rocm/include/hip/amd_detail/amd_hip_fp4.h>
+// #include </opt/rocm/include/hip/amd_detail/amd_hip_fp4.h>
 
 #include </opt/rocm/include/hip/amd_detail/amd_hip_fp6.h>
 
@@ -20,7 +18,7 @@
 
 #include </opt/rocm/include/hip/amd_detail/amd_hip_bf16.h>
 
-//#include </opt/rocm/include/hip/amd_detail/amd_hip_ocp_fp.hpp>
+// #include </opt/rocm/include/hip/amd_detail/amd_hip_ocp_fp.hpp>
 
 #include <fstream>
 
@@ -272,8 +270,10 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-      __hip_bfloat16  bf_key_in   = *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
-      __hip_bfloat16  bf_value_in = *reinterpret_cast<const __hip_bfloat16*>(&value[src_value_idx]);
+      // __hip_bfloat16 bf_key_in =
+      //     *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
+      // __hip_bfloat16 bf_value_in =
+      //     *reinterpret_cast<const __hip_bfloat16*>(&value[src_value_idx]);
       /*
       key_cache[tgt_key_idx] =
           fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 125.0f/7.5f);
@@ -284,7 +284,7 @@ __global__ void reshape_and_cache_kernel(
       /*
       __hip_fp6_e2m3 fp6_key = __hip_fp6_e2m3(bf_key_in);
       __hip_fp6_e2m3 fp6_value = __hip_fp6_e2m3(bf_value_in);
-      
+
      if (fp6_key.__x == 0b00100000) {
        fp6_key.__x = 0b00000000;
      }
@@ -298,11 +298,19 @@ __global__ void reshape_and_cache_kernel(
       __hip_bfloat16  bf_key_out{bf16r_key};
       __hip_bfloat16  bf_value_out{bf16r_value};
       */
-      
 
-      //almost sure the non-dynamic SF is not the issue, as the round trip works with one (when hardcoded into kv_cache.py), but might be useful to eventually improve accuracy?
-      key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_key_in), 120.0f/7.5f);
-      value_cache[tgt_value_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(*reinterpret_cast<scalar_t*>(&bf_value_in), 120.0f/7.5f);
+      // almost sure the non-dynamic SF is not the issue, as the round trip
+      // works with one (when hardcoded into kv_cache.py), but might be useful
+      // to eventually improve accuracy?
+      // key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
+      //     *reinterpret_cast<scalar_t*>(&bf_key_in), 1.0f);
+      // value_cache[tgt_value_idx] =
+      //     fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
+      //         *reinterpret_cast<scalar_t*>(&bf_value_in), 1.0f);
+      key_cache[tgt_key_idx] =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+      value_cache[tgt_value_idx] =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
     }
   }
 }
@@ -437,7 +445,7 @@ void reshape_and_cache(
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   DISPATCH_BY_KV_CACHE_DTYPE_FP6(key.dtype(), kv_cache_dtype,
-                             CALL_RESHAPE_AND_CACHE)
+                                 CALL_RESHAPE_AND_CACHE)
 }
 
 // KV_T is the data type of key and value tensors.

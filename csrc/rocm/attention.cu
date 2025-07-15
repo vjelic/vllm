@@ -23,7 +23,8 @@
 
 #include <algorithm>
 #include "../attention/dtype_fp8.cuh"
-#include "../quantization/fp8/amd/quant_utils.cuh"
+// #include "../quantization/fp8/amd/quant_utils.cuh"
+#include "../quantization/fp6/amd/quant_utils.cuh"
 
 #if defined(__HIPCC__) && \
     (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
@@ -202,28 +203,33 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
   }
 }
 
+// __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
+//   // From MI300+ platforms, we have v_cvt_pk_f32_fp8 instruction
+//   // to convert 2 packed fp8 to 2 packed fp32 values.
+//   // However, in MI200 platforms, we only have v_cvt_f32_fp8
+//   // to convert fp8 values individually. So we added
+//   // #else case for fewer instructions (# inst=2) in MI300+,
+//   // and fallback to
+//   // #if case for other platforms (# inst=4).
+//   #if defined(__gfx90a__)
+//   float4 f32x4 = vllm::fp8::vec_conversion<float4, uint32_t>(
+//       *reinterpret_cast<const uint32_t*>(&inp));
+//   return *reinterpret_cast<floatx4*>(&f32x4);
+//   #else  // MI3xx+ optimized builtins
+//   const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
+//   const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
+//   floatx4 ret;
+//   ret[0] = f0[0];
+//   ret[1] = f0[1];
+//   ret[2] = f1[0];
+//   ret[3] = f1[1];
+//   return ret;
+//   #endif
+// }
+
 __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
-  // From MI300+ platforms, we have v_cvt_pk_f32_fp8 instruction
-  // to convert 2 packed fp8 to 2 packed fp32 values.
-  // However, in MI200 platforms, we only have v_cvt_f32_fp8
-  // to convert fp8 values individually. So we added
-  // #else case for fewer instructions (# inst=2) in MI300+,
-  // and fallback to
-  // #if case for other platforms (# inst=4).
-  #if defined(__gfx90a__)
-  float4 f32x4 = vllm::fp8::vec_conversion<float4, uint32_t>(
-      *reinterpret_cast<const uint32_t*>(&inp));
+  float4 f32x4 = vllm::fp6::scaled_vec_conversion<float4, uint32_t>(inp, 1.0f);
   return *reinterpret_cast<floatx4*>(&f32x4);
-  #else  // MI3xx+ optimized builtins
-  const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
-  const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
-  floatx4 ret;
-  ret[0] = f0[0];
-  ret[1] = f0[1];
-  ret[2] = f1[0];
-  ret[3] = f1[1];
-  return ret;
-  #endif
 }
 
 template <typename T>
@@ -1483,8 +1489,8 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
                   static_cast<int64_t>(head_idx) * HEAD_SIZE;
   if constexpr (std::is_same<OUTT, bit8_t>::value) {
     out_ptr[threadIdx.x] =
-        __hip_cvt_float_to_fp8(acc, vllm::fp8::fp8_type::__default_saturation,
-                               vllm::fp8::fp8_type::__default_interpret);
+        __hip_cvt_float_to_fp8(acc, vllm::fp6::fp8_type::__default_saturation,
+                               vllm::fp6::fp8_type::__default_interpret);
   } else {
     out_ptr[threadIdx.x] = from_float<scalar_t>(acc);
   }

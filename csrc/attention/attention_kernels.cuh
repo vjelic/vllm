@@ -286,7 +286,7 @@ __device__ void paged_attention_kernel(
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
           k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
-              k_vec_quant, 120.0f/7.5f);
+              k_vec_quant, *k_scale);
         }
       }
 
@@ -416,7 +416,7 @@ __device__ void paged_attention_kernel(
               *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           // Vector conversion from V_quant_vec to V_vec.
           v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
-                                                                    1250.0f/7.5f);
+                                                                    *v_scale);
         }
         if (block_idx == num_seq_blocks - 1) {
           // NOTE(woosuk): When v_vec contains the tokens that are out of the

@@ -90,8 +90,8 @@ class BaseKVCacheMethod(QuantizeMethodBase):
                 layer._q_scale.copy_(k_scale)
 
             # These are used in the final Attention.forward()
-            #k_scale *= 125.0/7.5
-            #v_scale *= 125.0/7.5
+            k_scale *= 125.0/7.5
+            v_scale *= 125.0/7.5
 
             layer._k_scale.copy_(k_scale)
             layer._v_scale.copy_(v_scale)
