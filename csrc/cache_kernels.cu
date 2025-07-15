@@ -270,6 +270,15 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
+      key_cache[tgt_key_idx] =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+      value_cache[tgt_value_idx] =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+    }
+  }
+}
+
+
       // __hip_bfloat16 bf_key_in =
       //     *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
       // __hip_bfloat16 bf_value_in =
@@ -307,14 +316,8 @@ __global__ void reshape_and_cache_kernel(
       // value_cache[tgt_value_idx] =
       //     fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
       //         *reinterpret_cast<scalar_t*>(&bf_value_in), 1.0f);
-      key_cache[tgt_key_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-      value_cache[tgt_value_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
-    }
-  }
-}
 
+      
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
 __global__ void reshape_and_cache_flash_kernel(
     const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
