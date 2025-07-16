@@ -264,6 +264,13 @@ __global__ void reshape_and_cache_kernel(
         block_idx * num_heads * head_size * block_size +
         head_idx * head_size * block_size + head_offset * block_size +
         block_offset;
+
+
+    //mutiply by 3/4, do some bit math to figure out how to pack
+
+
+    //printf("key index: %lld\n", static_cast<long long>(tgt_key_idx));
+    
     scalar_t tgt_key = key[src_key_idx];
     scalar_t tgt_value = value[src_value_idx];
     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
