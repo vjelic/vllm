@@ -106,7 +106,7 @@ class DeepseekV2MoE(nn.Module):
         self.tp_size = get_tensor_model_parallel_world_size()
         self.routed_scaling_factor = config.routed_scaling_factor
         self.n_shared_experts = config.n_shared_experts
-        self.num_fused_shared_experts = self.n_shared_experts if envs.VLLM_ENABLE_SHARED_EXPERTS_FUSION else 0
+        self.num_fused_shared_experts = self.n_shared_experts if envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION else 0
 
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
@@ -151,6 +151,8 @@ class DeepseekV2MoE(nn.Module):
                 reduce_results=False,
                 prefix=f"{prefix}.shared_experts",
             )
+        else:
+            print("Using fused shared experts")
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_dim = hidden_states.shape
@@ -743,16 +745,16 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
     
     def _determine_fused_shared_experts(self, vllm_config: VllmConfig):
         self.num_fused_shared_experts = 0
-        if not envs.VLLM_ENABLE_SHARED_EXPERTS_FUSION:
+        if not envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION:
             return
         if (self.config.architectures[0] != "DeepseekV3ForCausalLM"
             or self.config.n_routed_experts != 256
             or self.config.n_shared_experts != 1):
-            envs.VLLM_ENABLE_SHARED_EXPERTS_FUSION = False
+            envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION = False
             print("Only Deepseek V3/R1 can use shared experts fusion optimization")
             return
         elif vllm_config.parallel_config.enable_expert_parallel:
-            envs.VLLM_ENABLE_SHARED_EXPERTS_FUSION = False
+            envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION = False
             print("Deepseek V3/R1 can not use shared experts fusion optimization when enable expert parallel.")
             return
         self.num_fused_shared_experts = self.config.n_shared_experts
