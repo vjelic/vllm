@@ -265,8 +265,6 @@ __global__ void reshape_and_cache_kernel(
         head_idx * head_size * block_size + head_offset * block_size +
         block_offset;
 
-
-    //mutiply by 3/4, do some bit math to figure out how to pack
     
     scalar_t tgt_key = key[src_key_idx];
     scalar_t tgt_value = value[src_value_idx];
@@ -274,13 +272,15 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
+
+      //* 3/4
       int64_t byte_idx = (tgt_key_idx / 4) * 3;
       int bit_pos = (tgt_key_idx % 4) * 6;
       
       uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
       uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
       
-      // 6 lsb
+      //6 lsbs
       key_fp6 &= 0x3F;
       value_fp6 &= 0x3F;
       
@@ -290,10 +290,13 @@ __global__ void reshape_and_cache_kernel(
       int byte_offset = bit_pos / 8;
       int bit_offset = bit_pos % 8;
 
+
+      //first 6 bits of the byte, or filling in the rest of a byte
       if (bit_offset <= 2) {
         key_cache_bytes[byte_idx + byte_offset] &= ~(0x3F << bit_offset);
         key_cache_bytes[byte_idx + byte_offset] |= (key_fp6 << bit_offset);
-      } else {
+      } else { 
+        //middle of one, first two of the second
         int bits_in_first = 8 - bit_offset;
         int bits_in_second = 6 - bits_in_first;
         
