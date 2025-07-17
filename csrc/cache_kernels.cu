@@ -277,23 +277,53 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-
-      int64_t fp6_key_idx = (tgt_key_idx * 3) /4;
-      int64_t fp6_value_idx = (tgt_value_idx * 3) /4;
-      int bit_offset = (tgt_key_idx % 4) * 6;
-
-      uint32_t* key_cache_ptr = reinterpret_cast<uint32_t*>(key_cache);
-      uint32_t* value_cache_ptr = reinterpret_cast<uint32_t*>(value_cache);
-
+      int64_t byte_idx = (tgt_key_idx / 4) * 3;
+      int bit_pos = (tgt_key_idx % 4) * 6;
+      
       uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
       uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+      
+      // 6 lsb
+      key_fp6 &= 0x3F;
+      value_fp6 &= 0x3F;
+      
+      uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
+      uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
+      
+      int byte_offset = bit_pos / 8;
+      int bit_offset = bit_pos % 8;
 
-      //need bitmath to be done
+      if (bit_offset <= 2) {
+        key_cache_bytes[byte_idx + byte_offset] &= ~(0x3F << bit_offset);
+        key_cache_bytes[byte_idx + byte_offset] |= (key_fp6 << bit_offset);
+      } else {
+        int bits_in_first = 8 - bit_offset;
+        int bits_in_second = 6 - bits_in_first;
+        
+        key_cache_bytes[byte_idx + byte_offset] &= ~(0xFF << bit_offset);
+        key_cache_bytes[byte_idx + byte_offset] |= (key_fp6 << bit_offset);
+        key_cache_bytes[byte_idx + byte_offset + 1] &= ~((1 << bits_in_second) - 1);
+        key_cache_bytes[byte_idx + byte_offset + 1] |= (key_fp6 >> bits_in_first);
+      }
 
-      key_cache[tgt_key_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-      value_cache[tgt_value_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+      byte_idx = (tgt_value_idx / 4) * 3;
+      bit_pos = (tgt_value_idx % 4) * 6;
+      byte_offset = bit_pos / 8;
+      bit_offset = bit_pos % 8;
+      
+      if (bit_offset <= 2) {
+        value_cache_bytes[byte_idx + byte_offset] &= ~(0x3F << bit_offset);
+        value_cache_bytes[byte_idx + byte_offset] |= (value_fp6 << bit_offset);
+      } else {
+        int bits_in_first = 8 - bit_offset;
+        int bits_in_second = 6 - bits_in_first;
+        
+        value_cache_bytes[byte_idx + byte_offset] &= ~(0xFF << bit_offset);
+        value_cache_bytes[byte_idx + byte_offset] |= (value_fp6 << bit_offset);
+        
+        value_cache_bytes[byte_idx + byte_offset + 1] &= ~((1 << bits_in_second) - 1);
+        value_cache_bytes[byte_idx + byte_offset + 1] |= (value_fp6 >> bits_in_first);
+      }
     }
   }
 }
