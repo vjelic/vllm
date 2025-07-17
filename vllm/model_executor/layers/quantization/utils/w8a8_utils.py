@@ -9,6 +9,7 @@ from vllm import envs
 from vllm._aiter_ops import aiter_ops
 from vllm.config import CompilationLevel, get_current_vllm_config
 from vllm.platforms import current_platform
+from vllm.utils import direct_register_custom_op
 
 # Input scaling factors are no longer optional in _scaled_mm starting
 # from pytorch 2.5. Allocating a dummy tensor to pass as input_scale
@@ -31,6 +32,68 @@ def on_mi3xx() -> bool:
 @cache
 def use_skinny_gemm() -> bool:
     return envs.VLLM_ROCM_USE_SKINNY_GEMM
+
+
+if current_platform.is_rocm():
+
+    def rocm_aiter_gemm_a8w8_bpreshuffle_impl(
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            out_dtype: Optional[torch.dtype] = None,
+            scale_a: Optional[torch.Tensor] = None,
+            scale_b: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+        # This AITER function can be used for
+        # - per-token activations + per-channel weights
+        #   e.g. vllm/model_executor/layers/quantization/utils/w8a8_utils.py
+        # accept the weight as # keep the weight as (N, K)
+        # NOTE: The weight has to be shuffled in the
+        # process_weights_after_loading of the CompressedTensorsW8A8Fp8 class
+        from aiter import gemm_a8w8_bpreshuffle_ck
+        m = input.shape[0]
+        n = weight.shape[0]
+        Y = torch.empty(m, n, dtype=out_dtype, device=input.device)
+        gemm_a8w8_bpreshuffle_ck(input, weight, scale_a, scale_b, Y)
+        return Y
+
+    def rocm_aiter_gemm_a8w8_bpreshuffle_fake(
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            out_dtype: Optional[torch.dtype] = None,
+            scale_a: Optional[torch.Tensor] = None,
+            scale_b: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+        m = input.shape[0]
+        n = weight.shape[0]
+        if out_dtype is None:
+            out_dtype = input.dtype
+        return torch.empty((m, n), dtype=out_dtype, device=input.device)
+
+    if current_platform.is_rocm():
+        direct_register_custom_op(
+            op_name="rocm_aiter_gemm_a8w8_bpreshuffle",
+            op_func=rocm_aiter_gemm_a8w8_bpreshuffle_impl,
+            mutates_args=[],
+            fake_impl=rocm_aiter_gemm_a8w8_bpreshuffle_fake,
+            dispatch_key=current_platform.dispatch_key,
+        )
+
+
+def rocm_aiter_per_token_w8a8_scaled_mm(qinput: torch.Tensor,
+                                        weight: torch.Tensor,
+                                        out_dtype: torch.dtype,
+                                        scale_a: torch.Tensor,
+                                        scale_b: torch.Tensor,
+                                        bias: torch.Tensor,
+                                        input_2d: torch.Tensor,
+                                        output_shape: list) -> torch.Tensor:
+    output_shape = [*qinput.shape[:-1], weight.shape[0]]
+    output = torch.ops.vllm.rocm_aiter_gemm_a8w8_bpreshuffle(
+        qinput, weight, out_dtype=out_dtype, scale_a=scale_a, scale_b=scale_b)
+    if bias is not None:
+        output = output + bias
+
+    return torch.narrow(output, 0, 0, input_2d.shape[0]).view(*output_shape)
 
 
 def rocm_aiter_per_tensor_w8a8_scaled_mm(qinput: torch.Tensor,
@@ -311,6 +374,11 @@ class Fp8LinearOp:
             elif (use_per_token_if_dynamic and not per_tensor_weights
                   and not per_tensor_activations
                   and USE_ROWWISE_TORCH_SCALED_MM):
+                if self.use_aiter_and_is_supported:
+                    return rocm_aiter_per_token_w8a8_scaled_mm(
+                        qinput, weight, out_dtype, x_scale, weight_scale, bias,
+                        input_2d, output_shape)
+
                 # For now validated on ROCm platform
                 # fp8 rowwise scaling in torch._scaled_mm is introduced in
                 # https://github.com/pytorch/pytorch/pull/144432 using hipBLASLt

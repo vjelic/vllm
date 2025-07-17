@@ -135,6 +135,8 @@ class RocmPlatform(Platform):
         "fbgemm_fp8", "gguf", "quark", "ptpc_fp8"
     ]
 
+    _fp8_dtype: torch.dtype = None
+
     @classmethod
     def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
                              kv_cache_dtype, block_size, use_v1,
@@ -328,10 +330,12 @@ class RocmPlatform(Platform):
 
     @classmethod
     def fp8_dtype(cls) -> torch.dtype:
-        if cls.is_fp8_fnuz():
-            return torch.float8_e4m3fnuz
-        else:
-            return torch.float8_e4m3fn
+        if cls._fp8_dtype is None:
+            if cls.is_fp8_fnuz():
+                cls._fp8_dtype = torch.float8_e4m3fnuz
+            else:
+                cls._fp8_dtype = torch.float8_e4m3fn
+        return cls._fp8_dtype
 
     @classmethod
     def supports_v1(cls, model_config: ModelConfig) -> bool:
