@@ -277,6 +277,19 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
+
+      int64_t fp6_key_idx = (tgt_key_idx * 3) /4;
+      int64_t fp6_value_idx = (tgt_value_idx * 3) /4;
+      int bit_offset = (tgt_key_idx % 4) * 6;
+
+      uint32_t* key_cache_ptr = reinterpret_cast<uint32_t*>(key_cache);
+      uint32_t* value_cache_ptr = reinterpret_cast<uint32_t*>(value_cache);
+
+      uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+      uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+
+      //need bitmath to be done
+
       key_cache[tgt_key_idx] =
           fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
       value_cache[tgt_value_idx] =
