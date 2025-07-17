@@ -267,9 +267,6 @@ __global__ void reshape_and_cache_kernel(
 
 
     //mutiply by 3/4, do some bit math to figure out how to pack
-
-
-    //printf("key index: %lld\n", static_cast<long long>(tgt_key_idx));
     
     scalar_t tgt_key = key[src_key_idx];
     scalar_t tgt_value = value[src_value_idx];
