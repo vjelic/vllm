@@ -303,6 +303,7 @@ __global__ void reshape_and_cache_kernel(
         key_cache_bytes[byte_idx + byte_offset + 1] |= (key_fp6 >> bits_in_first);
       }
 
+      //repeat for value
       byte_idx = (tgt_value_idx / 4) * 3;
       bit_pos = (tgt_value_idx % 4) * 6;
       byte_offset = bit_pos / 8;
