@@ -232,25 +232,40 @@ def rocm_aiter_asm_moe_impl(
     expert_mask: Optional[torch.Tensor] = None,
     activation_method: int = ActivationMethod.SILU.value,
 ) -> torch.Tensor:
+    import aiter
     from aiter import ActivationType
-    from aiter.fused_moe_bf16_asm import asm_moe
+    # from aiter.fused_moe_bf16_asm import asm_moe
+
+    # activation = ActivationType(activation_method)
+    # return asm_moe(
+    #     hidden_states,
+    #     w1,
+    #     w2,
+    #     topk_weights,
+    #     topk_ids,
+    #     fc1_scale=fc1_scale,
+    #     fc2_scale=fc2_scale,
+    #     fc1_smooth_scale=fc1_smooth_scale,
+    #     fc2_smooth_scale=fc2_smooth_scale,
+    #     a16=a16,
+    #     per_tensor_quant_scale=per_tensor_quant_scale,
+    #     block_shape=None if block_shape is None else tuple(block_shape),
+    #     activation=activation,
+    #     expert_mask=expert_mask,
+    # )
+    from aiter.fused_moe import fused_moe
 
     activation = ActivationType(activation_method)
-    return asm_moe(
+    return fused_moe(
         hidden_states,
         w1,
         w2,
         topk_weights,
         topk_ids,
-        fc1_scale=fc1_scale,
-        fc2_scale=fc2_scale,
-        fc1_smooth_scale=fc1_smooth_scale,
-        fc2_smooth_scale=fc2_smooth_scale,
-        a16=a16,
-        per_tensor_quant_scale=per_tensor_quant_scale,
-        block_shape=None if block_shape is None else tuple(block_shape),
+        w1_scale=fc1_scale,
+        w2_scale=fc2_scale,
+        quant_type=aiter.QuantType.per_Token,
         activation=activation,
-        expert_mask=expert_mask,
     )
 
 
