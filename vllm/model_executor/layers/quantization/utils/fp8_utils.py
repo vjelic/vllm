@@ -19,6 +19,12 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
+if current_platform.is_rocm():
+    import aiter as rocm_aiter
+    from aiter import get_hip_quant
+
+    aiter_per1x128_quant = get_hip_quant(rocm_aiter.QuantType.per_1x128)
+
 logger = init_logger(__name__)
 
 
@@ -112,22 +118,13 @@ def apply_w8a8_block_fp8_linear(
 ) -> torch.Tensor:
     assert input_scale is None
     # View input as 2D matrix for fp8 methods
+    # print(f'input.shape: {input.shape}, input.stride: {input.stride()}')
     input_2d = input.view(-1, input.shape[-1])
     output_shape = [*input.shape[:-1], weight.shape[0]]
 
     shape_supported_by_cutlass = (weight.shape[0] % 128 == 0
-                                  and weight.shape[1] % 128 == 0)
-    if current_platform.is_rocm():
-        # TODO this is never used, as cutlass_block_fp8_supported is False
-        scale_a_shape = ((input_2d.shape[-1] // block_size[1], ) +
-                         input_2d.shape[:-1])[::-1]
-        scale_b_shape = (weight_scale.view(-1, 1)
-                         if weight_scale.dim() <= 1 else weight_scale.T).shape
-        ar, ac = scale_a_shape
-        br, bc = scale_b_shape
-        if (ac > 1 or bc > 1 or ar not in (1, input_2d.shape[0])
-                or br not in (1, weight.shape[0])):
-            shape_supported_by_cutlass = False
+                                  and weight.shape[1] % 128 == 0) and current_platform.is_cuda()
+
     if cutlass_block_fp8_supported and shape_supported_by_cutlass:
         q_input, x_scale = per_token_group_quant_fp8(input_2d,
                                                      block_size[1],
@@ -138,7 +135,11 @@ def apply_w8a8_block_fp8_linear(
                                        scale_a=x_scale,
                                        scale_b=weight_scale.T)
     else:
-        q_input, x_scale = per_token_group_quant_fp8(input_2d,
+        if use_aiter_and_is_supported:
+            # print(f"input_2d.shape: {input_2d.shape}, input_2d.stride: {input_2d.stride()}")
+            q_input, x_scale = aiter_per1x128_quant(input_2d.contiguous(), quant_dtype=rocm_aiter.dtypes.fp8)
+        else:
+            q_input, x_scale = per_token_group_quant_fp8(input_2d,
                                                      block_size[1],
                                                      column_major_scales=False)
         w8a8_blockscale_func = dispatch_w8a8_blockscale_func(
