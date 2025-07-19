@@ -46,7 +46,7 @@ if current_platform.is_rocm():
         input: torch.Tensor,
         scale: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return aiter_per_token_quant(input, scale, rocm_aiter.dtypes.fp8)
+        return aiter_per_token_quant(input.contiguous(), scale, rocm_aiter.dtypes.fp8)
 
     def rocm_aiter_per_token_quant_fp8_fake(
         input: torch.Tensor,
@@ -64,7 +64,7 @@ if current_platform.is_rocm():
         input: torch.Tensor,
         scale: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return aiter_per_tensor_quant(input, scale, rocm_aiter.dtypes.fp8)
+        return aiter_per_tensor_quant(input.contiguous(), scale, rocm_aiter.dtypes.fp8)
 
     def rocm_aiter_per_tensor_quant_fp8_fake(
         input: torch.Tensor,
@@ -144,13 +144,13 @@ def rocm_aiter_per_token_w8a8_scaled_mm(qinput: torch.Tensor,
                                         bias: torch.Tensor,
                                         input_2d: torch.Tensor,
                                         output_shape: list) -> torch.Tensor:
-    output_shape = [*qinput.shape[:-1], weight.shape[0]]
+    # output_shape = [*qinput.shape[:-1], weight.shape[0]]
     output = torch.ops.vllm.rocm_aiter_gemm_a8w8_bpreshuffle(
         qinput, weight, out_dtype=out_dtype, scale_a=scale_a, scale_b=scale_b)
     if bias is not None:
         output = output + bias
-
-    return torch.narrow(output, 0, 0, input_2d.shape[0]).view(*output_shape)
+    return output
+    # return torch.narrow(output, 0, 0, input_2d.shape[0]).view(*output_shape)
 
 
 def rocm_aiter_per_tensor_w8a8_scaled_mm(qinput: torch.Tensor,
@@ -399,11 +399,12 @@ class Fp8LinearOp:
                     if use_per_token_if_dynamic:
                         qinput, x_scale = (
                             torch.ops.vllm.rocm_aiter_per_token_quant_fp8(
-                                input_2d.contiguous(), scale=input_scale))
+                                input_2d, scale=input_scale))
+                        
                     else:
                         qinput, x_scale = (
                             torch.ops.vllm.rocm_aiter_per_tensor_quant_fp8(
-                                input_2d.contiguous(), scale=input_scale))
+                                input_2d, scale=input_scale))
             else:
                 qinput, x_scale = input_2d, input_scale
 
