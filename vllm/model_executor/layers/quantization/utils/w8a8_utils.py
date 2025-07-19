@@ -46,7 +46,7 @@ if current_platform.is_rocm():
         input: torch.Tensor,
         scale: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return aiter_per_token_quant(input, scale, rocm_aiter.dtypes.fp8)
+        return aiter_per_token_quant(input.contiguous(), scale, rocm_aiter.dtypes.fp8)
 
     def rocm_aiter_per_token_quant_fp8_fake(
         input: torch.Tensor,
@@ -64,7 +64,7 @@ if current_platform.is_rocm():
         input: torch.Tensor,
         scale: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return aiter_per_tensor_quant(input, scale, rocm_aiter.dtypes.fp8)
+        return aiter_per_tensor_quant(input.contiguous(), scale, rocm_aiter.dtypes.fp8)
 
     def rocm_aiter_per_tensor_quant_fp8_fake(
         input: torch.Tensor,
@@ -399,11 +399,11 @@ class Fp8LinearOp:
                     if use_per_token_if_dynamic:
                         qinput, x_scale = (
                             torch.ops.vllm.rocm_aiter_per_token_quant_fp8(
-                                input_2d.contiguous(), scale=input_scale))
+                                input_2d, scale=input_scale))
                     else:
                         qinput, x_scale = (
                             torch.ops.vllm.rocm_aiter_per_tensor_quant_fp8(
-                                input_2d.contiguous(), scale=input_scale))
+                                input_2d, scale=input_scale))
             else:
                 qinput, x_scale = input_2d, input_scale
 
