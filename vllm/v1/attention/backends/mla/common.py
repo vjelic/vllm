@@ -952,9 +952,8 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
                 self._q_proj_and_k_up_proj(decode_hs_or_q_c)
 
             if self.use_rocm_aiter:
-                decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
-                    attn_metadata.decode.input_positions,
-                    decode_q_pe.clone().contiguous(), decode_k_pe.clone())
+                self.rotary_emb(attn_metadata.decode.input_positions,
+                                decode_q_pe, decode_k_pe)
             else:
                 decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
                     attn_metadata.decode.input_positions,
@@ -967,9 +966,8 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
             prefill_q_pe = prefill_q[..., self.qk_nope_head_dim:]
 
             if self.use_rocm_aiter:
-                prefill_q_pe[...], prefill_k_pe[...] = self.rotary_emb(
-                    attn_metadata.prefill.input_positions,
-                    prefill_q_pe.clone().contiguous(), prefill_k_pe.clone())
+                self.rotary_emb(attn_metadata.prefill.input_positions,
+                                prefill_q_pe, prefill_k_pe)
             else:
                 prefill_q_pe[...], prefill_k_pe[...] = self.rotary_emb(
                     attn_metadata.prefill.input_positions,
