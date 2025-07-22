@@ -123,7 +123,8 @@ def apply_w8a8_block_fp8_linear(
     output_shape = [*input.shape[:-1], weight.shape[0]]
 
     shape_supported_by_cutlass = (weight.shape[0] % 128 == 0
-                                  and weight.shape[1] % 128 == 0) and current_platform.is_cuda()
+                                  and weight.shape[1] % 128
+                                  == 0) and current_platform.is_cuda()
 
     if cutlass_block_fp8_supported and shape_supported_by_cutlass:
         q_input, x_scale = per_token_group_quant_fp8(input_2d,
@@ -137,11 +138,11 @@ def apply_w8a8_block_fp8_linear(
     else:
         if use_aiter_and_is_supported:
             # print(f"input_2d.shape: {input_2d.shape}, input_2d.stride: {input_2d.stride()}")
-            q_input, x_scale = aiter_per1x128_quant(input_2d.contiguous(), quant_dtype=rocm_aiter.dtypes.fp8)
+            q_input, x_scale = aiter_per1x128_quant(
+                input_2d.contiguous(), quant_dtype=rocm_aiter.dtypes.fp8)
         else:
-            q_input, x_scale = per_token_group_quant_fp8(input_2d,
-                                                     block_size[1],
-                                                     column_major_scales=False)
+            q_input, x_scale = per_token_group_quant_fp8(
+                input_2d, block_size[1], column_major_scales=False)
         w8a8_blockscale_func = dispatch_w8a8_blockscale_func(
             False, use_aiter_and_is_supported)
 

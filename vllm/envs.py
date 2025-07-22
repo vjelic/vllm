@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_FP8_PADDING: bool = True
     VLLM_ROCM_MOE_PADDING: bool = True
     VLLM_ROCM_CUSTOM_PAGED_ATTN: bool = True
+    VLLM_SHARED_EXPERT_FUSION_REPLICAS: int = 0
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = True
     VLLM_LOG_BATCHSIZE_INTERVAL: float = -1
     VLLM_DISABLE_COMPILE_CACHE: bool = False
@@ -571,7 +572,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ROCM_USE_AITER_ROPE":
     lambda: (os.getenv("VLLM_ROCM_USE_AITER_ROPE", "True").lower() in
              ("true", "1")),
-             
+
     # Use skinny gemm for FP8 kernels
     "VLLM_ROCM_USE_SKINNY_GEMM":
     lambda: (os.getenv("VLLM_ROCM_USE_SKINNY_GEMM", "True").lower() in
@@ -589,6 +590,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ROCM_CUSTOM_PAGED_ATTN":
     lambda: (os.getenv("VLLM_ROCM_CUSTOM_PAGED_ATTN", "True").lower() in
              ("true", "1")),
+
+    # Enable Share Expert Fusion by setting this > 0, disable by setting = 0
+    # The value here will be the Shared Expert relicas copied into MoE
+    # Set a larger value will consume more GPU memory
+    # but a better loading-balance thus potentially faster inference
+    "VLLM_SHARED_EXPERT_FUSION_REPLICAS":
+    lambda: int(os.getenv("VLLM_SHARED_EXPERT_FUSION_REPLICAS", "0")),
 
     # Divisor for dynamic query scale factor calculation for FP8 KV Cache
     "Q_SCALE_CONSTANT":

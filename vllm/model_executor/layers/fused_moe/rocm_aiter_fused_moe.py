@@ -6,6 +6,7 @@ from typing import Optional
 
 import torch
 
+import vllm._custom_ops as custom_ops
 from vllm import envs
 from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
@@ -332,7 +333,9 @@ def rocm_aiter_grouped_topk(
     num_expert_group: int = 0,
     topk_group: int = 0,
     scoring_func: str = "softmax",
-    e_score_correction_bias: Optional[torch.Tensor] = None
+    e_score_correction_bias: Optional[torch.Tensor] = None,
+    num_share_fusion_replicas: int = 0,
+    routed_scaling_factor: Optional[float] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     token = hidden_states.shape[0]
     device = hidden_states.device
@@ -342,26 +345,36 @@ def rocm_aiter_grouped_topk(
                                device=device)
 
     if e_score_correction_bias is not None:
-        torch.ops.vllm.rocm_aiter_biased_grouped_topk(
-            gating_output,
-            e_score_correction_bias,
-            topk_weights,
-            topk_ids,
-            num_expert_group,
-            topk_group,
-            renormalize,
-        )
+        # torch.ops.vllm.rocm_aiter_biased_grouped_topk(
+        #     gating_output,
+        #     e_score_correction_bias,
+        #     topk_weights,
+        #     topk_ids,
+        #     num_expert_group,
+        #     topk_group,
+        #     renormalize,
+        # )
+        custom_ops.rocm_biased_grouped_topk(gating_output,
+                                            e_score_correction_bias,
+                                            topk_weights, topk_ids,
+                                            num_expert_group, topk_group,
+                                            renormalize, routed_scaling_factor,
+                                            num_share_fusion_replicas)
     else:
         assert (scoring_func == "softmax" or scoring_func == "sigmoid")
-        torch.ops.vllm.rocm_aiter_grouped_topk(
-            gating_output,
-            topk_weights,
-            topk_ids,
-            num_expert_group,
-            topk_group,
-            renormalize,
-            scoring_func,
-        )
+        # torch.ops.vllm.rocm_aiter_grouped_topk(
+        #     gating_output,
+        #     topk_weights,
+        #     topk_ids,
+        #     num_expert_group,
+        #     topk_group,
+        #     renormalize,
+        #     scoring_func,
+        # )
+        custom_ops.rocm_grouped_topk(gating_output, topk_weights, topk_ids,
+                                     num_expert_group, topk_group, renormalize,
+                                     scoring_func, routed_scaling_factor,
+                                     num_share_fusion_replicas)
 
     return topk_weights, topk_ids
 

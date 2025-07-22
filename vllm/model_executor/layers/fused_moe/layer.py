@@ -167,6 +167,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        num_share_fusion_replicas: int = 0,
+        routed_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         return self.forward(
             x=x,
@@ -183,7 +185,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
             activation=activation,
-            apply_router_weight_on_input=apply_router_weight_on_input)
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            num_share_fusion_replicas=num_share_fusion_replicas,
+            routed_scaling_factor=routed_scaling_factor)
 
     def forward_cuda(
         self,
@@ -202,6 +206,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        num_share_fusion_replicas: int = 0,
+        routed_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -213,7 +219,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             num_expert_group=num_expert_group,
             custom_routing_function=custom_routing_function,
             scoring_func=scoring_func,
-            e_score_correction_bias=e_score_correction_bias)
+            e_score_correction_bias=e_score_correction_bias,
+            num_share_fusion_replicas=num_share_fusion_replicas,
+            routed_scaling_factor=routed_scaling_factor)
 
         return fused_experts(
             hidden_states=x,
@@ -424,6 +432,7 @@ class FusedMoE(torch.nn.Module):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        routed_scaling_factor: Optional[float] = None,
     ):
         super().__init__()
 
@@ -431,6 +440,7 @@ class FusedMoE(torch.nn.Module):
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype
 
+        vllm_config = get_current_vllm_config()
         # Note: here we guard against accessing the TP and DP groups when
         # uninitialized (this happens when testing)
         self.tp_size = (tp_size if tp_size is not None else
@@ -441,6 +451,8 @@ class FusedMoE(torch.nn.Module):
         self.dp_rank = (0
                         if self.dp_size == 1 else get_dp_group().rank_in_group)
         self.global_num_experts = num_experts
+        num_share_fusion_replicas = \
+            vllm_config.parallel_config.num_share_fusion_replicas
 
         # Use expert parallelism instead of tensor parallelism?
         vllm_config = get_current_vllm_config()
@@ -463,7 +475,13 @@ class FusedMoE(torch.nn.Module):
             self.tp_rank = 0
             self.ep_size = self.tp_size * self.dp_size
             self.tp_size = 1
-
+            if (num_share_fusion_replicas > 0
+                    and self.ep_size != num_share_fusion_replicas):
+                logger.warning(
+                    "With EP enabled and share expert fusion enabled"
+                    ", share expert replica should be same as ep_size"
+                    "got share expert replica = %d"
+                    "and ep_size = %d", num_share_fusion_replicas, ep_size)
             self.local_num_experts, self.expert_map = determine_expert_map(
                 ep_size=self.ep_size,
                 ep_rank=self.ep_rank,
@@ -493,6 +511,8 @@ class FusedMoE(torch.nn.Module):
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
         self.activation = activation
+        self.routed_scaling_factor = routed_scaling_factor
+        self.num_share_fusion_replicas = num_share_fusion_replicas
 
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
@@ -795,7 +815,9 @@ class FusedMoE(torch.nn.Module):
                        num_expert_group: Optional[int] = None,
                        custom_routing_function: Optional[Callable] = None,
                        scoring_func: str = "softmax",
-                       e_score_correction_bias: Optional[torch.Tensor] = None):
+                       e_score_correction_bias: Optional[torch.Tensor] = None,
+                       num_share_fusion_replicas: int = 0,
+                       routed_scaling_factor: Optional[float] = None):
         from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk
 
         # DeekSeekv2 uses grouped_top_k
@@ -810,7 +832,9 @@ class FusedMoE(torch.nn.Module):
                 num_expert_group=num_expert_group,
                 topk_group=topk_group,
                 scoring_func=scoring_func,
-                e_score_correction_bias=e_score_correction_bias)
+                e_score_correction_bias=e_score_correction_bias,
+                num_share_fusion_replicas=num_share_fusion_replicas,
+                routed_scaling_factor=routed_scaling_factor)
         elif custom_routing_function is None:
             topk_weights, topk_ids = fused_topk(hidden_states=hidden_states,
                                                 gating_output=router_logits,
@@ -881,7 +905,8 @@ class FusedMoE(torch.nn.Module):
             e_score_correction_bias=self.e_score_correction_bias,
             activation=self.activation,
             apply_router_weight_on_input=self.apply_router_weight_on_input,
-        )
+            routed_scaling_factor=self.routed_scaling_factor,
+            num_share_fusion_replicas=self.num_share_fusion_replicas)
 
         if self.dp_size > 1:
             start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
