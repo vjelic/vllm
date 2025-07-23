@@ -468,26 +468,24 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
         Klocal[token_depth][qkhe_depth] = *k_fetch_ptr_16B;
       } else{
         const uint8_t* k_byte_ptr = reinterpret_cast<const uint8_t*>(k_ptr3);
-
-        const int elem_group = head_elem / 4;
-        const int group_offset = head_elem % 4;
-        const int byte_offset = elem_group * 3;
-
-        uint32_t packed = *reinterpret_cast<const uint32_t*>(k_byte_ptr + byte_offset);
-
-        const int bit_shift = group_offset * 6;
-        const uint32_t shifted = packed << (24 - bit_shift - 6);
-
-        const uint8_t fp6_byte = (shifted >> 18) & 0x3F;
-        const float val = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(fp6_byte, *k_scale);
-
         _B16x8 vec_val;
 
-        float* vec_ptr = reinterpret_cast<float*>(&vec_val);
-        //#pragma unroll
         for (int i = 0; i < 8; ++i) {
             //all bit shift in here
-            vec_ptr[i] = val;
+
+            const int elem_group = head_elem / 4;
+            const int group_offset = head_elem % 4;
+            const int byte_offset = elem_group * 3;
+
+            uint32_t packed = *reinterpret_cast<const uint32_t*>(k_byte_ptr + byte_offset);
+
+            const int bit_shift = group_offset * 6;
+            const uint32_t shifted = packed << (24 - bit_shift - 6);
+
+            const uint8_t fp6_byte = (shifted >> 18) & 0x3F;
+
+            float* vec_ptr = reinterpret_cast<float*>(&vec_val);
+            vec_ptr[i] = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(fp6_byte, *k_scale);;
         }
         Klocal[token_depth][qkhe_depth] = vec_val;
 
@@ -552,31 +550,28 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
             vphysical_block_number[vtoken_depth][vblock_depth]);
         const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
         if(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto){
-          const cache_t* v_fetch_ptr =
+          const cache_t* v_fetch_ptr = 
               v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
           const _B16x8* v_fetch_ptr_16B =
               reinterpret_cast<const _B16x8*>(v_fetch_ptr);
           Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *v_fetch_ptr_16B;
         } else{
           const uint8_t* v_byte_ptr = reinterpret_cast<const uint8_t*>(v_ptr3);
-          
-          const int elem_group = vfetch_depth / 4;
-          const int group_offset = vfetch_depth % 4;
-          const int byte_offset = elem_group * 3;
-          
-          const uint32_t packed = *reinterpret_cast<const uint32_t*>(
-            v_byte_ptr + byte_offset) & 0x00FFFFFF;
-          
-          const uint8_t fp6_byte = (packed >> (18 - group_offset * 6)) & 0x3F;
-
-          const float val = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(
-            fp6_byte, *v_scale);
-
           _B16x8 vec_val;
-          float* vec_ptr = reinterpret_cast<float*>(&vec_val);
-          #pragma unroll
+          //#pragma unroll
           for(int i = 0; i < 8; ++i) {
-            vec_ptr[i] = val;
+            const int elem_group = vfetch_depth / 4;
+            const int group_offset = vfetch_depth % 4;
+            const int byte_offset = elem_group * 3;
+            
+            const uint32_t packed = *reinterpret_cast<const uint32_t*>(
+              v_byte_ptr + byte_offset) & 0x00FFFFFF;
+            
+            const uint8_t fp6_byte = (packed >> (18 - group_offset * 6)) & 0x3F;
+
+            float* vec_ptr = reinterpret_cast<float*>(&vec_val);
+            vec_ptr[i] = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(
+              fp6_byte, *v_scale);;
           }
           Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = vec_val;
         }

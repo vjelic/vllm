@@ -276,7 +276,7 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-      for (int j = 0; j < chunk_size; j++) {
+      //for (int j = 0; j < chunk_size; j++) {
         //process four blocks per loop
         //* 3/4
         int64_t byte_idx = (tgt_key_idx * 3) / 4;
@@ -332,7 +332,7 @@ __global__ void reshape_and_cache_kernel(
           value_cache_bytes[byte_idx + byte_offset + 1] &= ~((1 << bits_in_second_byte) - 1);
           value_cache_bytes[byte_idx + byte_offset + 1] |= (value_fp6 >> bits_in_first_byte);
         }
-      }
+      //}
     }
   }
 }
