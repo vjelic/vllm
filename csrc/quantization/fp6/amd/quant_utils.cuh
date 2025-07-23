@@ -134,6 +134,17 @@ scaled_vec_conversion<float4, uint32_t>(const uint32_t& a, float scale) {
   return {res.x.x, res.x.y, res.y.x, res.y.y};
 }
 
+//todo: fix
+// bf16x8 -> fp6x8
+template <>
+__inline__ __device__ uint2
+scaled_vec_conversion<uint2, bf16_8_t>(const bf16_8_t& a, float scale) {
+  uint2 res;
+  res.x = scaled_vec_conversion<uint32_t, bf16_4_t>({a.x, a.y}, scale);
+  res.y = scaled_vec_conversion<uint32_t, bf16_4_t>({a.z, a.w}, scale);
+  return res;
+}
+
   #endif  // ENABLE_FP8
 
 template <typename Tout, typename Tin, Fp8KVCacheDataType kv_dt>
