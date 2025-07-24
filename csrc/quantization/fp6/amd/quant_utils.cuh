@@ -94,6 +94,18 @@ __inline__ __device__ uint8_t scaled_vec_conversion<uint8_t, __hip_bfloat16>(
   return fp6_val.__x;
 }
 
+// fp6 -> bfloat
+template <>
+__inline__ __device__ __hip_bfloat16 scaled_vec_conversion<__hip_bfloat16, uint8_t>(
+    const uint8_t& a, float scale) {
+  __hip_fp6_e2m3 fp6_val;
+  fp6_val.__x = a;
+  float fVal = fp6_val;
+  fVal *= scale;
+  __hip_bfloat16 res = __hip_bfloat16(fVal);
+  return res;
+}
+
 // fp6 -> float
 template <>
 __inline__ __device__ float scaled_vec_conversion<float, uint8_t>(

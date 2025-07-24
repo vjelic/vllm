@@ -160,7 +160,8 @@ __device__ void paged_attention_kernel(
   // group fetch or compute 16 bytes at a time. For example, if the size of a
   // thread group is 4 and the data type is half, then the vector size is 16 /
   // (4 * sizeof(half)) == 2.
-  constexpr int VEC_SIZE = MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
+  constexpr int VEC_SIZE =
+      1;  // MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
   using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
@@ -267,24 +268,43 @@ __device__ void paged_attention_kernel(
       const int physical_block_offset =
           (thread_group_idx + i * WARP_SIZE) % BLOCK_SIZE;
       const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
-      K_vec k_vecs[NUM_VECS_PER_THREAD];
+      scalar_t k_vecs[NUM_VECS_PER_THREAD];
 
 #pragma unroll
       for (int j = 0; j < NUM_VECS_PER_THREAD; j++) {
-        const cache_t* k_ptr =
-            k_cache + physical_block_number * kv_block_stride +
-            kv_head_idx * kv_head_stride + physical_block_offset * x;
+        // const cache_t* k_ptr =
+        //     k_cache + physical_block_number * kv_block_stride +
+        //     kv_head_idx * kv_head_stride + physical_block_offset * x;
         const int vec_idx = thread_group_offset + j * THREAD_GROUP_SIZE;
         const int offset1 = (vec_idx * VEC_SIZE) / x;
         const int offset2 = (vec_idx * VEC_SIZE) % x;
+        size_t k_offset = physical_block_number * kv_block_stride +
+                          kv_head_idx * kv_head_stride +
+                          physical_block_offset * x + offset1 * BLOCK_SIZE * x +
+                          offset2;
 
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
-          k_vecs[j] = *reinterpret_cast<const K_vec*>(
-              k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+          k_vecs[j] = k_cache[k_offset];
         } else {
           // Vector conversion from Quant_vec to K_vec.
-          Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
-              k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+
+          int64_t byte_idx = (k_offset * 3) / 4;
+          int bit_pos = (k_offset * 6) % 8;
+          cache_t k_vec_quant;
+          if (bit_pos == 0) {
+            k_vec_quant = k_cache[byte_idx] >> 2;
+          } else if (bit_pos == 2) {
+            k_vec_quant = k_cache[byte_idx] & 0b00111111;
+          } else if (bit_pos == 4) {
+            k_vec_quant = ((k_cache[byte_idx] & 0b00001111) << 2) |
+                          ((k_cache[byte_idx + 1] & 0b11000000) >> 6);
+          } else if (bit_pos == 6) {
+            k_vec_quant = ((k_cache[byte_idx] & 0b00000011) << 4) |
+                          ((k_cache[byte_idx + 1] & 0b11110000) >> 4);
+          } else {
+            assert(false);
+          }
+
           k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
               k_vec_quant, *k_scale);
         }
@@ -358,7 +378,7 @@ __device__ void paged_attention_kernel(
   }
 
   // Each thread will fetch 16 bytes from the value cache at a time.
-  constexpr int V_VEC_SIZE = MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
+  constexpr int V_VEC_SIZE = 1;  // MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
   using V_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using L_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using V_quant_vec = typename Vec<cache_t, V_VEC_SIZE>::Type;
@@ -400,8 +420,6 @@ __device__ void paged_attention_kernel(
     from_float(logits_vec, *reinterpret_cast<Float_L_vec*>(logits + token_idx -
                                                            start_token_idx));
 
-    const cache_t* v_ptr = v_cache + physical_block_number * kv_block_stride +
-                           kv_head_idx * kv_head_stride;
 #pragma unroll
     for (int i = 0; i < NUM_ROWS_PER_THREAD; i++) {
       const int row_idx = lane / NUM_V_VECS_PER_ROW + i * NUM_ROWS_PER_ITER;
@@ -409,12 +427,27 @@ __device__ void paged_attention_kernel(
         const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
         V_vec v_vec;
 
+        size_t v_offset = physical_block_number * kv_block_stride +
+                          kv_head_idx * kv_head_stride + offset;
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
-          v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
+          v_vec = v_cache[v_offset];
         } else {
-          V_quant_vec v_quant_vec =
-              *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          // Vector conversion from V_quant_vec to V_vec.
+          int64_t byte_idx = (v_offset * 3) / 4;
+          int bit_pos = (v_offset * 6) % 8;
+          cache_t v_quant_vec;
+          if (bit_pos == 0) {
+            v_quant_vec = v_cache[byte_idx] >> 2;
+          } else if (bit_pos == 2) {
+            v_quant_vec = v_cache[byte_idx] & 0b00111111;
+          } else if (bit_pos == 4) {
+            v_quant_vec = ((v_cache[byte_idx] & 0b00001111) << 2) |
+                          ((v_cache[byte_idx + 1] & 0b11000000) >> 6);
+          } else if (bit_pos == 6) {
+            v_quant_vec = ((v_cache[byte_idx] & 0b00000011) << 4) |
+                          ((v_cache[byte_idx + 1] & 0b11110000) >> 4);
+          } else {
+            assert(false);
+          }
           v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
                                                                     *v_scale);
         }

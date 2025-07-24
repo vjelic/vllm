@@ -245,7 +245,6 @@ __global__ void reshape_and_cache_kernel(
 
   const int chunk_size = 3;
 
-
   const int64_t block_idx = slot_idx / block_size;
   const int64_t block_offset = slot_idx % block_size;
 
@@ -267,116 +266,111 @@ __global__ void reshape_and_cache_kernel(
         block_idx * num_heads * head_size * block_size +
         head_idx * head_size * block_size + head_offset * block_size +
         block_offset;
-    
-      
-    
+
     scalar_t tgt_key = key[src_key_idx];
     scalar_t tgt_value = value[src_value_idx];
     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-      //for (int j = 0; j < chunk_size; j++) {
-        //process four blocks per loop
-        //* 3/4
-        int64_t byte_idx = (tgt_key_idx * 3) / 4;
-        int bit_pos = (tgt_key_idx * 6) % 8;
-        
-        uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-        uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
-        
-        //6 lsb s
-        //though this could be problematic with negative values? -> quant/dequant issue? Or something with concurrency?
-        key_fp6 &= 0x3F;
-        value_fp6 &= 0x3F;
-        
-        uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
-        uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
-        
-        int byte_offset = bit_pos / 8;
-        int bit_offset = bit_pos % 8;
+      int64_t byte_idx = (tgt_key_idx * 3) / 4;
+      int bit_pos = (tgt_key_idx * 6) % 8;
 
+      uint8_t key_fp6 =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+      uint8_t value_fp6 =
+          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
 
-        //first 6 bits of the byte, or filling in the rest of a byte
-        if (bit_offset <= 2) {
-          key_cache_bytes[byte_idx + byte_offset] &= ~(0x3F << bit_offset);
-          key_cache_bytes[byte_idx + byte_offset] |= (key_fp6 << bit_offset);
-        } else { 
-          //middle of one, part of the second
-          int bits_in_first_byte = 8 - bit_offset;
-          int bits_in_second_byte = 6 - bits_in_first_byte;
-          
-          //atomics?
-          key_cache_bytes[byte_idx + byte_offset] &= ~(0xFF << bit_offset);
-          key_cache_bytes[byte_idx + byte_offset] |= (key_fp6 << bit_offset);
-          key_cache_bytes[byte_idx + byte_offset + 1] &= ~((1 << bits_in_second_byte) - 1);
-          key_cache_bytes[byte_idx + byte_offset + 1] |= (key_fp6 >> bits_in_first_byte);
-        }
+      uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
+      uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
 
-        //repeat for value
-        byte_idx = (tgt_value_idx * 3) / 4;
-        bit_pos = (tgt_value_idx * 6) % 8;
-        byte_offset = bit_pos / 8;
-        bit_offset = bit_pos % 8;
-        
-        if (bit_offset <= 2) {
-          value_cache_bytes[byte_idx + byte_offset] &= ~(0x3F << bit_offset);
-          value_cache_bytes[byte_idx + byte_offset] |= (value_fp6 << bit_offset);
-        } else {
-          int bits_in_first_byte = 8 - bit_offset;
-          int bits_in_second_byte = 6 - bits_in_first_byte;
-          
-          value_cache_bytes[byte_idx + byte_offset] &= ~(0xFF << bit_offset);
-          value_cache_bytes[byte_idx + byte_offset] |= (value_fp6 << bit_offset);
-          
-          value_cache_bytes[byte_idx + byte_offset + 1] &= ~((1 << bits_in_second_byte) - 1);
-          value_cache_bytes[byte_idx + byte_offset + 1] |= (value_fp6 >> bits_in_first_byte);
-        }
-      //}
+      if (bit_pos == 0) {
+        key_cache_bytes[byte_idx] &= 0b00000011;
+        key_cache_bytes[byte_idx] |= (key_fp6 << 2);
+      } else if (bit_pos == 2) {
+        key_cache_bytes[byte_idx] &= 0b11000000;
+        key_cache_bytes[byte_idx] |= (key_fp6);
+      } else if (bit_pos == 4) {
+        key_cache_bytes[byte_idx] &= 0b11110000;
+        key_cache_bytes[byte_idx + 1] &= 0b00111111;
+        key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
+        key_cache_bytes[byte_idx + 1] |= (key_fp6 << 6);
+      } else if (bit_pos == 6) {
+        key_cache_bytes[byte_idx] &= 0b11111100;
+        key_cache_bytes[byte_idx + 1] &= 0b00001111;
+        key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
+        key_cache_bytes[byte_idx + 1] |= (key_fp6 << 4);
+      } else {
+        // should never happen
+        assert(false);
+      }
+
+      // repeat for value
+      byte_idx = (tgt_value_idx * 3) / 4;
+      bit_pos = (tgt_value_idx * 6) % 8;
+
+      if (bit_pos == 0) {
+        value_cache_bytes[byte_idx] &= 0b00000011;
+        value_cache_bytes[byte_idx] |= (value_fp6 << 2);
+      } else if (bit_pos == 2) {
+        value_cache_bytes[byte_idx] &= 0b11000000;
+        value_cache_bytes[byte_idx] |= (value_fp6);
+      } else if (bit_pos == 4) {
+        value_cache_bytes[byte_idx] &= 0b11110000;
+        value_cache_bytes[byte_idx + 1] &= 0b00111111;
+        value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
+        value_cache_bytes[byte_idx + 1] |= (value_fp6 << 6);
+      } else if (bit_pos == 6) {
+        value_cache_bytes[byte_idx] &= 0b11111100;
+        value_cache_bytes[byte_idx + 1] &= 0b00001111;
+        value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
+        value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
+      } else {
+        // should never happen
+        assert(false);
+      }
     }
   }
 }
 
+// __hip_bfloat16 bf_key_in =
+//     *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
+// __hip_bfloat16 bf_value_in =
+//     *reinterpret_cast<const __hip_bfloat16*>(&value[src_value_idx]);
+/*
+key_cache[tgt_key_idx] =
+    fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 125.0f/7.5f);
+value_cache[tgt_value_idx] =
+    fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 125.0f/7.5);
+    */
 
-      // __hip_bfloat16 bf_key_in =
-      //     *reinterpret_cast<const __hip_bfloat16*>(&key[src_key_idx]);
-      // __hip_bfloat16 bf_value_in =
-      //     *reinterpret_cast<const __hip_bfloat16*>(&value[src_value_idx]);
-      /*
-      key_cache[tgt_key_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, 125.0f/7.5f);
-      value_cache[tgt_value_idx] =
-          fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, 125.0f/7.5);
-          */
+/*
+__hip_fp6_e2m3 fp6_key = __hip_fp6_e2m3(bf_key_in);
+__hip_fp6_e2m3 fp6_value = __hip_fp6_e2m3(bf_value_in);
 
-      /*
-      __hip_fp6_e2m3 fp6_key = __hip_fp6_e2m3(bf_key_in);
-      __hip_fp6_e2m3 fp6_value = __hip_fp6_e2m3(bf_value_in);
+if (fp6_key.__x == 0b00100000) {
+ fp6_key.__x = 0b00000000;
+}
+if (fp6_value.__x == 0b00100000) {
+ fp6_value.__x = 0b00000000;
+}
 
-     if (fp6_key.__x == 0b00100000) {
-       fp6_key.__x = 0b00000000;
-     }
-     if (fp6_value.__x == 0b00100000) {
-       fp6_value.__x = 0b00000000;
-     }
+__hip_bfloat16_raw bf16r_key = fp6_key;
+__hip_bfloat16_raw bf16r_value = fp6_value;
 
-      __hip_bfloat16_raw bf16r_key = fp6_key;
-      __hip_bfloat16_raw bf16r_value = fp6_value;
+__hip_bfloat16  bf_key_out{bf16r_key};
+__hip_bfloat16  bf_value_out{bf16r_value};
+*/
 
-      __hip_bfloat16  bf_key_out{bf16r_key};
-      __hip_bfloat16  bf_value_out{bf16r_value};
-      */
+// almost sure the non-dynamic SF is not the issue, as the round trip
+// works with one (when hardcoded into kv_cache.py), but might be useful
+// to eventually improve accuracy?
+// key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
+//     *reinterpret_cast<scalar_t*>(&bf_key_in), 1.0f);
+// value_cache[tgt_value_idx] =
+//     fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
+//         *reinterpret_cast<scalar_t*>(&bf_value_in), 1.0f);
 
-      // almost sure the non-dynamic SF is not the issue, as the round trip
-      // works with one (when hardcoded into kv_cache.py), but might be useful
-      // to eventually improve accuracy?
-      // key_cache[tgt_key_idx] = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
-      //     *reinterpret_cast<scalar_t*>(&bf_key_in), 1.0f);
-      // value_cache[tgt_value_idx] =
-      //     fp6::scaled_convert<cache_t, scalar_t, kv_dt>(
-      //         *reinterpret_cast<scalar_t*>(&bf_value_in), 1.0f);
-
-      
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
 __global__ void reshape_and_cache_flash_kernel(
     const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]

@@ -24,8 +24,6 @@
 #include <algorithm>
 #include "../attention/dtype_fp8.cuh"
 #include "../quantization/fp8/amd/quant_utils.cuh"
-#include "../quantization/fp6/amd/quant_utils.cuh"
-//#include </opt/rocm/include/hip/amd_detail/amd_hip_fp6.h>
 
 #if defined(__HIPCC__) && \
     (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
@@ -194,33 +192,28 @@ __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
   }
 }
 
-// __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
-//   // From MI300+ platforms, we have v_cvt_pk_f32_fp8 instruction
-//   // to convert 2 packed fp8 to 2 packed fp32 values.
-//   // However, in MI200 platforms, we only have v_cvt_f32_fp8
-//   // to convert fp8 values individually. So we added
-//   // #else case for fewer instructions (# inst=2) in MI300+,
-//   // and fallback to
-//   // #if case for other platforms (# inst=4).
-//   #if defined(__gfx90a__)
-//   float4 f32x4 = vllm::fp8::vec_conversion<float4, uint32_t>(
-//       *reinterpret_cast<const uint32_t*>(&inp));
-//   return *reinterpret_cast<floatx4*>(&f32x4);
-//   #else  // MI3xx+ optimized builtins
-//   const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
-//   const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
-//   floatx4 ret;
-//   ret[0] = f0[0];
-//   ret[1] = f0[1];
-//   ret[2] = f1[0];
-//   ret[3] = f1[1];
-//   return ret;
-//   #endif
-// }
-
 __device__ __forceinline__ floatx4 to_float_fp8x4(const _B8x4& inp) {
-  float4 f32x4 = vllm::fp6::scaled_vec_conversion<float4, uint32_t>(inp, 1.0f);
+  // From MI300+ platforms, we have v_cvt_pk_f32_fp8 instruction
+  // to convert 2 packed fp8 to 2 packed fp32 values.
+  // However, in MI200 platforms, we only have v_cvt_f32_fp8
+  // to convert fp8 values individually. So we added
+  // #else case for fewer instructions (# inst=2) in MI300+,
+  // and fallback to
+  // #if case for other platforms (# inst=4).
+  #if defined(__gfx90a__)
+  float4 f32x4 = vllm::fp8::vec_conversion<float4, uint32_t>(
+      *reinterpret_cast<const uint32_t*>(&inp));
   return *reinterpret_cast<floatx4*>(&f32x4);
+  #else  // MI3xx+ optimized builtins
+  const auto f0 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, false);
+  const auto f1 = __builtin_amdgcn_cvt_pk_f32_fp8(inp, true);
+  floatx4 ret;
+  ret[0] = f0[0];
+  ret[1] = f0[1];
+  ret[2] = f1[0];
+  ret[3] = f1[1];
+  return ret;
+  #endif
 }
 
 template <typename T>
@@ -444,43 +437,15 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
 
     for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
       const int head_elem = row_head_elem + qkhe_depth * QKHE_PER_FETCH;
-      if constexpr(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto){
-        //fp8 -> do as before
-        const int offset1 = head_elem / KX;
-        const int offset2 = head_elem % KX;
-        const cache_t* k_fetch_ptr = k_ptr3 + offset1 * BLOCK_SIZE * KX + offset2;
-        const _B16x8* k_fetch_ptr_16B =
-            reinterpret_cast<const _B16x8*>(k_fetch_ptr);
-        Klocal[token_depth][qkhe_depth] = *k_fetch_ptr_16B;
-      } else{
-        const uint8_t* k_byte_ptr = reinterpret_cast<const uint8_t*>(k_ptr3);
-        _B16x8 vec_val;
-
-        for (int i = 0; i < 8; ++i) {
-            //all bit shift in here
-
-            const int elem_group = head_elem / 4;
-            const int group_offset = head_elem % 4;
-            const int byte_offset = elem_group * 3;
-
-            uint32_t packed = *reinterpret_cast<const uint32_t*>(k_byte_ptr + byte_offset);
-
-            const int bit_shift = group_offset * 6;
-            const uint32_t shifted = packed << (24 - bit_shift - 6);
-
-            const uint8_t fp6_byte = (shifted >> 18) & 0x3F;
-
-            float* vec_ptr = reinterpret_cast<float*>(&vec_val);
-            vec_ptr[i] = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(fp6_byte, *k_scale);;
-        }
-        Klocal[token_depth][qkhe_depth] = vec_val;
-
-        //Klocal[token_depth][qkhe_depth] = 
-        //somehow_decode_16x8_fp6_vec<scalar_t, cache_t, KV_DTYPE>(k_byte_ptr, head_elem, k_scale_inv);
-      }
+      const int offset1 = head_elem / KX;
+      const int offset2 = head_elem % KX;
+      const cache_t* k_fetch_ptr = k_ptr3 + offset1 * BLOCK_SIZE * KX + offset2;
+      const _B16x8* k_fetch_ptr_16B =
+          reinterpret_cast<const _B16x8*>(k_fetch_ptr);
+      Klocal[token_depth][qkhe_depth] = *k_fetch_ptr_16B;
     }
   }
-  //TODO: tweak pull k-values from cache ^^
+
   float alibi_slope;
   if constexpr (ALIBI_ENABLED) {
     const int alibi_head_idx = wg_start_head_idx + lane16id;
@@ -535,36 +500,16 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
         const int64_t vblock_number = static_cast<int64_t>(
             vphysical_block_number[vtoken_depth][vblock_depth]);
         const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
-        if(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto){
-          const cache_t* v_fetch_ptr = 
-              v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
-          const _B16x8* v_fetch_ptr_16B =
-              reinterpret_cast<const _B16x8*>(v_fetch_ptr);
-          Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *v_fetch_ptr_16B;
-        } else{
-          const uint8_t* v_byte_ptr = reinterpret_cast<const uint8_t*>(v_ptr3);
-          _B16x8 vec_val;
-          //#pragma unroll
-          for(int i = 0; i < 8; ++i) {
-            const int elem_group = vfetch_depth / 4;
-            const int group_offset = vfetch_depth % 4;
-            const int byte_offset = elem_group * 3;
-            
-            const uint32_t packed = *reinterpret_cast<const uint32_t*>(
-              v_byte_ptr + byte_offset) & 0x00FFFFFF;
-            
-            const uint8_t fp6_byte = (packed >> (18 - group_offset * 6)) & 0x3F;
 
-            float* vec_ptr = reinterpret_cast<float*>(&vec_val);
-            vec_ptr[i] = vllm::fp6::scaled_convert<float, uint8_t, KV_DTYPE>(
-              fp6_byte, *v_scale);;
-          }
-          Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = vec_val;
-        }
+        const cache_t* v_fetch_ptr =
+            v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
+        const _B16x8* v_fetch_ptr_16B =
+            reinterpret_cast<const _B16x8*>(v_fetch_ptr);
+        Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *v_fetch_ptr_16B;
       }
     }
   }
-  //TODO tweak v pull here
+
   // calculate post qk mfma scale
   float scale2 = scale;
   if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
@@ -766,7 +711,6 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
         }
       }
     }
-    //TODO maybe there ^^?
     // apply post Softmax V mfma v_scale
     if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
       tmp_out *= *v_scale;
@@ -1523,8 +1467,8 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
                   static_cast<int64_t>(head_idx) * HEAD_SIZE;
   if constexpr (std::is_same<OUTT, bit8_t>::value) {
     out_ptr[threadIdx.x] =
-        __hip_cvt_float_to_fp8(acc, vllm::fp6::fp8_type::__default_saturation,
-                               vllm::fp6::fp8_type::__default_interpret);
+        __hip_cvt_float_to_fp8(acc, vllm::fp8::fp8_type::__default_saturation,
+                               vllm::fp8::fp8_type::__default_interpret);
   } else {
     out_ptr[threadIdx.x] = from_float<scalar_t>(acc);
   }
