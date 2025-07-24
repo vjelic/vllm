@@ -1,0 +1,651 @@
+/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools_scm/version.py:108: UserWarning: tag 'v0.9.1+rocm' will be stripped of its suffix '+rocm'
+  warnings.warn(f"tag {tag!r} will be stripped of its suffix {suffix!r}")
+running develop
+/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/command/develop.py:41: EasyInstallDeprecationWarning: easy_install command is deprecated.
+!!
+
+        ********************************************************************************
+        Please avoid running ``setup.py`` and ``easy_install``.
+        Instead, use pypa/build, pypa/installer or other
+        standards-based tools.
+
+        See https://github.com/pypa/setuptools/issues/917 for details.
+        ********************************************************************************
+
+!!
+  easy_install.initialize_options(self)
+/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/cmd.py:90: SetuptoolsDeprecationWarning: setup.py install is deprecated.
+!!
+
+        ********************************************************************************
+        Please avoid running ``setup.py`` directly.
+        Instead, use pypa/build, pypa/installer or other
+        standards-based tools.
+
+        See https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html for details.
+        ********************************************************************************
+
+!!
+  self.initialize_options()
+running egg_info
+writing vllm.egg-info/PKG-INFO
+writing dependency_links to vllm.egg-info/dependency_links.txt
+writing entry points to vllm.egg-info/entry_points.txt
+writing requirements to vllm.egg-info/requires.txt
+writing top-level names to vllm.egg-info/top_level.txt
+reading manifest template 'MANIFEST.in'
+adding license file 'LICENSE'
+writing manifest file 'vllm.egg-info/SOURCES.txt'
+running build_ext
+Using MAX_JOBS=32 as the number of jobs.
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Build type: RelWithDebInfo
+-- Target device: cuda
+-- Found Python: /opt/conda/envs/py_3.10/bin/python (found version "3.10.17") found components: Interpreter Development.Module Development.SABIModule
+-- Found python matching: /opt/conda/envs/py_3.10/bin/python.
+Building PyTorch for GPU arch: gfx942
+-- Found HIP: /opt/rocm (found suitable version "6.5.50421-a90f5536a", minimum required is "1.0")
+HIP VERSION: 6.5.50421-a90f5536a
+
+***** ROCm version from rocm_version.h ****
+
+ROCM_VERSION_DEV: 7.0.0
+ROCM_VERSION_DEV_MAJOR: 7
+ROCM_VERSION_DEV_MINOR: 0
+ROCM_VERSION_DEV_PATCH: 0
+ROCM_VERSION_DEV_INT:   70000
+HIP_VERSION_MAJOR: 6
+HIP_VERSION_MINOR: 5
+TORCH_HIP_VERSION: 605
+
+***** Library versions from cmake find_package *****
+
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+hip VERSION: 6.5.50421
+amd_comgr VERSION: 3.0.0
+rocrand VERSION: 3.4.0
+hiprand VERSION: 2.13.0
+rocblas VERSION: 5.0.0
+hipblas VERSION: 3.0.0
+miopen VERSION: 3.4.0
+hipfft VERSION: 1.0.20
+hipsparse VERSION: 4.0.0
+rocprim VERSION: 3.5.0
+hipcub VERSION: 3.5.0
+rocthrust VERSION: 3.4.0
+hipsolver VERSION: 3.0.0
+hiprtc VERSION: 6.5.50421
+hipblaslt VERSION: 0.15.0
+rccl VERSION: 2.25.1
+hsa-runtime64 VERSION: 1.16.70000
+hipblaslt is using scale pointer vec ext
+CMake Warning at /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:22 (message):
+  static library kineto_LIBRARY-NOTFOUND not found.
+Call Stack (most recent call first):
+  /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:125 (append_torchlib_if_found)
+  CMakeLists.txt:80 (find_package)
+
+
+-- Found Torch: /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/lib/libtorch.so
+-- The HIP compiler identification is Clang 19.0.0
+-- Detecting HIP compiler ABI info
+-- Detecting HIP compiler ABI info - done
+-- Check for working HIP compiler: /opt/rocm/lib/llvm/bin/clang++ - skipped
+-- Detecting HIP compile features
+-- Detecting HIP compile features - done
+CMake Warning at CMakeLists.txt:126 (message):
+  Pytorch version >= 2.7.0 expected for ROCm build, saw 2.8.0 instead.
+
+
+-- HIP supported arches: gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1200;gfx1201
+-- FetchContent base directory: /projects/vllm/.deps
+-- Enabling C extension.
+-- Enabling moe extension.
+-- Configuring done (21.7s)
+-- Generating done (0.0s)
+-- Build files have been written to: /projects/vllm/build/temp.linux-x86_64-cpython-310
+Using MAX_JOBS=32 as the number of jobs.
+[1/37] Running hipify on _rocm_C extension source files.
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/skinny_gemms.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/skinny_gemms.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_generic.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_generic.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_fp8.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_fp8.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float32.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float32.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float16.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float16.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_bfloat16.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_bfloat16_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_dtypes.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_dtypes_hip.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/amd/quant_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/amd/quant_utils_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp6/amd/quant_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp6/amd/quant_utils_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/attention.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/attention.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/fused_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/fused_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/custom.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/custom.hip [ok]
+Successfully preprocessed all matching files.
+Total number of unsupported CUDA function calls: 0
+
+
+Total number of replaced kernel launches: 18
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/skinny_gemms.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/attention.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/fused_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/custom.hip
+[2/37] Running hipify on _moe_C extension source files.
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cuda_compat.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_compat.h [skipped, already hipified]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/dispatch_utils.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/dispatch_utils.h [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/moe_align_sum_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/moe_align_sum_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/topk_softmax_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/topk_softmax_kernels.hip [ok]
+Successfully preprocessed all matching files.
+Total number of unsupported CUDA function calls: 0
+
+
+Total number of replaced kernel launches: 11
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/moe_align_sum_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/moe/topk_softmax_kernels.hip
+[3/37] Running hipify on _C extension source files.
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/selective_scan.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/selective_scan_hip.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/static_switch.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/static_switch.h [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/selective_scan_fwd.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/selective_scan_fwd.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d_hip.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/static_switch.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/static_switch.h [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cuda_utils.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_utils.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cuda_compat.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_compat.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/dispatch_utils.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/dispatch_utils.h [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_generic.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_generic.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float32.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float32.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float16.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_float16.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_bfloat16.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_bfloat16_hip.cuh [skipped, already hipified]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_fp8.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/dtype_fp8.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_dtypes.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_dtypes_hip.h [skipped, already hipified]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp6/amd/quant_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp6/amd/quant_utils_hip.cuh [skipped, already hipified]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/amd/quant_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/amd/quant_utils_hip.cuh [skipped, already hipified]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/nvidia/quant_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/nvidia/quant_utils_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_utils_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v1.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v1.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v2.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v2.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/merge_attn_states.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/merge_attn_states.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/vertical_slash_index.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/vertical_slash_index.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/pos_encoding_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/pos_encoding_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/activation_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/activation_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/type_convert.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/type_convert_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_quant_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_quant_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/sampler.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/sampler.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cuda_view.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_view.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/compat.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/compat.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_util.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_util.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/matrix_view.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/matrix_view_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_2.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_2.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_3.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_3.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_4.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_4.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_8.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/qdq_8.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/q_gemm.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/q_gemm.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/vectorization.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/vectorization.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/vectorization_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/vectorization_utils.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/compressed_tensors/int8_quant_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/compressed_tensors/int8_quant_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/quant_conversions.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/quant_conversions.cuh [skipped, no changes]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/layernorm_utils.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/layernorm_utils_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/ggml-common.h -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/ggml-common_hip.h [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/vecdotq.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/vecdotq_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/dequantize.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/dequantize_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmvq.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmvq_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_vec.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_vec_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/gguf_kernel.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/gguf_kernel.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cuda_utils_kernels.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_utils_kernels.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/prepare_inputs/advance_step.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/prepare_inputs/advance_step_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/prepare_inputs/advance_step.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/prepare_inputs/advance_step.hip [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/custom_all_reduce.cuh -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/custom_all_reduce_hip.cuh [ok]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/custom_all_reduce.cu -> /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/custom_all_reduce.hip [ok]
+Successfully preprocessed all matching files.
+Total number of unsupported CUDA function calls: 0
+
+
+Total number of replaced kernel launches: 145
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/mamba_ssm/selective_scan_fwd.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v1.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v2.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/merge_attn_states.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/vertical_slash_index.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/pos_encoding_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/activation_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/layernorm_quant_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/sampler.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_view.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gptq/q_gemm.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/compressed_tensors/int8_quant_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/gguf_kernel.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/hip_utils_kernels.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/prepare_inputs/advance_step.hip
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/custom_all_reduce.hip
+[4/37] Building HIP object CMakeFiles/_rocm_C.dir/csrc/rocm/fused_kernels.hip.o
+[5/37] Building HIP object CMakeFiles/_C.dir/csrc/hip_utils_kernels.hip.o
+[6/37] Building HIP object CMakeFiles/_rocm_C.dir/csrc/rocm/custom.hip.o
+[7/37] Building HIP object CMakeFiles/_C.dir/csrc/attention/vertical_slash_index.hip.o
+[8/37] Building HIP object CMakeFiles/_rocm_C.dir/csrc/rocm/skinny_gemms.hip.o
+[9/37] Building HIP object CMakeFiles/_C.dir/csrc/hip_view.hip.o
+[10/37] Building HIP object CMakeFiles/_C.dir/csrc/prepare_inputs/advance_step.hip.o
+[11/37] Building HIP object CMakeFiles/_moe_C.dir/csrc/moe/moe_align_sum_kernels.hip.o
+[12/37] Building HIP object CMakeFiles/_C.dir/csrc/cache_kernels.hip.o
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:15:
+In file included from /opt/rocm/include/hip/amd_detail/amd_hip_fp6.h:32:
+/opt/rocm/include/hip/amd_detail/amd_hip_ocp_host.hpp:804:22: warning: missing 'typename' prior to dependent type name std::conditional<in_float, OutType, InType>::type; implicit 'typename' is a C++20 extension [-Wc++20-extensions]
+  804 |   using other_type = std::conditional<in_float, OutType, InType>::type;
+      |                      ^
+      |                      typename 
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:155:26: warning: variable length arrays in C++ are a Clang extension [-Wvla-cxx-extension]
+  155 |   int64_t key_cache_ptrs[num_layers];
+      |                          ^~~~~~~~~~
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:155:26: note: read of non-const variable 'num_layers' is not allowed in a constant expression
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:145:7: note: declared here
+  145 |   int num_layers = key_caches.size();
+      |       ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:156:28: warning: variable length arrays in C++ are a Clang extension [-Wvla-cxx-extension]
+  156 |   int64_t value_cache_ptrs[num_layers];
+      |                            ^~~~~~~~~~
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:156:28: note: read of non-const variable 'num_layers' is not allowed in a constant expression
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:145:7: note: declared here
+  145 |   int num_layers = key_caches.size();
+      |       ^
+3 warnings generated when compiling for gfx942.
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:15:
+In file included from /opt/rocm/include/hip/amd_detail/amd_hip_fp6.h:32:
+/opt/rocm/include/hip/amd_detail/amd_hip_ocp_host.hpp:804:22: warning: missing 'typename' prior to dependent type name std::conditional<in_float, OutType, InType>::type; implicit 'typename' is a C++20 extension [-Wc++20-extensions]
+  804 |   using other_type = std::conditional<in_float, OutType, InType>::type;
+      |                      ^
+      |                      typename 
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:155:26: warning: variable length arrays in C++ are a Clang extension [-Wvla-cxx-extension]
+  155 |   int64_t key_cache_ptrs[num_layers];
+      |                          ^~~~~~~~~~
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:155:26: note: read of non-const variable 'num_layers' is not allowed in a constant expression
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:145:7: note: declared here
+  145 |   int num_layers = key_caches.size();
+      |       ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:156:28: warning: variable length arrays in C++ are a Clang extension [-Wvla-cxx-extension]
+  156 |   int64_t value_cache_ptrs[num_layers];
+      |                            ^~~~~~~~~~
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:156:28: note: read of non-const variable 'num_layers' is not allowed in a constant expression
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/cache_kernels.hip:145:7: note: declared here
+  145 |   int num_layers = key_caches.size();
+      |       ^
+3 warnings generated when compiling for host.
+[13/37] Building HIP object CMakeFiles/_C.dir/csrc/pos_encoding_kernels.hip.o
+[14/37] Building CXX object CMakeFiles/_rocm_C.dir/csrc/rocm/torch_bindings.cpp.o
+cc1plus: warning: command-line option ‘-Wno-duplicate-decl-specifier’ is valid for C/ObjC but not for C++
+[15/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/gguf/gguf_kernel.hip.o
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/gguf_kernel.hip:15:
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IfLb0EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  226 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IfLb1EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IfLb0EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  277 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IfLb1EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIfLb0EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  427 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIfLb1EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIfLb0EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  529 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIfLb1EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIfLb0EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  580 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIfLb1EEvPKvS1_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IN3c104HalfELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  226 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IN3c104HalfELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IN3c104HalfELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  277 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IN3c104HalfELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIN3c104HalfELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  427 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIN3c104HalfELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIN3c104HalfELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  529 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIN3c104HalfELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIN3c104HalfELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  580 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIN3c104HalfELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IN3c108BFloat16ELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  226 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:226:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_0IN3c108BFloat16ELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IN3c108BFloat16ELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  277 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:277:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_1IN3c108BFloat16ELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIN3c108BFloat16ELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  427 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:427:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q3_KIN3c108BFloat16ELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIN3c108BFloat16ELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  529 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:529:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q5_KIN3c108BFloat16ELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIN3c108BFloat16ELb0EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  580 |     const int ncols_x, const int nrows_x, const int ncols_y, const int nrows_y, const int nrows_dst) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/mmq_hip.cuh:580:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL12mul_mat_q6_KIN3c108BFloat16ELb1EEvPKvS3_PT_iiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/gguf_kernel.hip:16:
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IfLb0EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  275 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IfLb1EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IfLb0EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  336 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IfLb1EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIfLb0EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  641 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIfLb1EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIfLb0EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  702 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIfLb1EEvPKvS1_PT_PKiS5_S5_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IN3c104HalfELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  275 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IN3c104HalfELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IN3c104HalfELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  336 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IN3c104HalfELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIN3c104HalfELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  641 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIN3c104HalfELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIN3c104HalfELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  702 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIN3c104HalfELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IN3c108BFloat16ELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  275 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:275:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_0IN3c108BFloat16ELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IN3c108BFloat16ELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  336 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:336:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_1IN3c108BFloat16ELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIN3c108BFloat16ELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  641 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:641:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q5_KIN3c108BFloat16ELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIN3c108BFloat16ELb0EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+  702 |              const int top_k) {
+      | ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/gguf/moe_hip.cuh:702:1: warning: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL8moe_q6_KIN3c108BFloat16ELb1EEvPKvS3_PT_PKiS7_S7_iiiiiii': desired occupancy was 2, final occupancy is 1 [-Wpass-failed]
+54 warnings generated when compiling for gfx942.
+[16/37] Building HIP object CMakeFiles/_C.dir/csrc/custom_all_reduce.hip.o
+[17/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/activation_kernels.hip.o
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+   61 |   for (int32_t vec_idx = vec_start_idx + threadIdx.x; vec_idx < vec_end_idx;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/activation_kernels.hip:61:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+6 warnings generated when compiling for gfx942.
+[18/37] Building HIP object CMakeFiles/_C.dir/csrc/activation_kernels.hip.o
+[19/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/gptq/q_gemm.hip.o
+[20/37] Building HIP object CMakeFiles/_C.dir/csrc/attention/merge_attn_states.hip.o
+[21/37] Building HIP object CMakeFiles/_C.dir/csrc/sampler.hip.o
+[22/37] Building HIP object CMakeFiles/_C.dir/csrc/layernorm_kernels.hip.o
+[23/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/compressed_tensors/int8_quant_kernels.hip.o
+[24/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/fp8/common.hip.o
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common.hip:3:
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:115:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  115 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/quantization/fp8/common_hip.cuh:148:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  148 |   for (int64_t i = tid; i < num_vec_elems; i += step) {
+      |   ^
+21 warnings generated when compiling for gfx942.
+[25/37] Building HIP object CMakeFiles/_C.dir/csrc/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.hip.o
+[26/37] Building HIP object CMakeFiles/_C.dir/csrc/mamba/causal_conv1d/causal_conv1d.hip.o
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  439 |                 for (int w = 0; w < -final_state_position; ++w){
+      |                 ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/mamba/causal_conv1d/causal_conv1d.hip:439:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+18 warnings generated when compiling for gfx942.
+[27/37] Building HIP object CMakeFiles/_C.dir/csrc/layernorm_quant_kernels.hip.o
+[28/37] Building HIP object CMakeFiles/_C.dir/csrc/mamba/mamba_ssm/selective_scan_fwd.hip.o
+[29/37] Building HIP object CMakeFiles/_moe_C.dir/csrc/moe/topk_softmax_kernels.hip.o
+[30/37] Building CXX object CMakeFiles/_moe_C.dir/csrc/moe/torch_bindings.cpp.o
+cc1plus: warning: command-line option ‘-Wno-duplicate-decl-specifier’ is valid for C/ObjC but not for C++
+[31/37] Linking HIP shared module _moe_C.abi3.so
+[32/37] Building CXX object CMakeFiles/_C.dir/csrc/torch_bindings.cpp.o
+cc1plus: warning: command-line option ‘-Wno-duplicate-decl-specifier’ is valid for C/ObjC but not for C++
+[33/37] Building HIP object CMakeFiles/_C.dir/csrc/attention/paged_attention_v1.hip.o
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v1.hip:22:
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+32 warnings generated when compiling for gfx942.
+[34/37] Building HIP object CMakeFiles/_C.dir/csrc/attention/paged_attention_v2.hip.o
+In file included from /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/paged_attention_v2.hip:22:
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:669:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  669 |   for (int i = threadIdx.x; i < HEAD_SIZE; i += NUM_THREADS) {
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+  185 |   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+      |   ^
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/attention/attention_kernels_hip.cuh:185:3: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+38 warnings generated when compiling for gfx942.
+[35/37] Linking HIP shared module _C.abi3.so
+[36/37] Building HIP object CMakeFiles/_rocm_C.dir/csrc/rocm/attention.hip.o
+FAILED: CMakeFiles/_rocm_C.dir/csrc/rocm/attention.hip.o 
+sccache /opt/rocm/lib/llvm/bin/clang++  -DPy_LIMITED_API=3 -DTORCH_EXTENSION_NAME=_rocm_C -DUSE_C10D_GLOO -DUSE_C10D_NCCL -DUSE_DISTRIBUTED -DUSE_PROF_API=1 -DUSE_RPC -DUSE_TENSORPIPE -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -D_rocm_C_EXPORTS -I/projects/vllm/csrc -isystem /opt/conda/envs/py_3.10/include/python3.10 -isystem /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/include -isystem /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/include/torch/csrc/api/include -isystem /opt/rocm-7.0.0/include/hiprand -isystem /opt/rocm-7.0.0/include/rocrand -Wno-unused-result -O2 -g -DNDEBUG --offload-arch=gfx942 -fPIC -D__HIP_PLATFORM_AMD__=1 -DUSE_ROCM=1 -DHIPBLAS_V2 -fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -DUSE_ROCM -DENABLE_FP8 -U__HIP_NO_HALF_CONVERSIONS__ -U__HIP_NO_HALF_OPERATORS__ -fno-gpu-rdc -DTORCH_HIP_VERSION=605 -Wno-shift-count-negative -Wno-shift-count-overflow -Wno-duplicate-decl-specifier -DCAFFE2_USE_MIOPEN -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP -std=c++17 -DHIPBLASLT_VEC_EXT -MD -MT CMakeFiles/_rocm_C.dir/csrc/rocm/attention.hip.o -MF CMakeFiles/_rocm_C.dir/csrc/rocm/attention.hip.o.d -o CMakeFiles/_rocm_C.dir/csrc/rocm/attention.hip.o -x hip -c /projects/vllm/build/temp.linux-x86_64-cpython-310/csrc/rocm/attention.hip
+error: failed to execute compile
+caused by: error reading compile response from server
+caused by: Failed to read response header
+caused by: failed to fill whole buffer
+ninja: build stopped: subcommand failed.
+Traceback (most recent call last):
+  File "/projects/vllm/setup.py", line 685, in <module>
+    setup(
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/__init__.py", line 117, in setup
+    return distutils.core.setup(**attrs)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/core.py", line 186, in setup
+    return run_commands(dist)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/core.py", line 202, in run_commands
+    dist.run_commands()
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/dist.py", line 1002, in run_commands
+    self.run_command(cmd)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/dist.py", line 1104, in run_command
+    super().run_command(command)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/dist.py", line 1021, in run_command
+    cmd_obj.run()
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/command/develop.py", line 35, in run
+    self.install_for_development()
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/command/develop.py", line 112, in install_for_development
+    self.run_command('build_ext')
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/cmd.py", line 357, in run_command
+    self.distribution.run_command(command)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/dist.py", line 1104, in run_command
+    super().run_command(command)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/dist.py", line 1021, in run_command
+    cmd_obj.run()
+  File "/projects/vllm/setup.py", line 268, in run
+    super().run()
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/command/build_ext.py", line 99, in run
+    _build_ext.run(self)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/site-packages/setuptools/_distutils/command/build_ext.py", line 368, in run
+    self.build_extensions()
+  File "/projects/vllm/setup.py", line 242, in build_extensions
+    subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
+  File "/opt/conda/envs/py_3.10/lib/python3.10/subprocess.py", line 369, in check_call
+    raise CalledProcessError(retcode, cmd)
+subprocess.CalledProcessError: Command '['cmake', '--build', '.', '-j=32', '--target=_moe_C', '--target=_rocm_C', '--target=_C']' returned non-zero exit status 1.
