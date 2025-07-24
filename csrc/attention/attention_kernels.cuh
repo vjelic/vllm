@@ -24,6 +24,7 @@
 
 #include "attention_dtypes.h"
 #include "attention_utils.cuh"
+#include <fstream>
 
 #ifdef USE_ROCM
   #include <hip/hip_bf16.h>
@@ -284,6 +285,7 @@ __device__ void paged_attention_kernel(
           // Vector conversion from Quant_vec to K_vec.
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+          printf("ksh \n");
           k_vecs[j] = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
               k_vec_quant, *k_scale);
         }

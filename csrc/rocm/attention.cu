@@ -20,6 +20,7 @@
 #include <hip/hip_fp8.h>
 #include <hip/hip_bf16.h>
 #include "cuda_compat.h"
+#include <fstream>
 
 #include <algorithm>
 #include "../attention/dtype_fp8.cuh"
@@ -440,6 +441,7 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
       const int offset1 = head_elem / KX;
       const int offset2 = head_elem % KX;
       const cache_t* k_fetch_ptr = k_ptr3 + offset1 * BLOCK_SIZE * KX + offset2;
+      printf("nKsh \n");
       const _B16x8* k_fetch_ptr_16B =
           reinterpret_cast<const _B16x8*>(k_fetch_ptr);
       Klocal[token_depth][qkhe_depth] = *k_fetch_ptr_16B;
@@ -505,6 +507,7 @@ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
             v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
         const _B16x8* v_fetch_ptr_16B =
             reinterpret_cast<const _B16x8*>(v_fetch_ptr);
+        printf("v called here \n");
         Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *v_fetch_ptr_16B;
       }
     }
