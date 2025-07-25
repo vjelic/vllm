@@ -342,44 +342,69 @@ def determine_expert_map(
         ep_size: int, ep_rank: int,
         global_num_experts: int) -> Tuple[int, Optional[torch.Tensor]]:
     """
-        Calculates how many experts should be assigned to each rank for EP and
-        creates a mapping from global to local expert index. Experts are
-        distributed evenly across ranks. Any remaining are assigned to the
-        last rank.
+    Calculates how many experts should be assigned to each rank for EP and
+    creates a mapping from global to local expert index.
 
-        Args:
-            ep_size (int): The size of the expert parallel group
-            global_num_experts (int): The total number of experts in the model.
+    Experts are distributed as evenly as possible across ranks. The first
+    `global_num_experts % ep_size` ranks get one extra expert.
 
-        Returns:
-            Tuple[int, Optional[torch.Tensor]]: A tuple containing:
-                - local_num_experts (int): The number of experts assigned
-                    to the current rank.
-                - expert_map (Optional[torch.Tensor]): A tensor of shape
-                    (global_num_experts,) mapping from global to local index.
-                    Contains -1 for experts not assigned to the current rank.
-                    Returns None if ep_size is 1.
-        """
+    Args:
+        ep_size (int): The size of the expert parallel group.
+        ep_rank (int): The rank of the current process in the expert parallel
+            group.
+        global_num_experts (int): The total number of experts in the model.
+
+    Returns:
+        Tuple[int, Optional[torch.Tensor]]: A tuple containing:
+            - local_num_experts (int): The number of experts assigned
+                to the current rank.
+            - expert_map (Optional[torch.Tensor]): A tensor of shape
+                (global_num_experts,) mapping from global to local index.
+                Contains -1 for experts not assigned to the current rank.
+                Returns None if ep_size is 1.
+    """
     assert ep_size > 0
     if ep_size == 1:
         return (global_num_experts, None)
 
-    local_num_experts = global_num_experts // ep_size
+    # The base number of experts on each rank.
+    base_experts_per_rank = global_num_experts // ep_size
+    # The number of ranks that will receive one extra expert.
+    remainder = global_num_experts % ep_size
+
+    # Determine the number of experts for the current rank.
+    # The first `remainder` ranks get one extra expert.
+    if ep_rank < remainder:
+        local_num_experts = base_experts_per_rank + 1
+    else:
+        local_num_experts = base_experts_per_rank
+
+    # Calculate the starting global expert index for the current rank.
+    # This is the sum of experts on all previous ranks.
+    # Ranks before the remainder boundary have (base + 1) experts.
+    # Ranks at or after the remainder boundary have (base) experts.
+    if ep_rank < remainder:
+        # All previous ranks had (base + 1) experts.
+        start_idx = ep_rank * (base_experts_per_rank + 1)
+    else:
+        # The first `remainder` ranks had (base + 1) experts, and the
+        # subsequent ranks (from `remainder` to `ep_rank - 1`) had
+        # `base` experts.
+        start_idx = remainder * (base_experts_per_rank + 1) + \
+                    (ep_rank - remainder) * base_experts_per_rank
+        # A simpler way to write the same logic for this case is:
+        # start_idx = ep_rank * base_experts_per_rank + remainder
+
+    end_idx = start_idx + local_num_experts
 
     # Create a tensor of size num_experts filled with -1
     expert_map = torch.full((global_num_experts, ), -1, dtype=torch.int32)
-    # Create a expert map for the local experts
-    if ep_rank < (ep_size - 1):
-        # Each non-last rank gets local_num_experts experts.
-        expert_map[ep_rank * local_num_experts:
-                        (ep_rank + 1) * local_num_experts] = \
-            torch.arange(0, local_num_experts, dtype=torch.int32)
-    else:
-        # All remaining experts are assigned to the last rank.
-        local_num_experts = (global_num_experts - ep_rank * local_num_experts)
 
-        expert_map[-local_num_experts:] = \
-            torch.arange(0, local_num_experts, dtype=torch.int32)
+    # Populate the expert map for the local experts
+    expert_map[start_idx:end_idx] = torch.arange(0,
+                                                 local_num_experts,
+                                                 dtype=torch.int32)
+
     return (local_num_experts, expert_map)
 
 

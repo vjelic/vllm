@@ -747,8 +747,9 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
         })
 
     def _determine_fused_shared_experts(self, vllm_config: VllmConfig):
-        self.num_fused_shared_experts = 0
+        # self.num_fused_shared_experts = 0
         if not envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION:
+            self.num_fused_shared_experts = 0
             return
         if (self.config.architectures[0] != "DeepseekV3ForCausalLM"
                 or self.config.n_routed_experts != 256
@@ -757,12 +758,6 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             raise NotImplementedError(
                 "Only Deepseek V3/R1 can use shared experts fusion optimization"
             )
-
-        elif vllm_config.parallel_config.enable_expert_parallel:
-            envs.VLLM_ROCM_ENABLE_SHARED_EXPERTS_FUSION = False
-            raise NotImplementedError(
-                "Deepseek V3/R1 can not use shared experts fusion "
-                "optimization when enable expert parallel.")
 
         self.num_fused_shared_experts = self.config.n_shared_experts
 
