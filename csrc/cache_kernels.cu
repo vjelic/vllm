@@ -8,6 +8,7 @@
 
 #ifdef USE_ROCM
   #include "quantization/fp8/amd/quant_utils.cuh"
+  #include "quantization/fp6/amd/quant_utils.cuh"
 #else
   #include "quantization/fp8/nvidia/quant_utils.cuh"
 #endif
@@ -226,6 +227,9 @@ __global__ void reshape_and_cache_kernel(
     return;
   }
 
+  //const int chunk_size = 3;
+
+
   const int64_t block_idx = slot_idx / block_size;
   const int64_t block_offset = slot_idx % block_size;
 
@@ -247,16 +251,86 @@ __global__ void reshape_and_cache_kernel(
         block_idx * num_heads * head_size * block_size +
         head_idx * head_size * block_size + head_offset * block_size +
         block_offset;
+    
+      
+    
     scalar_t tgt_key = key[src_key_idx];
     scalar_t tgt_value = value[src_value_idx];
     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-      key_cache[tgt_key_idx] =
-          fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-      value_cache[tgt_value_idx] =
-          fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+        //process four blocks per loop
+        //* 3/4
+        int64_t byte_idx = (tgt_key_idx * 3) / 4;
+        int bit_pos = (tgt_key_idx * 6) % 8;
+        
+        uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+        uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+        
+        //6 lsb s
+        //though this could be problematic with negative values? -> quant/dequant issue? Or something with concurrency?
+        key_fp6 &= 0x3F;
+        value_fp6 &= 0x3F;
+        
+        uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
+        uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
+        
+        if(bit_pos == 0){
+          //1100 0000
+          key_cache_bytes[byte_idx] &= 0b11000000;
+          key_cache_bytes[byte_idx] |= key_fp6;
+
+        } else if(bit_pos == 2){
+          //0000 0011
+          key_cache_bytes[byte_idx] &= 0b00000011;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
+        } else if(bit_pos == 4){
+          //0000 1111
+          key_cache_bytes[byte_idx] &= 0b00001111;
+          key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
+          //1111 1100
+          key_cache_bytes[byte_idx + 1] &= 0b11000000;
+          key_cache_bytes[byte_idx + 1] |= (key_fp6 << 6);
+        } else if(bit_pos == 6) {
+          //0011 1111
+          key_cache_bytes[byte_idx] &= 0b00000011;
+          key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
+          //1111 0000
+          key_cache_bytes[byte_idx + 1] &= 0b11110000;
+          key_cache_bytes[byte_idx + 1] |= (key_fp6 << 4);
+        } else{
+          assert(false);
+        }
+        byte_idx = (tgt_value_idx * 3) / 4;
+        bit_pos = (tgt_value_idx * 6) % 8;
+
+        if(bit_pos == 0){
+          //1100 0000
+          value_cache_bytes[byte_idx] &= 0b11000000;
+          value_cache_bytes[byte_idx] |= value_fp6;
+
+        } else if(bit_pos == 2){
+          //0000 0011
+          value_cache_bytes[byte_idx] &= 0b00000011;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
+        } else if(bit_pos == 4){
+          //0000 1111
+          value_cache_bytes[byte_idx] &= 0b00001111;
+          value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
+          //1111 1100s
+          value_cache_bytes[byte_idx + 1] &= 0b11000000;
+          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 6);
+        } else if(bit_pos == 6) {
+          //0011 1111
+          value_cache_bytes[byte_idx] &= 0b00000011;
+          value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
+          //1111 0000
+          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
+          value_cache_bytes[byte_idx + 1] &= 0b11110000;
+        } else {
+          assert(false);
+        }
     }
   }
 }
@@ -390,7 +464,7 @@ void reshape_and_cache(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
+  DISPATCH_BY_KV_CACHE_DTYPE_FP6(key.dtype(), kv_cache_dtype,
                              CALL_RESHAPE_AND_CACHE)
 }
 
