@@ -123,14 +123,24 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
  
         import aiter
         max_seqlen_qo = 1
-        if max_seqlen_qo == 1 or paged_kv_indptr[-1] < 128 * 1024:
+
+        if max_seqlen_qo == 1 or paged_kv_indptr[-1] < 16 * 128:
             num_kv_splits_indptr = None
             batch_split_table = None
             split_table = None
             splits = None
         else:
             aiter.get_mla_metadata_impl(paged_kv_indptr, num_kv_splits_indptr, batch_split_table, split_table, splits)
-            #num_kv_splits_indptr, batch_split_table, split_table, _ = aiter.mla.get_meta_param_balanced(block_table.size(0), paged_kv_indptr, device=block_table.device)
+            # if get gpu hang, please use cpu metadata as following:
+            # num_kv_splits_indptr = torch.empty(200, dtype=torch.int32, device=block_table.device)
+            # kv_seq_les = torch.empty(200, dtype=torch.int32, device=block_table.device)
+            # aiter.mla.get_meta_param_balanced(paged_kv_indptr, num_kv_splits_indptr, batch_split_table, split_table, kv_seq_les, splits)
+
+            # double check
+            if num_kv_splits_indptr[0] == -1:
+                num_kv_splits_indptr=None
+                batch_split_table=None
+                split_table=None
 
         attn_metadata = AiterMLADecodeMetadata(
             input_positions=input_positions,
