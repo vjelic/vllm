@@ -279,13 +279,13 @@ __global__ void reshape_and_cache_kernel(
         
         if(bit_pos == 0){
           //1100 0000
-          key_cache_bytes[byte_idx] &= 0b11000000;
+          key_cache_bytes[byte_idx] &= 0b00000011;
           key_cache_bytes[byte_idx] |= key_fp6;
 
         } else if(bit_pos == 2){
           //0000 0011
-          key_cache_bytes[byte_idx] &= 0b00000011;
-          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
+          key_cache_bytes[byte_idx] &= 0b11000000;
+          key_cache_bytes[byte_idx] |= key_fp6;
         } else if(bit_pos == 4){
           //0000 1111
           key_cache_bytes[byte_idx] &= 0b00001111;
