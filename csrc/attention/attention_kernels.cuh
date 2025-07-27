@@ -383,7 +383,7 @@ __device__ void paged_attention_kernel(
   }
 
   // Each thread will fetch 16 bytes from the value cache at a time.
-  constexpr int V_VEC_SIZE = MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
+  constexpr int V_VEC_SIZE = 1;//MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
   using V_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using L_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using V_quant_vec = typename Vec<cache_t, V_VEC_SIZE>::Type;
@@ -439,6 +439,28 @@ __device__ void paged_attention_kernel(
         } else {
           V_quant_vec v_quant_vec =
               *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
+          
+          int placeholder = 4;
+          int byte_idx = (placeholder * 3) / 4;
+          int bit_pos = (placeholder * 6) % 8;
+
+          if(bit_pos == 0){
+            //first 6 bits of byte
+            v_vec_quant = v_cache[byte_idx] >> 2;
+          } else if(bit_pos == 2) {
+            //last 6 bits of the byte
+            v_vec_quant = v_cache[byte_idx] << 2 >> 2;
+            //though I suppose &0b00111111 is better lol
+          } else if(bit_pos == 4){
+            //last 4 bits of this byte, first two of the next one
+            v_vec_quant = v_cache[byte_idx] & 0b00001111 << 2 | (v_cache[byte_idx + 1] >> 6);
+          } else if(bit_pos == 6){
+            //last 2 bits of this byte, first four of next one
+            v_vec_quant = v_cache[byte_idx] & 0b00000011 << 4 | (v_cache[byte_idx + 1] >> 4);
+          } else{
+            assert(false);
+          }
+      v
           // Vector conversion from V_quant_vec to V_vec.
           v_vec = fp8::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
                                                                     *v_scale);
