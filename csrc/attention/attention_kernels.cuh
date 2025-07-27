@@ -160,7 +160,7 @@ __device__ void paged_attention_kernel(
   // group fetch or compute 16 bytes at a time. For example, if the size of a
   // thread group is 4 and the data type is half, then the vector size is 16 /
   // (4 * sizeof(half)) == 2.
-  constexpr int VEC_SIZE = MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
+  constexpr int VEC_SIZE = 1;//MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
   using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
@@ -283,9 +283,33 @@ __device__ void paged_attention_kernel(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
         } else {
           // Vector conversion from Quant_vec to K_vec.
+          //cache_t*
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
-          k_vecs[j] = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
+          
+          int placeholder = 4;
+          int byte_idx = (placeholder * 3) / 4;
+          int bit_pos = (placeholder * 6) % 8;
+
+          if(bit_pos == 0){
+            //first 6 bits of byte
+            k_vec_quant = k_cache[byte_idx] >> 2;
+          } else if(bit_pos == 2) {
+            //last 6 bits of the byte
+            k_vec_quant = k_cache[byte_idx] << 2 >> 2;
+            //though I suppose &0b00111111 is better lol
+          } else if(bit_pos == 4){
+            //last 4 bits of this byte, first two of the next one
+            k_vec_quant = k_cache[byte_idx] & 0b00001111 << 2 | (k_cache[byte_idx + 1] >> 6);
+          } else if(bit_pos == 6){
+            //last 2 bits of this byte, first four of next one
+            k_vec_quant = k_cache[byte_idx] & 0b00000011 << 4 | (k_cache[byte_idx + 1] >> 4);
+          } else{
+            assert(false);
+          }
+          
+          //aqui
+          k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
               k_vec_quant, *k_scale);
         }
       }
