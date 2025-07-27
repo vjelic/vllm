@@ -280,7 +280,7 @@ __global__ void reshape_and_cache_kernel(
         if(bit_pos == 0){
           //1100 0000
           key_cache_bytes[byte_idx] &= 0b00000011;
-          key_cache_bytes[byte_idx] |= key_fp6;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
 
         } else if(bit_pos == 2){
           //0000 0011
@@ -308,13 +308,13 @@ __global__ void reshape_and_cache_kernel(
 
         if(bit_pos == 0){
           //1100 0000
-          value_cache_bytes[byte_idx] &= 0b11000000;
-          value_cache_bytes[byte_idx] |= value_fp6;
+          value_cache_bytes[byte_idx] &= 0b00000011;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
 
         } else if(bit_pos == 2){
           //0000 0011
-          value_cache_bytes[byte_idx] &= 0b00000011;
-          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
+          value_cache_bytes[byte_idx] &= 0b11000000;
+          value_cache_bytes[byte_idx] |= value_fp6;
         } else if(bit_pos == 4){
           //0000 1111
           value_cache_bytes[byte_idx] &= 0b00001111;
@@ -327,8 +327,8 @@ __global__ void reshape_and_cache_kernel(
           value_cache_bytes[byte_idx] &= 0b00000011;
           value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
           //1111 0000
-          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
           value_cache_bytes[byte_idx + 1] &= 0b11110000;
+          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
         } else {
           assert(false);
         }
