@@ -29,6 +29,7 @@
 #ifdef USE_ROCM
   #include <hip/hip_bf16.h>
   #include "../quantization/fp8/amd/quant_utils.cuh"
+  #include "../quantization/fp6/amd/quant_utils.cuh"
 typedef __hip_bfloat16 __nv_bfloat16;
 #else
   #include "../quantization/fp8/nvidia/quant_utils.cuh"
