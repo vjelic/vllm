@@ -279,18 +279,22 @@ __device__ void paged_attention_kernel(
         const int offset1 = (vec_idx * VEC_SIZE) / x;
         const int offset2 = (vec_idx * VEC_SIZE) % x;
 
+        size_t k_ptr_fp6 = physical_block_number * kv_block_stride +
+                          kv_head_idx * kv_head_stride +
+                          physical_block_offset * x + offset1 * BLOCK_SIZE * x +
+                          offset2;
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
           k_vecs[j] = *reinterpret_cast<const K_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
         } else {
           // Vector conversion from Quant_vec to K_vec.
           //cache_t*
-          Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
-              k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+          //Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
           
-          int placeholder = 4;
-          int byte_idx = (placeholder * 3) / 4;
-          int bit_pos = (placeholder * 6) % 8;
+          //int placeholder = 4;
+          cache_t k_vec_quant;
+          int byte_idx = (k_ptr_fp6 * 3) / 4;
+          int bit_pos = (k_ptr_fp6 * 6) % 8;
 
           if(bit_pos == 0){
             //first 6 bits of byte
@@ -431,16 +435,19 @@ __device__ void paged_attention_kernel(
       if (row_idx < HEAD_SIZE) {
         const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
         V_vec v_vec;
+        
+        size_t v_ptr_fp6 = physical_block_number * kv_block_stride +
+                          kv_head_idx * kv_head_stride + offset;
 
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
           v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
         } else {
-          V_quant_vec v_quant_vec =
-              *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          
-          int placeholder = 4;
-          int byte_idx = (placeholder * 3) / 4;
-          int bit_pos = (placeholder * 6) % 8;
+          //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
+          cache_t v_quant_vec;
+
+          //int placeholder = 4;
+          int byte_idx = (v_ptr_fp6 * 3) / 4;
+          int bit_pos = (v_ptr_fp6 * 6) % 8;
 
           if(bit_pos == 0){
             //first 6 bits of byte
