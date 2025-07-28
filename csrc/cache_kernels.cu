@@ -263,7 +263,7 @@ __global__ void reshape_and_cache_kernel(
     } else {
         //process four blocks per loop
         //* 3/4
-        int64_t byte_idx = (tgt_key_idx * 3) / 4;
+        int64_t byte_idx = (tgt_key_idx * 6) / 8;
         int bit_pos = (tgt_key_idx * 6) % 8;
         
         uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
@@ -278,50 +278,51 @@ __global__ void reshape_and_cache_kernel(
         uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
         
         if(bit_pos == 0){
-          key_cache_bytes[byte_idx] &= 0b00000011;
-          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
-        } else if(bit_pos == 2){
           key_cache_bytes[byte_idx] &= 0b11000000;
           key_cache_bytes[byte_idx] |= key_fp6;
+        } else if(bit_pos == 2){
+          key_cache_bytes[byte_idx] &= 0b00000011;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
         } else if(bit_pos == 4){
-          key_cache_bytes[byte_idx] &= 0b11110000;
-          key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
+          key_cache_bytes[byte_idx] &= 0b00001111;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 4);
           
-          key_cache_bytes[byte_idx + 1] &= 0b00111111;
-          key_cache_bytes[byte_idx + 1] |= (key_fp6 << 6);
+          key_cache_bytes[byte_idx + 1] &= 0b11111100;
+          key_cache_bytes[byte_idx + 1] |= (key_fp6 >> 4);
         } else if(bit_pos == 6) {
-          key_cache_bytes[byte_idx] &= 0b11111100;
-          key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
+          key_cache_bytes[byte_idx] &= 0b00111111;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 6);
           
-          key_cache_bytes[byte_idx + 1] &= 0b00001111;
-          key_cache_bytes[byte_idx + 1] |= (key_fp6 << 4);
+          key_cache_bytes[byte_idx + 1] &= 0b11110000;
+          key_cache_bytes[byte_idx + 1] |= (key_fp6 >> 2);
         } else{
           assert(false);
         }
-        byte_idx = (tgt_value_idx * 3) / 4;
-        bit_pos = (tgt_value_idx * 6) % 8;
 
+        byte_idx = (tgt_value_idx * 6) / 8;
+        bit_pos = (tgt_value_idx * 6) % 8;
+        
         if(bit_pos == 0){
-          value_cache_bytes[byte_idx] &= 0b00000011;
-          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
-        } else if(bit_pos == 2){
           value_cache_bytes[byte_idx] &= 0b11000000;
           value_cache_bytes[byte_idx] |= value_fp6;
+        } else if(bit_pos == 2){
+          value_cache_bytes[byte_idx] &= 0b00000011;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
         } else if(bit_pos == 4){
-          value_cache_bytes[byte_idx] &= 0b11110000;
-          value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
+          value_cache_bytes[byte_idx] &= 0b00001111;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 4);
           
-          value_cache_bytes[byte_idx + 1] &= 0b00111111;
-          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 6);
+          value_cache_bytes[byte_idx + 1] &= 0b11111100;
+          value_cache_bytes[byte_idx + 1] |= (value_fp6 >> 4);
         } else if(bit_pos == 6) {
-          value_cache_bytes[byte_idx] &= 0b11111100;
-          value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
-
-          value_cache_bytes[byte_idx + 1] &= 0b00001111;
-          value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
-        } else {
+          value_cache_bytes[byte_idx] &= 0b00111111;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 6);
+          
+          value_cache_bytes[byte_idx + 1] &= 0b11110000;
+          value_cache_bytes[byte_idx + 1] |= (value_fp6 >> 2);
+        } else{
           assert(false);
-        }
+        } 
     }
   }
 }

@@ -292,27 +292,31 @@ __device__ void paged_attention_kernel(
           //Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
           
           //int placeholder = 4;
-          cache_t k_vec_quant;
-          int byte_idx = (k_ptr_fp6 * 3) / 4;
+          
+          int byte_idx = (k_ptr_fp6 * 6) / 8;
           int bit_pos = (k_ptr_fp6 * 6) % 8;
+          
+          const void* raw = static_cast<const void*>(k_cache);
+          const uint8_t* __restrict__ key_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
+          uint8_t k_vec_quant;
 
           if(bit_pos == 0){
             //first 6 bits of byte
-            k_vec_quant = (k_cache[byte_idx] >> 2);
+            k_vec_quant = (key_cache_bytes[byte_idx] & 0b00111111);
           } else if(bit_pos == 2) {
-            //last 6 bits of the byte
-            k_vec_quant = (k_cache[byte_idx] & 0b00111111);
+            //last 6 bits of the byte. & just in case
+            k_vec_quant = (key_cache_bytes[byte_idx] >> 2) & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            k_vec_quant = (((k_cache[byte_idx] & 0b00001111) << 2) | (k_cache[byte_idx + 1] >> 6));
+            k_vec_quant = (((key_cache_bytes[byte_idx] >> 4) & 0b00001111) | ((key_cache_bytes[byte_idx + 1] &0b00000011) << 4));
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            k_vec_quant = (((k_cache[byte_idx] & 0b00000011) << 4) | (k_cache[byte_idx + 1] >> 4));
+            k_vec_quant = (((key_cache_bytes[byte_idx] >> 6) & 0b00000011) | ((key_cache_bytes[byte_idx + 1] &0b00001111) << 2));
           } else{
             assert(false);
           }
           
-          k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
+          k_vecs[j] = fp6::scaled_convert<K_vec, uint8_t, KV_DTYPE>(
               k_vec_quant, *k_scale);
         }
       }
@@ -443,30 +447,33 @@ __device__ void paged_attention_kernel(
           v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
         } else {
           //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          cache_t v_quant_vec;
+          //uint8_t v_quant_vec;
 
-          //int placeholder = 4;
-          int byte_idx = (v_ptr_fp6 * 3) / 4;
+          int byte_idx = (v_ptr_fp6 * 6) / 8;
           int bit_pos = (v_ptr_fp6 * 6) % 8;
+
+          const void* raw = static_cast<const void*>(v_cache);
+          const uint8_t* __restrict__ value_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
+          uint8_t v_quant_vec;
 
           if(bit_pos == 0){
             //first 6 bits of byte
-            v_quant_vec = (v_cache[byte_idx] >> 2);
+            v_quant_vec = (value_cache_bytes[byte_idx] & 0b00111111);
           } else if(bit_pos == 2) {
-            //last 6 bits of the byte
-            v_quant_vec = (v_cache[byte_idx] & 0b00111111);
+            //last 6 bits of the byte. & just in case
+            v_quant_vec = (value_cache_bytes[byte_idx] >> 2) & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            v_quant_vec = (((v_cache[byte_idx] & 0b00001111) << 2) | (v_cache[byte_idx + 1] >> 6));
+            v_quant_vec = (((value_cache_bytes[byte_idx] >> 4) & 0b00001111) | ((value_cache_bytes[byte_idx + 1] &0b00000011) << 4));
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            v_quant_vec = (((v_cache[byte_idx] & 0b00000011) << 4) | (v_cache[byte_idx + 1] >> 4));
+            v_quant_vec = (((value_cache_bytes[byte_idx] >> 6) & 0b00000011) | ((value_cache_bytes[byte_idx + 1] &0b00001111) << 2));
           } else{
             assert(false);
           }
-          // Vector conversion from V_quant_vec to V_vec.
-          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
-                                                                    *v_scale);
+          
+          v_vec = fp6::scaled_convert<V_vec, uint8_t, KV_DTYPE>(
+              v_quant_vec, *v_scale);
         }
         if (block_idx == num_seq_blocks - 1) {
           // NOTE(woosuk): When v_vec contains the tokens that are out of the
