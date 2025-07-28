@@ -590,6 +590,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ROCM_CUSTOM_PAGED_ATTN":
     lambda: (os.getenv("VLLM_ROCM_CUSTOM_PAGED_ATTN", "True").lower() in
              ("true", "1")),
+             
+    # for fused rmsnorm and fp8 quant kernel from aiter
+    "VLLM_ROCM_USE_AITER_FUSED_RMSNORM_QUANT":
+    lambda: (os.getenv("VLLM_ROCM_USE_AITER_FUSED_RMSNORM_QUANT", "True").lower() in
+              ("true", "1")),
 
     # Divisor for dynamic query scale factor calculation for FP8 KV Cache
     "Q_SCALE_CONSTANT":
