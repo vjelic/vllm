@@ -6,7 +6,6 @@ import torch
 from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
-
 def rocm_aiter_tuned_gemm_impl(
         input: torch.Tensor,
         weight: torch.Tensor,
@@ -47,20 +46,14 @@ def rocm_aiter_tuned_gemm_fake(
 
 def rocm_aiter_rmsnorm2d_fwd_with_add_quant_impl(
     input: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
-    variance_epsilon: float, x_scale=None, y_scale_dtype=None, 
-    q_dtype="fp8", model_sensitive=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-
+    variance_epsilon: float, x_scale: Optional[torch.Tensor]=None, y_scale_dtype: Optional[torch.dtype]=None, 
+    q_dtype: torch.dtype=torch.float8_e4m3fnuz, model_sensitive: float=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # TODO: make q_dtype general 
     import aiter as rocm_aiter
-    from aiter import  dtypes 
-    quant_dtype_map = {
-        "i8": dtypes.i8 ,
-        "fp8": dtypes.fp8
-    }
-    q_dtype = quant_dtype_map[q_dtype]
     assert y_scale_dtype is not None # TODO
     
     if x_scale is None: 
-        output = torch.empty(input.shape, dtype=q_dtype, devive="cuda")
+        output = torch.empty(input.shape, dtype=q_dtype, device="cuda")
         y_scale = torch.empty(input.shape[0], 1, dtype=y_scale_dtype, device="cuda") #TODO: only per-token quant now
         if residual is None:
             residual_out = None 
@@ -73,24 +66,24 @@ def rocm_aiter_rmsnorm2d_fwd_with_add_quant_impl(
                 output, input, residual, residual_out, y_scale, weight, variance_epsilon, model_sensitive 
             )
     else:
-        output = torch.empty(input.shape, dtype=q_dtype, devive="cuda")
+        output = torch.empty(input.shape, dtype=q_dtype, device="cuda")
         y_scale = torch.empty(input.shape[0], 1, dtype=y_scale_dtype, device="cuda") #TODO: only per-token quant now
         if residual is None:
             residual_out = None 
-            aiter.rmsnorm2d_fwd_with_smoothquant(
+            rocm_aiter.rmsnorm2d_fwd_with_smoothquant(
                 output, input, x_scale, y_scale, weight, variance_epsilon, model_sensitive
             )
         elif residual is not None:
             residual_out = torch.empty_like(input)
-            aiter.rmsnorm2d_fwd_with_add_smoothquant(
+            rocm_aiter.rmsnorm2d_fwd_with_add_smoothquant(
                 output, input, residual, residual_out, x_scale, y_scale, weight, variance_epsilon
             )
     return output, residual_out, y_scale 
 
 def rocm_aiter_rmsnorm2d_fwd_with_add_quant_fake(
         input: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
-        variance_epsilon: float, x_scale=None, y_scale_dtype=None, 
-        q_dtype="fp8", model_sensitive=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        variance_epsilon: float, x_scale: Optional[torch.Tensor] = None, y_scale_dtype: Optional[torch.dtype] = None, 
+        q_dtype: torch.dtype=torch.float8_e4m3fnuz, model_sensitive: float=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     return torch.empty(input.shape, dtype=q_dtype, device="cuda"), torch.empty_like(input), torch.empty(input.shape[0], 1, dtype=y_scale_dtype, device="cuda")
 
 
@@ -134,8 +127,8 @@ class aiter_ops:
     @staticmethod 
     def rocm_aiter_rmsnorm2d_fwd_with_add_quant(
             input: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
-            variance_epsilon: float, x_scale=None, y_scale_dtype=None, 
-            q_dtype="fp8", model_sensitive=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            variance_epsilon: float, x_scale: Optional[torch.Tensor] = None, y_scale_dtype: Optional[torch.dtype] = None, 
+            q_dtype: torch.dtype=torch.float8_e4m3fnuz, model_sensitive: float=0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         return torch.ops.vllm.rocm_aiter_rmsnorm2d_fwd_with_add_quant(
             input, residual, weight, variance_epsilon, x_scale, 
