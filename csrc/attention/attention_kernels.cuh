@@ -280,7 +280,7 @@ __device__ void paged_attention_kernel(
         const int offset1 = (vec_idx * VEC_SIZE) / x;
         const int offset2 = (vec_idx * VEC_SIZE) % x;
 
-        cache_t k_ptr_fp6 = physical_block_number * kv_block_stride +
+        size_t k_ptr_fp6 = physical_block_number * kv_block_stride +
                           kv_head_idx * kv_head_stride +
                           physical_block_offset * x + offset1 * BLOCK_SIZE * x +
                           offset2;
@@ -451,7 +451,7 @@ __device__ void paged_attention_kernel(
         } else {
           //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           //uint8_t v_quant_vec;
-          cache_t v_quant_vec;
+          size_t v_quant_vec;
 
           int byte_idx = (v_ptr_fp6 * 3) / 4;
           int bit_pos = (v_ptr_fp6 * 6) % 8;
