@@ -16,6 +16,18 @@ import uvloop
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase
 
+
+def set_environment_variables():
+    from datetime import datetime
+    os.environ["VLLM_USE_TRITON_FLASH_ATTN"] = "0"
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    profile_dir = f"{current_time}_profile"
+    os.environ["VLLM_TORCH_PROFILER_DIR"] = profile_dir
+
+    os.makedirs(profile_dir, exist_ok=True)
+    print(f"Profile directory created: {profile_dir}")
+    
+
 from benchmark_dataset import (
     AIMODataset,
     BurstGPTDataset,
@@ -86,6 +98,11 @@ def run_vllm(
 
     use_beam_search = False
 
+    print("---PROFILE5={}".format(args.profile))
+    if args.profile:
+        print("Starting performance profiling...")
+        llm.start_profile()
+
     outputs = None
     if not use_beam_search:
         start = time.perf_counter()
@@ -110,6 +127,11 @@ def run_vllm(
             ),
         )
         end = time.perf_counter()
+         
+    if args.profile:
+        print("Stopping performance profiling...")
+        llm.stop_profile()
+
     return end - start, outputs
 
 
@@ -206,6 +228,11 @@ async def run_vllm_async(
             )
             lora_requests.append(request.lora_request)
 
+        print("---PROFILE1={}".format(args.profile))
+        if args.profile:
+            print("Starting performance profiling...")
+            llm.start_profile()
+        
         generators = []
         start = time.perf_counter()
         for i, (prompt, sp, lr) in enumerate(
@@ -217,6 +244,10 @@ async def run_vllm_async(
         async for i, res in all_gens:
             pass
         end = time.perf_counter()
+        
+        if args.profile:
+            print("Stopping performance profiling...")
+            llm.stop_profile()
         return end - start
 
 
@@ -238,6 +269,11 @@ def run_hf(
     llm = llm.cuda()
 
     pbar = tqdm(total=len(requests))
+    print("---PROFILE2={}".format(args.profile))
+    if args.profile:
+        print("Starting performance profiling...")
+        llm.start_profile()
+
     start = time.perf_counter()
     batch: list[str] = []
     max_prompt_len = 0
@@ -282,6 +318,11 @@ def run_hf(
         max_prompt_len = 0
         max_output_len = 0
     end = time.perf_counter()
+    print("---PROFILE3={}".format(args.profile))
+    if args.profile:
+        print("Stopping performance profiling...")
+        llm.stop_profile()
+    
     return end - start
 
 
@@ -296,9 +337,18 @@ def run_mii(
     llm = serve(model, tensor_parallel=tensor_parallel_size)
     prompts = [request.prompt for request in requests]
 
+    print("---PROFILE4={}".format(PROFILE))
+    if args.profile:
+        print("Starting performance profiling...")
+        llm.start_profile()
+    
     start = time.perf_counter()
     llm.generate(prompts, max_new_tokens=output_len)
     end = time.perf_counter()
+    if args.profile:
+        print("Stopping performance profiling...")
+        llm.stop_profile()
+    
     client = client(model)
     client.terminate_server()
     return end - start
@@ -382,6 +432,9 @@ def get_requests(args, tokenizer):
 
 
 def main(args: argparse.Namespace):
+    set_environment_variables()
+    print("PROFILE0={}".format(args.profile))
+
     if args.seed is None:
         args.seed = 0
     print(args)
@@ -713,6 +766,8 @@ def create_argument_parser():
         "define a symmetric sampling range "
         "[length * (1 - range_ratio), length * (1 + range_ratio)].",
     )
+    parser.add_argument('--profile', action='store_true',
+        help='Enable performance profiling')
 
     # hf dtaset
     parser.add_argument(
