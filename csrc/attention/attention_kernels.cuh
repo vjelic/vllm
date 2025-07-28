@@ -303,16 +303,16 @@ __device__ void paged_attention_kernel(
 
           if(bit_pos == 0){
             //first 6 bits of byte
-            k_vec_quant = (k_cache[byte_idx] & 0b00111111);
+            k_vec_quant = (k_cache[byte_idx] >> 2);
           } else if(bit_pos == 2) {
             //last 6 bits of the byte. & just in case
-            k_vec_quant = (k_cache[byte_idx] >> 2) & 0b00111111;
+            k_vec_quant = k_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            k_vec_quant = (((k_cache[byte_idx] >> 4) & 0b00001111) | ((k_cache[byte_idx + 1] &0b00000011) << 4));
+            k_vec_quant = (((k_cache[byte_idx] & 0b00001111) << 2) | ((k_cache[byte_idx + 1] & 0b11000000) >> 6));
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            k_vec_quant = (((k_cache[byte_idx] >> 6) & 0b00000011) | ((k_cache[byte_idx + 1] &0b00001111) << 2));
+            k_vec_quant = ((k_cache[byte_idx] & 0b00000011) << 4) | ((k_cache[byte_idx + 1] & 0b11110000) >> 4);
           } else{
             assert(false);
           }
@@ -459,16 +459,16 @@ __device__ void paged_attention_kernel(
 
           if(bit_pos == 0){
             //first 6 bits of byte
-            v_quant_vec = (v_cache[byte_idx] & 0b00111111);
+           v_quant_vec = v_cache[byte_idx] >> 2;
           } else if(bit_pos == 2) {
             //last 6 bits of the byte. & just in case
-            v_quant_vec = (v_cache[byte_idx] >> 2) & 0b00111111;
+            v_quant_vec = v_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            v_quant_vec = (((v_cache[byte_idx] >> 4) & 0b00001111) | ((v_cache[byte_idx + 1] &0b00000011) << 4));
+            v_quant_vec = ((v_cache[byte_idx] & 0b00001111) << 2) | ((v_cache[byte_idx + 1] & 0b11000000) >> 6);
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            v_quant_vec = (((v_cache[byte_idx] >> 6) & 0b00000011) | ((v_cache[byte_idx + 1] &0b00001111) << 2));
+            v_quant_vec = ((v_cache[byte_idx] & 0b00000011) << 4) | ((v_cache[byte_idx + 1] & 0b11110000) >> 4);
           } else{
             assert(false);
           }
