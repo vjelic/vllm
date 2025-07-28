@@ -1,22 +1,3 @@
-/*
- * Adapted from
- * https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/decoder_masked_multihead_attention/decoder_masked_multihead_attention_template.hpp
- * Copyright (c) 2023, The vLLM team.
- * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -160,8 +141,7 @@ __device__ void paged_attention_kernel(
   // group fetch or compute 16 bytes at a time. For example, if the size of a
   // thread group is 4 and the data type is half, then the vector size is 16 /
   // (4 * sizeof(half)) == 2.
-  constexpr int VEC_SIZE = 1; 
-  //MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
+  constexpr int VEC_SIZE = MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
   using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
@@ -286,7 +266,7 @@ __device__ void paged_attention_kernel(
           // Vector conversion from Quant_vec to K_vec.
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(
               k_ptr + offset1 * BLOCK_SIZE * x + offset2);
-          k_vecs[j] = fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
+          k_vecs[j] = vllm::fp6::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
               k_vec_quant, *k_scale);
         }
       }
@@ -359,8 +339,7 @@ __device__ void paged_attention_kernel(
   }
 
   // Each thread will fetch 16 bytes from the value cache at a time.
-  constexpr int V_VEC_SIZE = 1; 
-  //MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
+  constexpr int V_VEC_SIZE = MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
   using V_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using L_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using V_quant_vec = typename Vec<cache_t, V_VEC_SIZE>::Type;
@@ -417,7 +396,7 @@ __device__ void paged_attention_kernel(
           V_quant_vec v_quant_vec =
               *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           // Vector conversion from V_quant_vec to V_vec.
-          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
+          v_vec = vllm::fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
                                                                     *v_scale);
         }
         if (block_idx == num_seq_blocks - 1) {
