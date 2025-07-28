@@ -443,7 +443,7 @@ __device__ void paged_attention_kernel(
         const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
         V_vec v_vec;
         
-        cache_t v_ptr_fp6 = physical_block_number * kv_block_stride +
+        size_t v_ptr_fp6 = physical_block_number * kv_block_stride +
                           kv_head_idx * kv_head_stride + offset;
 
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
