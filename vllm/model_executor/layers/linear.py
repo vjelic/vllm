@@ -538,11 +538,7 @@ class ColumnParallelLinear(LinearBase):
 
         # Matrix multiply.
         assert self.quant_method is not None
-        # TODO: bug for gate_up_proj(x)
-        if input_scale is not None:
-            output_parallel = self.quant_method.apply(self, input_, bias, input_scale)
-        else:
-            output_parallel = self.quant_method.apply(self, input_, bias)
+        output_parallel = self.quant_method.apply(self, input_, bias, input_scale)
         # for fused_rmsnorm_quant usage
         if self.gather_output:
             # All-gather across the partitions.

@@ -32,7 +32,7 @@ class CompressedTensorsScheme(ABC):
 
     @abstractmethod
     def apply_weights(self, layer: torch.nn.Module, x: torch.Tensor,
-                      bias: Optional[torch.Tensor]):
+                      bias: Optional[torch.Tensor], input_scale: Optional[torch.Tensor]):
         """
         Run the forward pass for the particular scheme. This is where 
         scheme-specific dequant/quant steps/kernels should be applied.
@@ -41,6 +41,7 @@ class CompressedTensorsScheme(ABC):
             other parameters relevant to the particular scheme. 
         :param x: input to the layer
         :param bias: bias parameter
+        :parm input_scale: input scale used for fused_rmsnorm_quant 
 
         """
         raise NotImplementedError

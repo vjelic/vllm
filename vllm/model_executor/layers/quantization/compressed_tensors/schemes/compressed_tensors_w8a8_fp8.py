@@ -156,11 +156,14 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
     def apply_weights(self,
                       layer: torch.nn.Module,
                       x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+                      bias: Optional[torch.Tensor] = None,
+                      input_scale: Optional[torch.Tensor]=None) -> torch.Tensor:
+
+        effective_input_scale = input_scale if input_scale is not None else layer.input_scale
 
         return self.fp8_linear.apply(input=x,
                                      weight=layer.weight,
                                      weight_scale=layer.weight_scale,
                                      out_dtype=self.out_dtype,
-                                     input_scale=layer.input_scale,
+                                     input_scale=effective_input_scale,
                                      bias=bias)
