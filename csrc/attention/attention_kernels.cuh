@@ -161,7 +161,8 @@ __device__ void paged_attention_kernel(
   // group fetch or compute 16 bytes at a time. For example, if the size of a
   // thread group is 4 and the data type is half, then the vector size is 16 /
   // (4 * sizeof(half)) == 2.
-  constexpr int VEC_SIZE = 1;//MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
+  constexpr int VEC_SIZE = 1;
+  //MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
   using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
   using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
@@ -279,7 +280,7 @@ __device__ void paged_attention_kernel(
         const int offset1 = (vec_idx * VEC_SIZE) / x;
         const int offset2 = (vec_idx * VEC_SIZE) % x;
 
-        size_t k_ptr_fp6 = physical_block_number * kv_block_stride +
+        cache_t k_ptr_fp6 = physical_block_number * kv_block_stride +
                           kv_head_idx * kv_head_stride +
                           physical_block_offset * x + offset1 * BLOCK_SIZE * x +
                           offset2;
@@ -295,17 +296,17 @@ __device__ void paged_attention_kernel(
           
           int byte_idx = (k_ptr_fp6 * 3) / 4;
           int bit_pos = (k_ptr_fp6 * 6) % 8;
+          cache_t k_vec_quant;
           
           //const void* raw = static_cast<const void*>(k_cache);
           //const uint8_t* __restrict__ key_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
           //uint8_t k_vec_quant;
-          cache_t k_vec_quant;
 
           if(bit_pos == 0){
             //first 6 bits of byte
             k_vec_quant = (k_cache[byte_idx] >> 2);
           } else if(bit_pos == 2) {
-            //last 6 bits of the byte. & just in case
+            //last 6 bits of the byte
             k_vec_quant = k_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
@@ -390,7 +391,8 @@ __device__ void paged_attention_kernel(
   }
 
   // Each thread will fetch 16 bytes from the value cache at a time.
-  constexpr int V_VEC_SIZE = 1;//MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
+  constexpr int V_VEC_SIZE = 1;
+  //MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
   using V_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using L_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
   using V_quant_vec = typename Vec<cache_t, V_VEC_SIZE>::Type;
@@ -441,7 +443,7 @@ __device__ void paged_attention_kernel(
         const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
         V_vec v_vec;
         
-        size_t v_ptr_fp6 = physical_block_number * kv_block_stride +
+        cache_t v_ptr_fp6 = physical_block_number * kv_block_stride +
                           kv_head_idx * kv_head_stride + offset;
 
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
@@ -449,19 +451,19 @@ __device__ void paged_attention_kernel(
         } else {
           //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           //uint8_t v_quant_vec;
+          cache_t v_quant_vec;
 
           int byte_idx = (v_ptr_fp6 * 3) / 4;
           int bit_pos = (v_ptr_fp6 * 6) % 8;
 
           //const void* raw = static_cast<const void*>(v_cache);
           //const uint8_t* __restrict__ value_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
-          cache_t v_quant_vec;
 
           if(bit_pos == 0){
             //first 6 bits of byte
            v_quant_vec = v_cache[byte_idx] >> 2;
           } else if(bit_pos == 2) {
-            //last 6 bits of the byte. & just in case
+            //last 6 bits of the byte
             v_quant_vec = v_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
