@@ -396,7 +396,19 @@ class Fp8LinearMethod(LinearMethodBase):
     def apply(self,
               layer: torch.nn.Module,
               x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+              bias: Optional[torch.Tensor] = None,
+              input_scale: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Apply the FP8 linear transformation.
+
+        Args:
+            layer: The linear layer module
+            x: Input tensor
+            bias: Optional bias tensor
+            input_scale: Optional input scale tensor from fused_rmsnorm_quant
+        """
+        # Use provided input_scale if available, otherwise use layer's input_scale
+        effective_input_scale = input_scale if input_scale is not None else layer.input_scale
 
         if self.use_marlin:
             return apply_fp8_marlin_linear(
@@ -415,7 +427,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 weight=layer.weight,
                 block_size=self.quant_config.weight_block_size,
                 weight_scale=layer.weight_scale_inv,
-                input_scale=layer.input_scale,
+                input_scale=effective_input_scale,
                 bias=bias,
                 cutlass_block_fp8_supported=self.cutlass_block_fp8_supported,
                 use_aiter_and_is_supported=self.use_aiter_and_is_supported,
@@ -425,7 +437,7 @@ class Fp8LinearMethod(LinearMethodBase):
                                      weight=layer.weight,
                                      weight_scale=layer.weight_scale,
                                      out_dtype=self.out_dtype,
-                                     input_scale=layer.input_scale,
+                                     input_scale=effective_input_scale,
                                      bias=bias)
 
 

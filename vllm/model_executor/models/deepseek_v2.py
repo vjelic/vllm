@@ -64,7 +64,8 @@ from vllm._aiter_ops import aiter_ops
 def is_rocm_aiter_rmsnorm_enabled() -> bool:
     return current_platform.is_rocm() \
         and envs.VLLM_ROCM_USE_AITER_RMSNORM \
-        and envs.VLLM_ROCM_USE_AITER
+        and envs.VLLM_ROCM_USE_AITER \
+        and envs.VLLM_ROCM_USE_AITER_FUSED_RMSNORM_QUANT
 
 class DeepseekV2MLP(nn.Module):
 
@@ -303,11 +304,10 @@ class DeepseekV2Attention(nn.Module):
         if self.q_lora_rank is not None:
             q = self.q_a_proj(hidden_states)[0]
             if is_rocm_aiter_rmsnorm_enabled():
-                q_dtype = "fp8"  # TODO, get quant type correctly
-                q, residual_out, y_scale, q_before_quant = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(q, None, 
-                        self.q_a_layernorm.weight, self.q_a_layernorm.variance_epsilon,
-                        None, torch.float32, q_dtype)
-                
+                q, residual_out, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(q, residual=None, 
+                        weight=self.q_a_layernorm.weight, variance_epsilon=self.q_a_layernorm.variance_epsilon,
+                        x_scale=None, y_scale_type=torch.float32, q_dtype="fp8")
+                q = self.q_b_proj(q, y_scale).view(-1, self.num_local_heads, self.qk_head_dim)
             else: 
                 q = self.q_a_layernorm(q)
                 q = self.q_b_proj(q)[0].view(-1, self.num_local_heads,

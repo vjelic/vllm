@@ -387,23 +387,27 @@ class Fp8LinearOp:
         # so fallback to naive if per channel or per token
         else:
             if input.dtype != current_platform.fp8_dtype():
-                
-                if not self.use_aiter_and_is_supported:
-                    # Maybe apply padding to output, see comment in __init__
-                    qinput, x_scale = ops.scaled_fp8_quant(
-                        input_2d,
-                        input_scale,
-                        num_token_padding=self.output_padding,
-                        use_per_token_if_dynamic=use_per_token_if_dynamic)
+                # # Handle fused RMSNorm + quant case
+                if envs.VLLM_ROCM_USE_AITER_FUSED_RMSNORM_QUANT and input_scale is not None:
+                    print(f"[DEBUG FUSED_RMS_QUANT], input_scale in Fp8LinearOp")
+                    qinput, x_scale = input_2d, input_scale
                 else:
-                    if use_per_token_if_dynamic:
-                        qinput, x_scale = (
-                            torch.ops.vllm.rocm_aiter_per_token_quant_fp8(
-                                input_2d, scale=input_scale))
+                    if not self.use_aiter_and_is_supported:
+                        # Maybe apply padding to output, see comment in __init__
+                        qinput, x_scale = ops.scaled_fp8_quant(
+                            input_2d,
+                            input_scale,
+                            num_token_padding=self.output_padding,
+                            use_per_token_if_dynamic=use_per_token_if_dynamic)
                     else:
-                        qinput, x_scale = (
-                            torch.ops.vllm.rocm_aiter_per_tensor_quant_fp8(
-                                input_2d, scale=input_scale))
+                        if use_per_token_if_dynamic:
+                            qinput, x_scale = (
+                                torch.ops.vllm.rocm_aiter_per_token_quant_fp8(
+                                    input_2d, scale=input_scale))
+                        else:
+                            qinput, x_scale = (
+                                torch.ops.vllm.rocm_aiter_per_tensor_quant_fp8(
+                                    input_2d, scale=input_scale))
             else:
                 qinput, x_scale = input_2d, input_scale
 
