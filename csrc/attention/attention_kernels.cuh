@@ -451,7 +451,7 @@ __device__ void paged_attention_kernel(
         } else {
           //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           //uint8_t v_quant_vec;
-          size_t v_quant_vec;
+          cache_t v_quant_vec;
 
           int byte_idx = (v_ptr_fp6 * 3) / 4;
           int bit_pos = (v_ptr_fp6 * 6) % 8;
