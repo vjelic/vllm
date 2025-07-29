@@ -197,7 +197,7 @@ fused_add_rms_norm_kernel(
 #define LAUNCH_RMS_NORM(width)                                               \
   VLLM_DISPATCH_FLOATING_TYPES(input.scalar_type(), "rms_norm_kernel", [&] { \
     vllm::rms_norm_kernel<scalar_t, width><<<grid, block, 0, stream>>>(      \
-        out.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), input_strtide, \
+        out.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), input_stride,  \
         weight.data_ptr<scalar_t>(), epsilon, num_tokens, hidden_size,       \
         vec_hidden_size);                                                    \
   });
