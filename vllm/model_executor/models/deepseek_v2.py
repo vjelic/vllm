@@ -300,14 +300,16 @@ class DeepseekV2Attention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
+        input_scale: Optional[torch.Tensor] = None ,
+        quant_hidden_states: Optional[torch.Tensor] = None 
     ) -> torch.Tensor:
         if self.q_lora_rank is not None:
             q = self.q_a_proj(hidden_states)[0]
             if is_rocm_aiter_fused_rms_quant_enabled():
-                q, residual_out, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(q, residual=None, 
+                q, residual_out, q_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(q, residual=None, 
                         weight=self.q_a_layernorm.weight, variance_epsilon=self.q_a_layernorm.variance_epsilon,
                         x_scale=None, y_scale_dtype=torch.float32)
-                q = self.q_b_proj(q, y_scale)[0].view(-1, self.num_local_heads, self.qk_head_dim)
+                q = self.q_b_proj(q, q_scale)[0].view(-1, self.num_local_heads, self.qk_head_dim)
             else: 
                 q = self.q_a_layernorm(q)
                 q = self.q_b_proj(q)[0].view(-1, self.num_local_heads,
@@ -321,8 +323,14 @@ class DeepseekV2Attention(nn.Module):
         kv_a, _ = latent_cache.split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         latent_cache = latent_cache.unsqueeze(1)
-        kv_a = self.kv_a_layernorm(kv_a.contiguous())
-        kv = self.kv_b_proj(kv_a)[0]
+        if is_rocm_aiter_fused_rms_quant_enabled():
+            kv_a, residual_out, kv_a_y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(kv_a, residual=None, 
+                        weight=self.kv_a_layernorm.weight, variance_epsilon=self.kv_a_layernorm.variance_epsilon,
+                        x_scale=None, y_scale_dtype=torch.float32) 
+            kv = self.kv_b_proj(kv_a, kv_a_y_scale)[0]
+        else: 
+            kv_a = self.kv_a_layernorm(kv_a.contiguous())
+            kv = self.kv_b_proj(kv_a)[0]
         kv = kv.view(-1, self.num_local_heads,
                      self.qk_nope_head_dim + self.v_head_dim)
         k_nope, v = kv.split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
@@ -482,14 +490,19 @@ class DeepseekV2MLAAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
+        input_scale: Optional[torch.Tensor] = None, 
+        quant_hidden_states: Optional[torch.Tensor] = None, 
     ) -> torch.Tensor:
         if self.q_lora_rank is not None:
-            ckq = self.q_a_proj(hidden_states)[0]
+            if is_rocm_aiter_fused_rms_quant_enabled():  
+                ckq = self.q_a_proj(quant_hidden_states, input_scale)[0]
+            else:
+                ckq = self.q_a_proj(hidden_states)[0]
             hidden_states_or_q_c = self.q_a_layernorm(ckq)
         else:
             hidden_states_or_q_c = hidden_states
         kv_c, k_pe = self.kv_a_proj_with_mqa(hidden_states)[0].split(
-            [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+                [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
         return self.mla_attn(hidden_states_or_q_c,
                              kv_c_normed,
@@ -568,16 +581,32 @@ class DeepseekV2DecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
         # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-        hidden_states = self.self_attn(
-            positions=positions,
-            hidden_states=hidden_states,
-        )
+        if is_rocm_aiter_fused_rms_quant_enabled():
+            q_hidden_states, residual, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(hidden_states,
+                                                            residual=residual, weight=self.input_layernorm.weight,
+                                                            variance_epsilon=self.input_layernorm.variance_epsilon,
+                                                            x_scale=None, y_scale_dtype=torch.float32)
+            if residual is None:
+                residual = hidden_states 
+        else: 
+            if residual is None:
+                residual = hidden_states
+                hidden_states = self.input_layernorm(hidden_states)
+            else:
+                hidden_states, residual = self.input_layernorm(
+                    hidden_states, residual)
+        if is_rocm_aiter_fused_rms_quant_enabled():
+            hidden_states = self.self_attn(
+                positions=positions,
+                hidden_states=hidden_states,
+                input_scale=y_scale,
+                quant_hidden_states = q_hidden_states
+            )
+        else: 
+            hidden_states = self.self_attn(
+                positions=positions,
+                hidden_states=hidden_states,
+            )
 
         if hidden_states.dtype == torch.float16:
             # Fix FP16 overflow
