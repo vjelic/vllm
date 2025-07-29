@@ -582,12 +582,18 @@ class DeepseekV2DecoderLayer(nn.Module):
     ) -> torch.Tensor:
         # Self Attention
         if is_rocm_aiter_fused_rms_quant_enabled():
-            q_hidden_states, residual, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(hidden_states,
+            if residual is None: 
+                q_hidden_states, residual_out, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(hidden_states,
+                                                            residual=None, weight=self.input_layernorm.weight,
+                                                            variance_epsilon=self.input_layernorm.variance_epsilon,
+                                                            x_scale=None, y_scale_dtype=torch.float32)
+                residual = hidden_states 
+            else: # tmp fix for enable cuda graph
+                q_hidden_states, residual_out, y_scale = aiter_ops.rocm_aiter_rmsnorm2d_fwd_with_add_quant(hidden_states,
                                                             residual=residual, weight=self.input_layernorm.weight,
                                                             variance_epsilon=self.input_layernorm.variance_epsilon,
                                                             x_scale=None, y_scale_dtype=torch.float32)
-            if residual is None:
-                residual = hidden_states 
+                residual = residual_out
         else: 
             if residual is None:
                 residual = hidden_states
