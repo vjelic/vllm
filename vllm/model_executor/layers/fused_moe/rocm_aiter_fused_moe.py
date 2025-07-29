@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from enum import IntEnum
-from functools import cache
+from functools import cache, lru_cache
 from typing import Optional
 
 import torch
@@ -39,6 +39,44 @@ def is_rocm_aiter_moe_enabled() -> bool:
     return current_platform.is_rocm() \
         and (envs.VLLM_ROCM_USE_AITER_MOE or envs.VLLM_ROCM_USE_AITER_ASMMOE) \
         and envs.VLLM_ROCM_USE_AITER
+
+
+@cache
+def is_rocm_aiter_fusion_shared_expert_enabled() -> bool:
+    return envs.VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS and is_rocm_aiter_moe_enabled()
+
+aiter_topK_meta_data = None
+
+@lru_cache(maxsize=1)
+def init_aiter_topK_meta_data(
+    n_routed_experts: int,
+    n_shared_experts: int,
+    top_k: int,
+    tp_rank: int,
+    tp_size: int,
+    shared_experts_score: float = 1.0,
+    max_num_tokens: int = 32768,
+    is_EP: bool = False
+): 
+    global aiter_topK_meta_data
+    fake_expertid = n_routed_experts + n_shared_experts
+    
+    # all layers reuse same buffer
+    total_topk_ids = torch.empty((max_num_tokens, top_k + n_shared_experts + is_EP), dtype=torch.int32, device='cuda')
+    ns_topk_ids, s_topk_ids = total_topk_ids.split([top_k, n_shared_experts + is_EP], dim=1)
+    shared_expert_ids = [n_routed_experts + i for i in range(n_shared_experts + is_EP)]
+    if is_EP:
+        s_topk_ids_list = [[fake_expertid]* (n_shared_experts + is_EP)] * max_num_tokens
+        for i in range(tp_rank, max_num_tokens, tp_size):
+            s_topk_ids_list[i] = shared_expert_ids
+    else:
+        s_topk_ids_list = [range(n_routed_experts, fake_expertid)] * max_num_tokens
+    s_topk_ids[:] = torch.tensor(s_topk_ids_list, dtype=torch.int32, device='cuda')
+
+    total_topk_weights = torch.empty((max_num_tokens, top_k + n_shared_experts + is_EP), dtype=torch.float32, device='cuda')
+    ns_topk_weights, s_topk_weights = total_topk_weights.split([top_k, n_shared_experts + is_EP], dim=1)
+    s_topk_weights.fill_(shared_experts_score)
+    aiter_topK_meta_data = (total_topk_weights, total_topk_ids)
 
 
 def rocm_aiter_asm_moe_tkw1_impl(
@@ -231,24 +269,23 @@ def rocm_aiter_asm_moe_impl(
     block_shape: Optional[list[int]] = None,
     expert_mask: Optional[torch.Tensor] = None,
     activation_method: int = ActivationMethod.SILU.value,
+    quant_method: int = QuantMethod.NO.value,
 ) -> torch.Tensor:
-    from aiter import ActivationType
-    from aiter.fused_moe_bf16_asm import asm_moe
+    from aiter import ActivationType, QuantType 
+    from aiter.fused_moe import fused_moe
 
     activation = ActivationType(activation_method)
-    return asm_moe(
+    quant_type = QuantType(quant_method)
+
+    return fused_moe(
         hidden_states,
         w1,
         w2,
         topk_weights,
         topk_ids,
-        fc1_scale=fc1_scale,
-        fc2_scale=fc2_scale,
-        fc1_smooth_scale=fc1_smooth_scale,
-        fc2_smooth_scale=fc2_smooth_scale,
-        a16=a16,
-        per_tensor_quant_scale=per_tensor_quant_scale,
-        block_shape=None if block_shape is None else tuple(block_shape),
+        w1_scale=fc1_scale,
+        w2_scale=fc2_scale,
+        quant_type=quant_type,
         activation=activation,
         expert_mask=expert_mask,
     )
@@ -269,6 +306,7 @@ def rocm_aiter_asm_moe_fake(
     block_shape: Optional[list[int]] = None,
     expert_mask: Optional[torch.Tensor] = None,
     activation_method: int = ActivationMethod.SILU.value,
+    quant_method: int = QuantMethod.NO.value,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
@@ -332,14 +370,31 @@ def rocm_aiter_grouped_topk(
     num_expert_group: int = 0,
     topk_group: int = 0,
     scoring_func: str = "softmax",
-    e_score_correction_bias: Optional[torch.Tensor] = None
+    e_score_correction_bias: Optional[torch.Tensor] = None,
+    num_fused_shared_experts: int = 0,
+    routed_scaling_factor: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     token = hidden_states.shape[0]
     device = hidden_states.device
-    topk_ids = torch.empty((token, topk), dtype=torch.int32, device=device)
-    topk_weights = torch.empty((token, topk),
-                               dtype=torch.float32,
-                               device=device)
+    if is_rocm_aiter_fusion_shared_expert_enabled() and num_fused_shared_experts > 0:
+        assert aiter_topK_meta_data is not None, (
+            "AITER topK meta data is not initialized. "
+            "Please ensure that init_aiter_topK_meta_data is called before this function."
+        )
+        total_topk_weights, total_topk_ids = aiter_topK_meta_data
+        assert total_topk_weights.shape[0] >= token, (
+            f"AITER topK meta data support {total_topk_weights.shape[0]} tokens which "
+            f"is determined by max_num_batched_tokens, but got {token} tokens now."
+        )
+        total_topk_weights = total_topk_weights[:token]
+        total_topk_ids = total_topk_ids[:token]
+        topk_weights, _ = total_topk_weights.split([topk, total_topk_weights.shape[1] - topk], dim=1)
+        topk_ids, _ = total_topk_ids.split([topk, total_topk_ids.shape[1] - topk], dim=1)
+    else:
+        topk_ids = torch.empty((token, topk), dtype=torch.int32, device=device)
+        topk_weights = torch.empty((token, topk),
+                                dtype=torch.float32,
+                                device=device)
 
     if e_score_correction_bias is not None:
         torch.ops.vllm.rocm_aiter_biased_grouped_topk(
@@ -350,6 +405,7 @@ def rocm_aiter_grouped_topk(
             num_expert_group,
             topk_group,
             renormalize,
+            routed_scaling_factor,
         )
     else:
         assert (scoring_func == "softmax" or scoring_func == "sigmoid")
@@ -361,8 +417,11 @@ def rocm_aiter_grouped_topk(
             topk_group,
             renormalize,
             scoring_func,
+            routed_scaling_factor,
         )
 
+    if is_rocm_aiter_fusion_shared_expert_enabled() and num_fused_shared_experts > 0:
+        return total_topk_weights, total_topk_ids
     return topk_weights, topk_ids
 
 
@@ -392,9 +451,24 @@ def rocm_aiter_fused_experts(
     topk_ids = topk_ids.to(torch.int32)
 
     if expert_map is not None:
-        expert_mask = (expert_map > -1).to(torch.int32)
+        expert_mask = expert_map
     else:
         expert_mask = None
+
+    quant_method = QuantMethod.NO.value
+    # w8a8 block-scaled
+    if block_shape is not None and use_fp8_w8a8:
+        assert not apply_router_weight_on_input, (
+            "apply_router_weight_on_input is\
+            not supported for block scaled moe")
+        assert w1_scale is not None
+        assert w2_scale is not None
+        quant_method = QuantMethod.BLOCK_128x128.value
+    elif per_channel_quant and use_fp8_w8a8:
+        quant_method = QuantMethod.PER_TOKEN.value
+    elif use_fp8_w8a8:
+        # Currently only per tensor quantization method is enabled.
+        quant_method = QuantMethod.PER_TENSOR.value
 
     # w8a8 per-channel quantization
     if per_channel_quant and apply_router_weight_on_input and use_fp8_w8a8:
@@ -437,24 +511,9 @@ def rocm_aiter_fused_experts(
             block_shape=block_shape,
             activation_method=activation_method,
             expert_mask=expert_mask,
+            quant_method=quant_method,
         )
     else:
-        quant_method = QuantMethod.NO.value
-
-        # w8a8 block-scaled
-        if block_shape is not None and use_fp8_w8a8:
-            assert not apply_router_weight_on_input, (
-                "apply_router_weight_on_input is\
-                not supported for block scaled moe")
-            assert w1_scale is not None
-            assert w2_scale is not None
-            quant_method = QuantMethod.BLOCK_128x128.value
-        elif per_channel_quant and use_fp8_w8a8:
-            quant_method = QuantMethod.PER_TOKEN.value
-        elif use_fp8_w8a8:
-            # Currently only per tensor quantization method is enabled.
-            quant_method = QuantMethod.PER_TENSOR.value
-
         if apply_router_weight_on_input:
             assert (topk_weights.dim() == 2
                     ), "`topk_weights` should be in shape (num_tokens, topk)"
