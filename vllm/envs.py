@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_USE_AITER_PAGED_ATTN: bool = False
     VLLM_ROCM_USE_AITER_LINEAR: bool = True
     VLLM_ROCM_USE_AITER_RMSNORM: bool = True
+    VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE: int = 0
     VLLM_ROCM_USE_AITER_MOE: bool = True
     VLLM_ROCM_USE_AITER_ASMMOE: bool = False
     VLLM_ROCM_USE_AITER_MLA: bool = True
@@ -678,6 +679,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ROCM_USE_AITER_RMSNORM":
     lambda: (os.getenv("VLLM_ROCM_USE_AITER_RMSNORM", "True").lower() in
              ("true", "1")),
+
+    # sensitive model mode, 0: for no specific model, 1: for T5-like model
+    "VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE":
+    lambda: int(os.getenv("VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE", "0")),
 
     # Whether to use aiter moe ops.
     # By default is enabled.

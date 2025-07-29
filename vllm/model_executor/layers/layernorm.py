@@ -53,10 +53,10 @@ def rocm_aiter_rms_norm_impl(x: torch.Tensor, weight: torch.Tensor,
     if x.dim() > 2:
         x_original_shape = x.shape
         x = x.reshape(-1, x_original_shape[-1])
-        x = rocm_aiter.rms_norm(x, weight, variance_epsilon)
+        x = rocm_aiter.rms_norm(x, weight, variance_epsilon, envs.VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE)
         return x.reshape(x_original_shape)
 
-    return rocm_aiter.rms_norm(x, weight, variance_epsilon)
+    return rocm_aiter.rms_norm(x, weight, variance_epsilon, envs.VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE)
 
 
 def rocm_aiter_rms_norm_fake(x: torch.Tensor, weight: torch.Tensor,
@@ -79,6 +79,7 @@ def rocm_aiter_rmsnorm2d_fwd_with_add_impl(
         residual_out,  # residual output
         weight,
         variance_epsilon,
+        envs.VLLM_ROCM_USE_AITER_RMSNORM_MODEL_SENSITIVE,
     )
     return output, residual_out
 
