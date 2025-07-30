@@ -484,15 +484,13 @@ class FusedMoE(torch.nn.Module):
 
         self.num_fused_shared_experts = config.n_shared_experts if config is not None and is_rocm_aiter_fusion_shared_expert_enabled() else 0
         self.routed_scaling_factor = config.routed_scaling_factor if config is not None and config.torch_dtype != torch.float16 else 1.0
-        if is_rocm_aiter_fusion_shared_expert_enabled():
-            self.local_num_experts += self.num_fused_shared_experts
         self.expert_mask = None
         if use_ep and is_rocm_aiter_moe_enabled():
             expert_mask = torch.ones((self.global_num_experts + self.num_fused_shared_experts + 1,), dtype=torch.int32)
             expert_mask[-1] = 0
             expert_mask[:self.global_num_experts] = self.expert_map > -1
             self.expert_mask = expert_mask
-            self.expert_map = torch.cat((self.expert_map, torch.tensor([self.local_num_experts - 1],dtype=torch.int32)), dim=0)
+            self.expert_map = torch.cat((self.expert_map, torch.tensor([self.local_num_experts + i  for i in range(self.num_fused_shared_experts)],dtype=torch.int32)), dim=0)
         if is_rocm_aiter_fusion_shared_expert_enabled() and self.num_fused_shared_experts > 0:
             init_aiter_topK_meta_data(
                 n_routed_experts=self.global_num_experts,
@@ -504,6 +502,8 @@ class FusedMoE(torch.nn.Module):
                 max_num_tokens=vllm_config.scheduler_config.max_num_batched_tokens,
                 is_EP=use_ep,
             )
+        if is_rocm_aiter_fusion_shared_expert_enabled():
+            self.local_num_experts += self.num_fused_shared_experts
 
         assert intermediate_size % self.tp_size == 0
         self.hidden_size = hidden_size
