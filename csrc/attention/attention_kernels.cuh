@@ -296,6 +296,7 @@ __device__ void paged_attention_kernel(
           
           int byte_idx = (k_ptr_fp6 * 3) / 4;
           int bit_pos = (k_ptr_fp6 * 6) % 8;
+          int next_byte_idx = ((k_ptr_fp6 + 1) * 3) / 4;
           cache_t k_vec_quant;
           
           //const void* raw = static_cast<const void*>(k_cache);
@@ -310,10 +311,10 @@ __device__ void paged_attention_kernel(
             k_vec_quant = k_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            k_vec_quant = (((k_cache[byte_idx] & 0b00001111) << 2) | ((k_cache[byte_idx + 1] & 0b11000000) >> 6));
+            k_vec_quant = (((k_cache[byte_idx] & 0b00001111) << 2) | ((k_cache[next_byte_idx] & 0b11000000) >> 6));
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            k_vec_quant = ((k_cache[byte_idx] & 0b00000011) << 4) | ((k_cache[byte_idx + 1] & 0b11110000) >> 4);
+            k_vec_quant = ((k_cache[byte_idx] & 0b00000011) << 4) | ((k_cache[next_byte_idx] & 0b11110000) >> 4);
           } else{
             assert(false);
           }
@@ -455,6 +456,7 @@ __device__ void paged_attention_kernel(
 
           int byte_idx = (v_ptr_fp6 * 3) / 4;
           int bit_pos = (v_ptr_fp6 * 6) % 8;
+          int next_byte_idx = ((v_ptr_fp6 + 1) * 3) / 4;
 
           //const void* raw = static_cast<const void*>(v_cache);
           //const uint8_t* __restrict__ value_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
@@ -467,10 +469,10 @@ __device__ void paged_attention_kernel(
             v_quant_vec = v_cache[byte_idx] & 0b00111111;
           } else if(bit_pos == 4){
             //last 4 bits of this byte, first two of the next one
-            v_quant_vec = ((v_cache[byte_idx] & 0b00001111) << 2) | ((v_cache[byte_idx + 1] & 0b11000000) >> 6);
+            v_quant_vec = ((v_cache[byte_idx] & 0b00001111) << 2) | ((v_cache[next_byte_idx] & 0b11000000) >> 6);
           } else if(bit_pos == 6){
             //last 2 bits of this byte, first four of next one
-            v_quant_vec = ((v_cache[byte_idx] & 0b00000011) << 4) | ((v_cache[byte_idx + 1] & 0b11110000) >> 4);
+            v_quant_vec = ((v_cache[byte_idx] & 0b00000011) << 4) | ((v_cache[next_byte_idx] & 0b11110000) >> 4);
           } else{
             assert(false);
           }

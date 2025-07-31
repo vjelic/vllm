@@ -264,6 +264,7 @@ __global__ void reshape_and_cache_kernel(
         //* 3/4
         int64_t byte_idx = (tgt_key_idx * 3) / 4;
         int bit_pos = (tgt_key_idx * 6) % 8;
+        int64_t next_byte_idx = ((tgt_key_idx + 1) * 3) / 4;
         
         uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
         uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
@@ -286,13 +287,13 @@ __global__ void reshape_and_cache_kernel(
       } else if(bit_pos == 4) {
         key_cache_bytes[byte_idx] &= 0b11110000;
         key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
-        key_cache_bytes[byte_idx + 1] &= 0b00111111;
-        key_cache_bytes[byte_idx + 1] |= (key_fp6 << 6);
+        key_cache_bytes[next_byte_idx] &= 0b00111111;
+        key_cache_bytes[next_byte_idx] |= (key_fp6 << 6);
       } else if (bit_pos == 6) {
         key_cache_bytes[byte_idx] &= 0b11111100;
         key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
-        key_cache_bytes[byte_idx + 1] &= 0b00001111;
-        key_cache_bytes[byte_idx + 1] |= (key_fp6 << 4);
+        key_cache_bytes[next_byte_idx] &= 0b00001111;
+        key_cache_bytes[next_byte_idx] |= (key_fp6 << 4);
       } else {
         assert(false);
       }
@@ -300,6 +301,7 @@ __global__ void reshape_and_cache_kernel(
       //same for value
       byte_idx = (tgt_value_idx * 3) / 4;
       bit_pos = (tgt_value_idx * 6) % 8;
+      next_byte_idx = ((tgt_value_idx + 1) * 3) / 4;
 
       if(bit_pos == 0) {
         value_cache_bytes[byte_idx] &= 0b00000011;
@@ -310,13 +312,13 @@ __global__ void reshape_and_cache_kernel(
       } else if(bit_pos == 4) {
         value_cache_bytes[byte_idx] &= 0b11110000;
         value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
-        value_cache_bytes[byte_idx + 1] &= 0b00111111;
-        value_cache_bytes[byte_idx + 1] |= (value_fp6 << 6);
+        value_cache_bytes[next_byte_idx] &= 0b00111111;
+        value_cache_bytes[next_byte_idx] |= (value_fp6 << 6);
       } else if(bit_pos == 6) {
         value_cache_bytes[byte_idx] &= 0b11111100;
         value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
-        value_cache_bytes[byte_idx + 1] &= 0b00001111;
-        value_cache_bytes[byte_idx + 1] |= (value_fp6 << 4);
+        value_cache_bytes[next_byte_idx] &= 0b00001111;
+        value_cache_bytes[next_byte_idx] |= (value_fp6 << 4);
       } else {
         assert(false);
       } 
@@ -448,8 +450,8 @@ void reshape_and_cache(
   int key_stride = key.stride(0);
   int value_stride = value.stride(0);
 
-  dim3 grid(num_tokens);
-  dim3 block(std::min(num_heads * head_size, 512));
+  dim3 grid(1);//num_tokens
+  dim3 block(std::min(num_heads * head_size, 1));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
