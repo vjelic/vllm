@@ -219,12 +219,14 @@ __global__ void reshape_and_cache_kernel(
     const int64_t* __restrict__ slot_mapping,  // [num_tokens]
     const int key_stride, const int value_stride, const int num_heads,
     const int head_size, const int block_size, const int x,
-    const float* k_scale, const float* v_scale) {
-  const int64_t token_idx = blockIdx.x;
+    const float* k_scale, const float* v_scale, const int num_tokens) {
+    for(int64_t token_idx = 0; token_idx < num_tokens; token_idx++){
+  //const int64_t token_idx = blockIdx.x;
   const int64_t slot_idx = slot_mapping[token_idx];
   if (slot_idx < 0) {
     // Padding token that should be ignored.
-    return;
+    //return;
+    continue;
   }
 
   //const int chunk_size = 3;
@@ -234,7 +236,7 @@ __global__ void reshape_and_cache_kernel(
   const int64_t block_offset = slot_idx % block_size;
 
   const int n = num_heads * head_size;
-  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+  for (int i = 0; i < n; i += 1) {
     const int64_t src_key_idx = token_idx * key_stride + i;
     const int64_t src_value_idx = token_idx * value_stride + i;
 
@@ -324,6 +326,7 @@ __global__ void reshape_and_cache_kernel(
       } 
     }
   }
+}
 }
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
@@ -429,7 +432,8 @@ __global__ void concat_and_cache_mla_kernel(
           slot_mapping.data_ptr<int64_t>(), key_stride, value_stride, \
           num_heads, head_size, block_size, x,                        \
           reinterpret_cast<const float*>(k_scale.data_ptr()),         \
-          reinterpret_cast<const float*>(v_scale.data_ptr()));
+          reinterpret_cast<const float*>(v_scale.data_ptr()),        \
+          num_tokens);
 
 void reshape_and_cache(
     torch::Tensor& key,    // [num_tokens, num_heads, head_size]
@@ -451,7 +455,7 @@ void reshape_and_cache(
   int value_stride = value.stride(0);
 
   dim3 grid(1);//num_tokens
-  dim3 block(std::min(num_heads * head_size, 1));
+  dim3 block(1);//std::min(num_heads * head_size, 512)
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
