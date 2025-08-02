@@ -271,14 +271,15 @@ class Qwen2_5_VisionAttention(nn.Module):
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
         if self.attn_backend not in {
-                _Backend.FLASH_ATTN,
-                _Backend.TORCH_SDPA,
-                _Backend.XFORMERS,
+                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS,
+                _Backend.ROCM_AITER_FA
         }:
             raise RuntimeError(
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
-        self.is_flash_attn_backend = self.attn_backend in {_Backend.FLASH_ATTN}
+        self.is_flash_attn_backend = self.attn_backend in {
+            _Backend.FLASH_ATTN, _Backend.ROCM_AITER_FA
+        }
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -326,7 +327,10 @@ class Qwen2_5_VisionAttention(nn.Module):
             k = apply_rotary_pos_emb_vision(k, rotary_pos_emb)
 
         if self.is_flash_attn_backend:
-            from flash_attn import flash_attn_varlen_func
+            if self.attn_backend == _Backend.ROCM_AITER_FA:
+                from aiter import flash_attn_varlen_func
+            else:
+                from flash_attn import flash_attn_varlen_func
 
             q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
 
