@@ -480,6 +480,8 @@ void reshape_and_cache(
   int key_stride = key.stride(0);
   int value_stride = value.stride(0);
   
+  //maybe need to make sure chunks are contiguous (of size that is some common multiple of 3 and 4)?
+
   //want one thread per chunk per head
   int num_x_groups = head_size / x;
 
