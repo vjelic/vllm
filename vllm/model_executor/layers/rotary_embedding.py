@@ -992,7 +992,6 @@ def _triton_qwen2vl_mrope_forward(
     pad_hd: tl.constexpr,
     mrope_section_t: tl.constexpr,
     mrope_section_h: tl.constexpr,
-    BLOCK_SIZE: tl.constexpr,
 ):
     # Adapted from
     # https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/ops/qwen2vl_mrope.py
@@ -1112,7 +1111,6 @@ def triton_mrope(
     pad_hd = triton.next_power_of_2(head_size)
     pad_n_q_head = triton.next_power_of_2(n_q_head)
     pad_n_kv_head = triton.next_power_of_2(n_kv_head)
-    BLOCK_SIZE = max(pad_n_q_head, pad_n_kv_head)
 
     # ensure tensors passed into the kernel are contiguous.
     # It will be no-op if they are already contiguous
@@ -1135,7 +1133,6 @@ def triton_mrope(
         pad_hd,
         mrope_section[0],
         mrope_section[1],
-        BLOCK_SIZE=BLOCK_SIZE,
     )
     return q, k
 
