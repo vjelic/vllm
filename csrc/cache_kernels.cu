@@ -220,30 +220,23 @@ __global__ void reshape_and_cache_kernel(
     const int key_stride, const int value_stride, const int num_heads,
     const int head_size, const int block_size, const int x,
     const float* k_scale, const float* v_scale, const int num_tokens) {
-    //for(int64_t token_idx = 0; token_idx < num_tokens; token_idx++){
   const int64_t token_idx = blockIdx.x;
   const int64_t slot_idx = slot_mapping[token_idx];
   if (slot_idx < 0) {
     // Padding token that should be ignored.
     return;
-    //continue;
   }
-
-  //const int chunk_size = 3;
 
   const int64_t block_idx = slot_idx / block_size;
   const int64_t block_offset = slot_idx % block_size;
 
-  const int num_x_groups = head_size / x; //this was normally just grouped, pulled out
+  const int num_x_groups = head_size / x;
   const int thread_head_idx = threadIdx.x / num_x_groups;
   const int thread_x_idx = threadIdx.x % num_x_groups;
 
-  //not sure if this is necessary, but also not sure if my bounds will always align
   if(thread_head_idx >= num_heads){
     return;
   }
-
-  //const int n = num_heads * head_size;
 
   for (int x_offset = 0; x_offset < x; x_offset += 1) {
     const int head_offset = thread_x_idx * x + x_offset;
@@ -252,22 +245,6 @@ __global__ void reshape_and_cache_kernel(
     const int64_t src_key_idx = token_idx * key_stride + i;
     const int64_t src_value_idx = token_idx * value_stride + i;
 
-    /*
-    const int head_idx = i / head_size;
-    const int head_offset = i % head_size;
-    const int x_idx = head_offset / x;
-    const int x_offset = head_offset % x;
-    */
-    /*
-    const int64_t tgt_key_idx =
-    block_idx * num_heads * (head_size / x) * block_size * x +
-    head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
-    block_offset * x + x_offset;
-    const int64_t tgt_value_idx =
-    block_idx * num_heads * head_size * block_size +
-    head_idx * head_size * block_size + head_offset * block_size +
-    block_offset;
-    */
     const int64_t tgt_key_idx =
         block_idx * num_heads *num_x_groups * block_size * x
         + thread_head_idx * num_x_groups * block_size * x
@@ -292,67 +269,59 @@ __global__ void reshape_and_cache_kernel(
 
         uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
         uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
-        //process four blocks per loop
-        //* 3/4
+
         int64_t byte_idx = (tgt_key_idx * 3) / 4;
         int bit_pos = (tgt_key_idx * 6) % 8;
         int64_t next_byte_idx = ((tgt_key_idx + 1) * 3) / 4;
-        
-        
-        //6 lsb s
-        //though this could be problematic with negative values? -> quant/dequant issue? Or something with concurrency?
-        //key_fp6 &= 0x3F;
-        //value_fp6 &= 0x3F;
-        
-      
-      //sanity check: number of zeroes for each branch should be 6 (6 bits to write in, all others to be preserved)
-      if(bit_pos == 0) {
-        key_cache_bytes[byte_idx] &= 0b00000011;
-        key_cache_bytes[byte_idx] |= (key_fp6 << 2);
-      } else if(bit_pos == 2) {
-        key_cache_bytes[byte_idx] &= 0b11000000;
-        key_cache_bytes[byte_idx] |= (key_fp6);
-      } else if(bit_pos == 4) {
-        key_cache_bytes[byte_idx] &= 0b11110000;
-        key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
-        key_cache_bytes[next_byte_idx] &= 0b00111111;
-        key_cache_bytes[next_byte_idx] |= (key_fp6 << 6);
-      } else if (bit_pos == 6) {
-        key_cache_bytes[byte_idx] &= 0b11111100;
-        key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
-        key_cache_bytes[next_byte_idx] &= 0b00001111;
-        key_cache_bytes[next_byte_idx] |= (key_fp6 << 4);
-      } else {
-        assert(false);
-      }
-      
-      //same for value
-      byte_idx = (tgt_value_idx * 3) / 4;
-      bit_pos = (tgt_value_idx * 6) % 8;
-      next_byte_idx = ((tgt_value_idx + 1) * 3) / 4;
 
-      if(bit_pos == 0) {
-        value_cache_bytes[byte_idx] &= 0b00000011;
-        value_cache_bytes[byte_idx] |= (value_fp6 << 2);
-      } else if(bit_pos == 2) {
-        value_cache_bytes[byte_idx] &= 0b11000000;
-        value_cache_bytes[byte_idx] |= (value_fp6);
-      } else if(bit_pos == 4) {
-        value_cache_bytes[byte_idx] &= 0b11110000;
-        value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
-        value_cache_bytes[next_byte_idx] &= 0b00111111;
-        value_cache_bytes[next_byte_idx] |= (value_fp6 << 6);
-      } else if(bit_pos == 6) {
-        value_cache_bytes[byte_idx] &= 0b11111100;
-        value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
-        value_cache_bytes[next_byte_idx] &= 0b00001111;
-        value_cache_bytes[next_byte_idx] |= (value_fp6 << 4);
-      } else {
-        assert(false);
-      } 
+      
+
+        if(bit_pos == 0) {
+          key_cache_bytes[byte_idx] &= 0b00000011;
+          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
+        } else if(bit_pos == 2) {
+          key_cache_bytes[byte_idx] &= 0b11000000;
+          key_cache_bytes[byte_idx] |= (key_fp6);
+        } else if(bit_pos == 4) {
+          key_cache_bytes[byte_idx] &= 0b11110000;
+          key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
+          key_cache_bytes[next_byte_idx] &= 0b00111111;
+          key_cache_bytes[next_byte_idx] |= (key_fp6 << 6);
+        } else if (bit_pos == 6) {
+          key_cache_bytes[byte_idx] &= 0b11111100;
+          key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
+          key_cache_bytes[next_byte_idx] &= 0b00001111;
+          key_cache_bytes[next_byte_idx] |= (key_fp6 << 4);
+        } else {
+          assert(false);
+        }
+        
+        //same for value
+        byte_idx = (tgt_value_idx * 3) / 4;
+        bit_pos = (tgt_value_idx * 6) % 8;
+        next_byte_idx = ((tgt_value_idx + 1) * 3) / 4;
+
+        if(bit_pos == 0) {
+          value_cache_bytes[byte_idx] &= 0b00000011;
+          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
+        } else if(bit_pos == 2) {
+          value_cache_bytes[byte_idx] &= 0b11000000;
+          value_cache_bytes[byte_idx] |= (value_fp6);
+        } else if(bit_pos == 4) {
+          value_cache_bytes[byte_idx] &= 0b11110000;
+          value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
+          value_cache_bytes[next_byte_idx] &= 0b00111111;
+          value_cache_bytes[next_byte_idx] |= (value_fp6 << 6);
+        } else if(bit_pos == 6) {
+          value_cache_bytes[byte_idx] &= 0b11111100;
+          value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
+          value_cache_bytes[next_byte_idx] &= 0b00001111;
+          value_cache_bytes[next_byte_idx] |= (value_fp6 << 4);
+        } else {
+          assert(false);
+        } 
     }
   }
-//}
 }
 
 template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
