@@ -171,10 +171,10 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
             # aiter.mla.get_meta_param_balanced(paged_kv_indptr, num_kv_splits_indptr, batch_split_table, split_table, kv_seq_les, splits)
 
             # double check
-            if num_kv_splits_indptr[0] == -1:
-                num_kv_splits_indptr=None
-                batch_split_table=None
-                split_table=None
+            #if num_kv_splits_indptr[0] == -1:
+            #    num_kv_splits_indptr=None
+            #    batch_split_table=None
+            #    split_table=None
 
         attn_metadata = AiterMLADecodeMetadata(
             input_positions=input_positions,
