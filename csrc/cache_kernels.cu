@@ -264,62 +264,60 @@ __global__ void reshape_and_cache_kernel(
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
-        uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-        uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+      uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
+      uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
 
-        uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
-        uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
+      uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
+      uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
 
-        int64_t byte_idx = (tgt_key_idx * 3) / 4;
-        int bit_pos = (tgt_key_idx * 6) % 8;
-        int64_t next_byte_idx = ((tgt_key_idx + 1) * 3) / 4;
+      int64_t byte_idx = (tgt_key_idx * 3) / 4;
+      int bit_pos = (tgt_key_idx * 6) % 8;
+      int64_t next_byte_idx = ((tgt_key_idx + 1) * 3) / 4;
 
-      
-
-        if(bit_pos == 0) {
-          key_cache_bytes[byte_idx] &= 0b00000011;
-          key_cache_bytes[byte_idx] |= (key_fp6 << 2);
-        } else if(bit_pos == 2) {
-          key_cache_bytes[byte_idx] &= 0b11000000;
-          key_cache_bytes[byte_idx] |= (key_fp6);
-        } else if(bit_pos == 4) {
-          key_cache_bytes[byte_idx] &= 0b11110000;
-          key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
-          key_cache_bytes[next_byte_idx] &= 0b00111111;
-          key_cache_bytes[next_byte_idx] |= (key_fp6 << 6);
-        } else if (bit_pos == 6) {
-          key_cache_bytes[byte_idx] &= 0b11111100;
-          key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
-          key_cache_bytes[next_byte_idx] &= 0b00001111;
-          key_cache_bytes[next_byte_idx] |= (key_fp6 << 4);
-        } else {
-          assert(false);
-        }
+      if(bit_pos == 0) {
+        key_cache_bytes[byte_idx] &= 0b00000011;
+        key_cache_bytes[byte_idx] |= (key_fp6 << 2);
+      } else if(bit_pos == 2) {
+        key_cache_bytes[byte_idx] &= 0b11000000;
+        key_cache_bytes[byte_idx] |= (key_fp6);
+      } else if(bit_pos == 4) {
+        key_cache_bytes[byte_idx] &= 0b11110000;
+        key_cache_bytes[byte_idx] |= (key_fp6 >> 2);
+        key_cache_bytes[next_byte_idx] &= 0b00111111;
+        key_cache_bytes[next_byte_idx] |= (key_fp6 << 6);
+      } else if (bit_pos == 6) {
+        key_cache_bytes[byte_idx] &= 0b11111100;
+        key_cache_bytes[byte_idx] |= (key_fp6 >> 4);
+        key_cache_bytes[next_byte_idx] &= 0b00001111;
+        key_cache_bytes[next_byte_idx] |= (key_fp6 << 4);
+      } else {
+        assert(false);
+      }
         
-        //same for value
-        byte_idx = (tgt_value_idx * 3) / 4;
-        bit_pos = (tgt_value_idx * 6) % 8;
-        next_byte_idx = ((tgt_value_idx + 1) * 3) / 4;
+      //same for value
+      byte_idx = (tgt_value_idx * 3) / 4;
+      bit_pos = (tgt_value_idx * 6) % 8;
+      next_byte_idx = ((tgt_value_idx + 1) * 3) / 4;
 
-        if(bit_pos == 0) {
-          value_cache_bytes[byte_idx] &= 0b00000011;
-          value_cache_bytes[byte_idx] |= (value_fp6 << 2);
-        } else if(bit_pos == 2) {
-          value_cache_bytes[byte_idx] &= 0b11000000;
-          value_cache_bytes[byte_idx] |= (value_fp6);
-        } else if(bit_pos == 4) {
-          value_cache_bytes[byte_idx] &= 0b11110000;
-          value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
-          value_cache_bytes[next_byte_idx] &= 0b00111111;
-          value_cache_bytes[next_byte_idx] |= (value_fp6 << 6);
-        } else if(bit_pos == 6) {
-          value_cache_bytes[byte_idx] &= 0b11111100;
-          value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
-          value_cache_bytes[next_byte_idx] &= 0b00001111;
-          value_cache_bytes[next_byte_idx] |= (value_fp6 << 4);
-        } else {
-          assert(false);
-        } 
+      if(bit_pos == 0) {
+        value_cache_bytes[byte_idx] &= 0b00000011;
+        value_cache_bytes[byte_idx] |= (value_fp6 << 2);
+      } else if(bit_pos == 2) {
+        value_cache_bytes[byte_idx] &= 0b11000000;
+        value_cache_bytes[byte_idx] |= (value_fp6);
+      } else if(bit_pos == 4) {
+        value_cache_bytes[byte_idx] &= 0b11110000;
+        value_cache_bytes[byte_idx] |= (value_fp6 >> 2);
+        value_cache_bytes[next_byte_idx] &= 0b00111111;
+        value_cache_bytes[next_byte_idx] |= (value_fp6 << 6);
+      } else if(bit_pos == 6) {
+        value_cache_bytes[byte_idx] &= 0b11111100;
+        value_cache_bytes[byte_idx] |= (value_fp6 >> 4);
+        value_cache_bytes[next_byte_idx] &= 0b00001111;
+        value_cache_bytes[next_byte_idx] |= (value_fp6 << 4);
+      } else {
+        assert(false);
+      } 
     }
   }
 }
