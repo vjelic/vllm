@@ -53,6 +53,8 @@ HF_UNSUPPORTED_MODELS = [
 ]
 
 V1_SUPPORTED_MODELS = [
+    "state-spaces/mamba-130m-hf",
+    "ai21labs/Jamba-tiny-dev",
     "mistralai/Mamba-Codestral-7B-v0.1",
     "ibm-ai-platform/Bamba-9B-v1",
     "Zyphra/Zamba2-1.2B-instruct",
@@ -274,7 +276,7 @@ def test_models_preemption_recompute(
     Tests that outputs are identical with and w/o preemptions (recompute).
     """
     with vllm_runner(model, max_num_seqs=MAX_NUM_SEQS) as vllm_model:
-        scheduler = vllm_model.model.llm_engine.scheduler[0]
+        scheduler = vllm_model.llm.llm_engine.scheduler[0]
         scheduler.ENABLE_ARTIFICIAL_PREEMPT = True
         preempt_vllm_outputs = vllm_model.generate_greedy(
             example_prompts, max_tokens)

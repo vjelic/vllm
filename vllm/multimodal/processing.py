@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import json
-import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import (Callable, Generator, ItemsView, Iterable, Mapping,
@@ -17,16 +15,16 @@ import torch
 from typing_extensions import assert_never
 
 from vllm.inputs import InputProcessingContext
-from vllm.jsontree import json_map_leaves, json_reduce_leaves
 from vllm.logger import init_logger
 from vllm.transformers_utils.tokenizer import (AnyTokenizer, decode_tokens,
                                                encode_tokens)
-from vllm.utils import GiB_bytes, LRUCache, flatten_2d_lists, full_groupby
+from vllm.utils import GiB_bytes, flatten_2d_lists, full_groupby
 
+from .cache import MultiModalCache
 from .hasher import MultiModalHasher
 from .inputs import (MultiModalDataDict, MultiModalEncDecInputs,
                      MultiModalFieldConfig, MultiModalInputs, MultiModalKwargs,
-                     MultiModalKwargsItem, NestedTensors, PlaceholderRange)
+                     MultiModalKwargsItem, PlaceholderRange)
 from .parse import (DictEmbeddingItems, EmbeddingItems, MultiModalDataItems,
                     MultiModalDataParser)
 
@@ -889,9 +887,6 @@ def find_mm_placeholders(
     return dict(full_groupby_modality(it))
 
 
-_V = TypeVar("_V", bound="Union[MultiModalKwargs, MultiModalKwargsItem]")
-
-
 class ProcessingCacheOptionalItem(NamedTuple):
     key: str
     value: Optional[MultiModalKwargsItem]
@@ -902,48 +897,7 @@ class ProcessingCacheItem(NamedTuple):
     value: MultiModalKwargsItem
 
 
-class ProcessingCache:
-
-    @staticmethod
-    def get_lru_cache(
-        capacity_gb: float,
-        value_type: type[_V],
-        *,
-        debug: bool = False,
-    ) -> LRUCache[str, _V]:
-
-        def get_leaf_size(leaf: object) -> int:
-            # MultiModalKwargs is not a subclass of dict
-            if isinstance(leaf, MultiModalKwargs):
-                return get_item_size(leaf.data)
-
-            # MultiModalKwargsItem is not a subclass of dict
-            if isinstance(leaf, MultiModalKwargsItem):
-                leaf_data = {k: v.data for k, v in leaf.items()}
-                return get_item_size(leaf_data)
-
-            # sys.getsizeof doesn't work for tensors
-            if isinstance(leaf, torch.Tensor):
-                return leaf.nbytes
-
-            return sys.getsizeof(leaf)
-
-        def get_item_size(
-            value: Union[MultiModalKwargs, MultiModalKwargsItem,
-                         Mapping[str, NestedTensors]]
-        ) -> int:
-            size = json_reduce_leaves(
-                lambda a, b: a + b,
-                json_map_leaves(get_leaf_size, value),
-            )
-
-            if debug:
-                logger.debug("Calculated size of %s to be %.2f GiB",
-                             type(value), size / GiB_bytes)
-
-            return size
-
-        return LRUCache(GiB_bytes * capacity_gb, getsizeof=get_item_size)
+class ProcessingCache(MultiModalCache):
 
     def __init__(
         self,
@@ -1156,6 +1110,18 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
 
         self.data_parser = self._get_data_parser()
 
+        # Avoid unnecessary recomputation
+        self._supported_mm_limits = self.info.get_supported_mm_limits()
+        self._allowed_mm_limits = self.info.get_allowed_mm_limits()
+
+    @property
+    def supported_mm_limits(self):
+        return self._supported_mm_limits
+
+    @property
+    def allowed_mm_limits(self):
+        return self._allowed_mm_limits
+
     def __call__(
         self,
         prompt: str,
@@ -1176,6 +1142,28 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
         """
         return MultiModalDataParser()
 
+    def validate_num_items(
+        self,
+        modality: str,
+        num_items: int,
+    ) -> None:
+        supported_limit = self.supported_mm_limits.get(modality, 0)
+        allowed_limit = self.allowed_mm_limits.get(modality, 0)
+
+        if supported_limit is None:
+            supported_limit = allowed_limit
+
+        limit = min(supported_limit, allowed_limit)
+
+        if num_items > limit:
+            msg = (f"At most {limit} {modality}(s) may be provided in "
+                   "one prompt.")
+
+            if num_items <= supported_limit:
+                msg += " Set `--limit-mm-per-prompt` to increase this limit."
+
+            raise ValueError(msg)
+
     def _to_mm_items(
         self,
         mm_data: MultiModalDataDict,
@@ -1188,26 +1176,9 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
         [`_get_hf_mm_data`][vllm.multimodal.processing.BaseMultiModalProcessor._get_hf_mm_data].
         """
         mm_items = self.data_parser.parse_mm_data(mm_data)
-        supported_mm_limits = self.info.get_supported_mm_limits()
-        allowed_mm_limits = self.info.get_allowed_mm_limits()
 
         for modality, items in mm_items.items():
-            supported_limit = supported_mm_limits.get(modality, 0)
-            allowed_limit = allowed_mm_limits.get(modality, 0)
-            num_items = len(items)
-
-            if supported_limit is not None and num_items > supported_limit:
-                raise ValueError(
-                    f"The model only supports at most {supported_limit} "
-                    f"{modality} items, but you passed {num_items} "
-                    f"{modality} items in the same prompt.")
-
-            if num_items > allowed_limit:
-                raise ValueError(
-                    "You set or defaulted to "
-                    f"'{json.dumps({modality: allowed_limit})}' in "
-                    f"`--limit-mm-per-prompt`, but passed {num_items} "
-                    f"{modality} items in the same prompt.")
+            self.validate_num_items(modality, len(items))
 
         return mm_items
 

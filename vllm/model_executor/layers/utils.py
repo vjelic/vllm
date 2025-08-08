@@ -9,6 +9,7 @@ from vllm import _custom_ops as ops
 from vllm import envs
 from vllm._aiter_ops import aiter_ops
 from vllm.platforms import current_platform
+from vllm.utils import direct_register_custom_op
 
 
 def get_token_bin_counts_and_mask(
