@@ -163,11 +163,17 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
         import aiter
         max_seqlen_qo = 1
         num_kv_splits_indptr = None
-        work_indptr = None
-        work_info_set = None
-        reduce_indptr = None
-        reduce_final_map = None
-        reduce_partial_map = None
+        # work_indptr = None
+        # work_info_set = None
+        # reduce_indptr = None
+        # reduce_final_map = None
+        # reduce_partial_map = None
+
+        work_indptr        = torch.empty([81], dtype=torch.int32, device="cuda")
+        work_info_set      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
+        reduce_indptr      = torch.empty([batch_size + 1], dtype=torch.int32, device="cuda")
+        reduce_final_map   = torch.empty([batch_size, 2], dtype=torch.int32, device="cuda")
+        reduce_partial_map = torch.empty([batch_size], dtype=torch.int32, device="cuda")
 
         if max_seqlen_qo == 1 or paged_kv_indptr[-1] < 16 * 128:
             batch_split_table = None
@@ -179,18 +185,17 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
             # num_kv_splits_indptr = torch.empty(200, dtype=torch.int32, device=block_table.device)
             # kv_seq_les = torch.empty(200, dtype=torch.int32, device=block_table.device)
             # aiter.mla.get_meta_param_balanced(paged_kv_indptr, num_kv_splits_indptr, batch_split_table, split_table, kv_seq_les, splits)
-            (
-                work_indptr,
-                work_info_set,
-                reduce_indptr,
-                reduce_final_map,
-                reduce_partial_map,
-            ) = aiter.get_mla_metadata_v1(
+            aiter.get_mla_metadata_v1(
                 qo_indptr,
                 paged_kv_indptr,
                 16,   # nhead // nhead_kv,
                 1,    # nhead_kv,
                 True,
+                work_info_set,
+                work_indptr,
+                reduce_indptr,
+                reduce_final_map,
+                reduce_partial_map,
             )
 
 
