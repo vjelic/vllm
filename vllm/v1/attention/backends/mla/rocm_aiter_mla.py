@@ -198,8 +198,6 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
                 reduce_partial_map,
             )
 
-
-
         attn_metadata = AiterMLADecodeMetadata(
             input_positions=input_positions,
             block_table=block_table,
