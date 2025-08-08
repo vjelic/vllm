@@ -450,7 +450,7 @@ __device__ void paged_attention_kernel(
           V_quant_vec v_quant_vec =
               *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
           // Vector conversion from V_quant_vec to V_vec.
-          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
+          v_vec = fp8::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
                                                                     *v_scale);
         }
         if (block_idx == num_seq_blocks - 1) {

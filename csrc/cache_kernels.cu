@@ -265,7 +265,7 @@ __global__ void reshape_and_cache_kernel(
       value_cache[tgt_value_idx] = tgt_value;
     } else {
       uint8_t key_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, *k_scale);
-      uint8_t value_fp6 = fp6::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
+      uint8_t value_fp6 = fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, *v_scale);
 
       uint8_t* key_cache_bytes = reinterpret_cast<uint8_t*>(key_cache);
       uint8_t* value_cache_bytes = reinterpret_cast<uint8_t*>(value_cache);
