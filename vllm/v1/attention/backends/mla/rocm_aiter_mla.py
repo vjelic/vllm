@@ -169,6 +169,7 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
         # reduce_final_map = None
         # reduce_partial_map = None
 
+        batch_size = paged_kv_indptr.size(0)
         work_indptr        = torch.empty([81], dtype=torch.int32, device="cuda")
         work_info_set      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
         reduce_indptr      = torch.empty([batch_size + 1], dtype=torch.int32, device="cuda")
