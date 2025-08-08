@@ -443,41 +443,15 @@ __device__ void paged_attention_kernel(
       if (row_idx < HEAD_SIZE) {
         const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
         V_vec v_vec;
-        
-        size_t v_ptr_fp6 = physical_block_number * kv_block_stride +
-                          kv_head_idx * kv_head_stride + offset;
 
         if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
           v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
         } else {
-          //V_quant_vec v_quant_vec =*reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          //uint8_t v_quant_vec;
-          cache_t v_quant_vec;
-
-          int byte_idx = (v_ptr_fp6 * 3) / 4;
-          int bit_pos = (v_ptr_fp6 * 6) % 8;
-          int next_byte_idx = ((v_ptr_fp6 + 1) * 3) / 4;
-
-          //const void* raw = static_cast<const void*>(v_cache);
-          //const uint8_t* __restrict__ value_cache_bytes = reinterpret_cast<const uint8_t* __restrict__>(raw);
-
-          if(bit_pos == 0){
-            //first 6 bits of byte
-           v_quant_vec = v_cache[byte_idx] >> 2;
-          } else if(bit_pos == 2) {
-            //last 6 bits of the byte
-            v_quant_vec = v_cache[byte_idx] & 0b00111111;
-          } else if(bit_pos == 4){
-            //last 4 bits of this byte, first two of the next one
-            v_quant_vec = ((v_cache[byte_idx] & 0b00001111) << 2) | ((v_cache[next_byte_idx] & 0b11000000) >> 6);
-          } else if(bit_pos == 6){
-            //last 2 bits of this byte, first four of next one
-            v_quant_vec = ((v_cache[byte_idx] & 0b00000011) << 4) | ((v_cache[next_byte_idx] & 0b11110000) >> 4);
-          } else{
-            assert(false);
-          }
-          
-          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec, *v_scale);
+          V_quant_vec v_quant_vec =
+              *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
+          // Vector conversion from V_quant_vec to V_vec.
+          v_vec = fp6::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(v_quant_vec,
+                                                                    *v_scale);
         }
         if (block_idx == num_seq_blocks - 1) {
           // NOTE(woosuk): When v_vec contains the tokens that are out of the

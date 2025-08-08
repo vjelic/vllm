@@ -293,7 +293,8 @@ __global__ void reshape_and_cache_kernel(
       } else {
         assert(false);
       }
-        
+      value_cache_bytes[tgt_value_idx] = value_fp6;
+      /*
       //same for value
       byte_idx = (tgt_value_idx * 3) / 4;
       bit_pos = (tgt_value_idx * 6) % 8;
@@ -318,6 +319,7 @@ __global__ void reshape_and_cache_kernel(
       } else {
         assert(false);
       } 
+      */
     }
   }
 }
