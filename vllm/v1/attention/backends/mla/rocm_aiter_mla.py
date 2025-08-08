@@ -146,6 +146,11 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
 
     def _build_decode(self, input_positions: torch.Tensor,
                       block_table: torch.Tensor,
+                      work_indptr: torch.Tensor,
+                      work_info_set: torch.Tensor,
+                      reduce_indptr: torch.Tensor,
+                      reduce_final_map: torch.Tensor,
+                      reduce_partial_map: torch.Tensor,
                       seq_lens: torch.Tensor) -> AiterMLADecodeMetadata:
 
         (
@@ -169,13 +174,7 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
         # reduce_final_map = None
         # reduce_partial_map = None
 
-        work_indptr        = torch.empty([81], dtype=torch.int32, device="cuda")
-        work_info_set      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
-        reduce_indptr      = torch.empty([batch_size + 1], dtype=torch.int32, device="cuda")
-        reduce_final_map   = torch.empty([batch_size, 2], dtype=torch.int32, device="cuda")
-        reduce_partial_map = torch.empty([batch_size], dtype=torch.int32, device="cuda")
-
-        if max_seqlen_qo == 1 or paged_kv_indptr[-1] < 16 * 128:
+        if max_seqlen_qo == 1:
             batch_split_table = None
             split_table = None
             splits = None
