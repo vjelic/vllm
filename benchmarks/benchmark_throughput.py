@@ -19,7 +19,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenize
 
 def set_environment_variables():
     from datetime import datetime
-    os.environ["VLLM_USE_TRITON_FLASH_ATTN"] = "0"
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     profile_dir = f"{current_time}_profile"
     os.environ["VLLM_TORCH_PROFILER_DIR"] = profile_dir
@@ -98,7 +97,6 @@ def run_vllm(
 
     use_beam_search = False
 
-    print("---PROFILE5={}".format(args.profile))
     if args.profile:
         print("Starting performance profiling...")
         llm.start_profile()
@@ -228,7 +226,6 @@ async def run_vllm_async(
             )
             lora_requests.append(request.lora_request)
 
-        print("---PROFILE1={}".format(args.profile))
         if args.profile:
             print("Starting performance profiling...")
             llm.start_profile()
@@ -269,7 +266,6 @@ def run_hf(
     llm = llm.cuda()
 
     pbar = tqdm(total=len(requests))
-    print("---PROFILE2={}".format(args.profile))
     if args.profile:
         print("Starting performance profiling...")
         llm.start_profile()
@@ -318,7 +314,6 @@ def run_hf(
         max_prompt_len = 0
         max_output_len = 0
     end = time.perf_counter()
-    print("---PROFILE3={}".format(args.profile))
     if args.profile:
         print("Stopping performance profiling...")
         llm.stop_profile()
@@ -337,7 +332,6 @@ def run_mii(
     llm = serve(model, tensor_parallel=tensor_parallel_size)
     prompts = [request.prompt for request in requests]
 
-    print("---PROFILE4={}".format(PROFILE))
     if args.profile:
         print("Starting performance profiling...")
         llm.start_profile()
@@ -432,8 +426,8 @@ def get_requests(args, tokenizer):
 
 
 def main(args: argparse.Namespace):
-    set_environment_variables()
-    print("PROFILE0={}".format(args.profile))
+    if args.profile:
+        set_environment_variables()
 
     if args.seed is None:
         args.seed = 0
