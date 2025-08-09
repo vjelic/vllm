@@ -5,8 +5,8 @@ export VLLM_RPC_TIMEOUT=1800000
 export VLLM_USE_V1=1
 
 # #llama3.1 70B BF16 TP8
-SIZE=llama3.1-70B
-MODEL=${MODEL_PATH}/Llama-3.1-70B-Instruct
+SIZE=llama3.3-70B
+MODEL=${MODEL_PATH}/meta-llama/Llama-3.3-70B-Instruct
 DTYPE=bfloat16
 WTYPE=bfloat16
 TP=8
@@ -40,6 +40,13 @@ WTYPE=bfloat16
 TP=8
 
 #Qwen3 32B FP8 TP1
+SIZE=Qwen3-32B
+MODEL=${MODEL_PATH}/Qwen/Qwen3-32B-FP8
+DTYPE=bfloat16
+WTYPE=fp8
+TP=1
+
+#Qwen3 32B FP8 TP8
 SIZE=Qwen3-32B
 MODEL=${MODEL_PATH}/Qwen/Qwen3-32B-FP8
 DTYPE=bfloat16
