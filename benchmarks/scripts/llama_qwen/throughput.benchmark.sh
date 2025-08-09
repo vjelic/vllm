@@ -1,32 +1,29 @@
 MODEL_PATH=/home/zejchen/models
-RES_PATH=./bench_results/llama
-mkdir -r ${RES_PATH}
+RES_PATH=./bench_results
+mkdir -p ${RES_PATH}
 export VLLM_RPC_TIMEOUT=1800000
 export VLLM_USE_V1=1
 
-#llama3.1 70B BF16 TP8
+# #llama3.1 70B BF16 TP8
 SIZE=llama3.1-70B
 MODEL=${MODEL_PATH}/Llama-3.1-70B-Instruct
 DTYPE=bfloat16
 WTYPE=bfloat16
 TP=8
-OUT=1024
 
 #llama3.3 70B FP8 TP8
 SIZE=llama3.3-70B
-MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-FP8-KV
+MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-FP8-KV/
 DTYPE=bfloat16
 WTYPE=fp8
 TP=8
-OUT=1024
 
-#llama3.3 70B FP4 TP8
-SIZE=llama3.3-70B
-MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-MXFP4-Preview
-DTYPE=bfloat16
-WTYPE=fp4
-TP=8
-OUT=1024
+# #llama3.3 70B FP4 TP8
+# SIZE=llama3.3-70B
+# MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-MXFP4-Preview
+# DTYPE=bfloat16
+# WTYPE=fp4
+# TP=8
 
 #llama3.3 8B FP8 TP1
 SIZE=llama3.1-8B
@@ -51,7 +48,7 @@ TP=8
 
 #Qwen3 235B FP8 TP8
 SIZE=Qwen3-235B
-MODEL=${MODEL_PATH}/Qwen/Qwen3-235B-A22B-FP8
+MODEL=${MODEL_PATH}/Qwen/Qwen3-235B-A22B-Instruct-2507-FP8
 DTYPE=bfloat16
 WTYPE=fp8
 TP=8
@@ -63,9 +60,9 @@ OUT=1024
 array_in=(1024)
 array_bs=(1)
 
-for IN in ${array_in[@]} do
-    for bs in ${array_bs[@]} do
-        python3 ../benchmark_throughput.py \
+for IN in ${array_in[@]}; do
+    for bs in ${array_bs[@]}; do
+        python3 ../../benchmark_throughput.py \
             --distributed-executor-backend mp \
             --dtype $DTYPE \
             --disable-detokenize \
