@@ -473,7 +473,6 @@ class MLACommonMetadataBuilder(Generic[M]):
 
     def _build_decode(self, input_positions: torch.Tensor,
                       block_table: torch.Tensor,
-                      block_table: torch.Tensor,
                       work_indptr: torch.Tensor,
                       work_info_set: torch.Tensor,
                       reduce_indptr: torch.Tensor,
