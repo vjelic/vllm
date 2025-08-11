@@ -1,8 +1,5 @@
 MODEL_PATH=/home/zejchen/models
-RES_PATH=./bench_results
-mkdir -p ${RES_PATH}
-export VLLM_RPC_TIMEOUT=1800000
-export VLLM_USE_V1=1
+
 
 # #llama3.1 70B BF16 TP8
 SIZE=llama3.3-70B
@@ -67,8 +64,16 @@ OUT=1024
 array_in=(1024)
 array_bs=(1)
 
+
+############# piecewise cuda graph ############
+export VLLM_RPC_TIMEOUT=1800000
+export VLLM_USE_V1=1
+export VLLM_ROCM_USE_AITER=1
 for IN in ${array_in[@]}; do
     for bs in ${array_bs[@]}; do
+        RES_PATH=./bench_results/${SIZE}_TP${TP}_dtype${DTYPE}_wtype${WTYPE}_bs${bs}_input${IN}_output${OUT}
+        mkdir -p ${RES_PATH}
+        export VLLM_TORCH_PROFILER_DIR=RES_PATH
         python3 ../../benchmark_throughput.py \
             --distributed-executor-backend mp \
             --dtype $DTYPE \
@@ -84,21 +89,58 @@ for IN in ${array_in[@]}; do
             --tensor-parallel-size $TP \
             --num-prompts $bs \
             --max-num-seqs $bs \
-            --output-json ${RES_PATH}/${SIZE}.TP${TP}.dtype${DTYPE}.wtype${WTYPE}.bs${bs}.input${IN}.output${OUT}.json
-        2>&1 | tee ${RES_PATH}/${SIZE}.TP${TP}.dtype${DTYPE}.wtype${WTYPE}.bs${bs}.input${IN}.output${OUT}.log
+            --output-json ${RES_PATH}/res.json
+        2>&1 | tee ${RES_PATH}/res.log
     done
 done
 
 
 
+############# full cuda graph ############
+# Currently only the prefill decode attention backend is supported in full graph
+export VLLM_USE_V1=1
+export VLLM_ROCM_USE_AITER=1 
+export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1 
+export VLLM_ROCM_USE_AITER_MHA=0 
+export VLLM_DISABLE_COMPILE_CACHE=1 
+for IN in ${array_in[@]}; do
+    for bs in ${array_bs[@]}; do
+        RES_PATH=./bench_results/${SIZE}_TP${TP}_dtype${DTYPE}_wtype${WTYPE}_bs${bs}_input${IN}_output${OUT}
+        mkdir -p ${RES_PATH}
+        export VLLM_TORCH_PROFILER_DIR=RES_PATH
+        python3 ../../benchmark_throughput.py \
+            --distributed-executor-backend mp \
+            --dtype $DTYPE \
+            --disable-detokenize \
+            --gpu-memory-utilization 0.9 \
+            --trust-remote-code \
+            --model $MODEL \
+            --max-model-len 32768 \
+            --max-num-batched-tokens 131072 \
+            --max-seq-len-to-capture 131072 \
+            --input-len $IN \
+            --output-len $OUT \
+            --tensor-parallel-size $TP \
+            --num-prompts $bs \
+            --max-num-seqs $bs \
+            --compilation-config '{"full_cuda_graph": true}'
+            --output-json ${RES_PATH}/res.json
+        2>&1 | tee ${RES_PATH}/res.log
+    done
+done
 
-'''
-export VLLM_ROCM_USE_AITER_MHA=0
-export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
-for IN in 1024 4096 10240; do
-    for bs in 1 16 32 64 128 256; do
-        OUT=1024
 
+############# fp8 KV Cache ############
+export VLLM_USE_V1=1
+export VLLM_ROCM_USE_AITER=1 
+export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1 
+export VLLM_ROCM_USE_AITER_MHA=0 
+export VLLM_DISABLE_COMPILE_CACHE=1 
+for IN in ${array_in[@]}; do
+    for bs in ${array_in[@]}; do
+        RES_PATH=./bench_results/${SIZE}_TP${TP}_dtype${DTYPE}_wtype${WTYPE}_bs${bs}_input${IN}_output${OUT}
+        mkdir -p ${RES_PATH}
+        export VLLM_TORCH_PROFILER_DIR=RES_PATH
         python3 ../benchmark_throughput.py \
             --distributed-executor-backend mp \
             --dtype $DTYPE \
@@ -115,10 +157,12 @@ for IN in 1024 4096 10240; do
             --tensor-parallel-size $TP \
             --num-prompts $bs \
             --max-num-seqs $bs \
-            --output-json ${RES_PATH}/llama70B.TP${TP}.dtype${DTYPE}.wtype${WTYPE}.bs${bs}.input${IN}.output${OUT}.json
-        2>&1 | tee ${RES_PATH}/llama70B.TP${TP}.dtype${DTYPE}.wtype${WTYPE}.bs${bs}.input${IN}.output${OUT}.log
+            --output-json ${RES_PATH}/res.json
+        2>&1 | tee ${RES_PATH}/res.log
     done
 done
-'''
+
+
+
 
 
