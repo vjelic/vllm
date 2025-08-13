@@ -182,11 +182,33 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
         q_pe: torch.Tensor,
         kv_c_and_k_pe_cache: torch.Tensor,
         attn_metadata: AiterMLAMetadata,
+        q_nope_pe: torch.Tensor = None,
+        q_scale: torch.Tensor = None,
     ) -> torch.Tensor:
         assert kv_c_and_k_pe_cache.numel() > 0
         assert attn_metadata.decode is not None
 
-        if envs.VLLM_AITER_TRITON_FUSED_CONCAT_ZEROS:
+        if envs.VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT_QUANT and q_nope_pe is not None and q_scale is not None:
+            # q_nope_pe.dtype == torch.float8_e4m3fnuz
+            # q_scale.dtype == torch.float32
+            # upcast back to bf16 for current implementation, this section can be commented out once aiter_mla_decode_fwd support fp8 and without using zero-tensor output
+            q = (q_nope_pe.to(torch.float32) * q_scale).to(q_nope.dtype)
+            B = q_nope.shape[0]
+            o = torch.zeros(B,
+                            self.num_heads,
+                            self.kv_lora_rank,
+                            dtype=q.dtype,
+                            device=q.device)
+        elif envs.VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT and q_nope_pe is not None:
+            # q_nope_pe.dtype == torch.bfloat16
+            q = q_nope_pe
+            B = q_nope.shape[0]
+            o = torch.zeros(B,
+                            self.num_heads,
+                            self.kv_lora_rank,
+                            dtype=q.dtype,
+                            device=q.device)
+        elif envs.VLLM_AITER_TRITON_FUSED_CONCAT_ZEROS:
             q, o = fused_concat_zeros(q_nope, q_pe)
         else:
             B = q_nope.shape[0]

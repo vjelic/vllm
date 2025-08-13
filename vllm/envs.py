@@ -112,7 +112,8 @@ if TYPE_CHECKING:
     VLLM_MSGPACK_ZERO_COPY_THRESHOLD: int = 256
     VLLM_AITER_TRITON_FP8_BMM: bool = False
     VLLM_AITER_TRITON_FUSED_CONCAT_ZEROS: bool = False
-
+    VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT: bool = False
+    VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT_QUANT: bool = False
 
 def get_default_cache_root():
     return os.getenv(
@@ -736,7 +737,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     
     "VLLM_AITER_TRITON_FUSED_CONCAT_ZEROS":
     lambda: bool(int(os.getenv("VLLM_AITER_TRITON_FUSED_CONCAT_ZEROS", "0"))),
-    
+
+    "VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT":
+    lambda: bool(int(os.getenv("VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT", "0"))),
+
+    "VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT_QUANT":
+    lambda: bool(int(os.getenv("VLLM_AITER_TRITON_FUSED_ROPE_CACHE_CONCAT_QUANT", "0"))),
+
 }
 
 # end-env-vars-definition
