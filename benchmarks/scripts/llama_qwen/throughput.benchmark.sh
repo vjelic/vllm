@@ -1,33 +1,33 @@
-MODEL_PATH=/home/zejchen/models
+MODEL=$1
+TP=$2
+DTYPE=$3
+array_in=$4
+array_out=$5
 
-
+'''
 # #llama3.1 70B BF16 TP8
 SIZE=llama3.3-70B
 MODEL=${MODEL_PATH}/meta-llama/Llama-3.3-70B-Instruct
 DTYPE=bfloat16
 WTYPE=bfloat16
-TP=8
 
 #llama3.3 70B FP8 TP8
 SIZE=llama3.3-70B
 MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-FP8-KV/
 DTYPE=bfloat16
 WTYPE=fp8
-TP=8
 
 # #llama3.3 70B FP4 TP8
 # SIZE=llama3.3-70B
 # MODEL=${MODEL_PATH}/amd/Llama-3.3-70B-Instruct-MXFP4-Preview
 # DTYPE=bfloat16
 # WTYPE=fp4
-# TP=8
 
 #llama3.3 8B FP8 TP1
 SIZE=llama3.1-8B
 MODEL=${MODEL_PATH}/amd/Llama-3.1-8B-Instruct-FP8-KV
 DTYPE=bfloat16
 WTYPE=fp8
-TP=1
 
 #Qwen3 32B BF16 TP1
 SIZE=Qwen3-32B
@@ -63,7 +63,7 @@ OUT=1024
 #array_bs=(1 16 32 64 128 256)
 array_in=(1024)
 array_bs=(1)
-
+'''
 
 ############# piecewise cuda graph ############
 export VLLM_RPC_TIMEOUT=1800000
@@ -107,7 +107,7 @@ for IN in ${array_in[@]}; do
     for bs in ${array_bs[@]}; do
         RES_PATH=./bench_results/${SIZE}_TP${TP}_dtype${DTYPE}_wtype${WTYPE}_bs${bs}_input${IN}_output${OUT}
         mkdir -p ${RES_PATH}
-        export VLLM_TORCH_PROFILER_DIR=RES_PATH
+        export VLLM_TORCH_PROFILER_DIR=${RES_PATH}
         python3 ../../benchmark_throughput.py \
             --distributed-executor-backend mp \
             --dtype $DTYPE \
