@@ -1,6 +1,5 @@
-'''
-bash server.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1 bfloat16
-'''
+# bash server.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1 bfloat16
+
 export VLLM_RPC_TIMEOUT=1800000
 export VLLM_USE_V1=1
 export VLLM_ROCM_USE_AITER=1 

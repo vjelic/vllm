@@ -1,6 +1,6 @@
-'''
-bash latency.benchmark.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1 bfloat16 1 1024 1024 llama3.1-8B
-'''
+
+# bash benchmark_latency.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1 bfloat16 1 1024 1024 llama3.1-8B
+
 MODEL=$1
 TP=$2
 DTYPE=$3

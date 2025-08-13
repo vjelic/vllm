@@ -1,6 +1,4 @@
-'''
-bash client.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1000 1024 1024
-'''
+# bash client.sh /home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV 1000 1024 1024
 
 MODEL=$1
 NUM=$2
