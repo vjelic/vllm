@@ -14,7 +14,7 @@ export VLLM_ROCM_USE_AITER_MHA=0
 export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1 
 export VLLM_DISABLE_COMPILE_CACHE=1 
 
-RES_PATH=./bench_results/${LOG_NAME}_TP${TP}_dtype${DTYPE}_wtype${WTYPE}_bs${bs}_input${IN}_output${OUT}
+RES_PATH=./bench_results/${LOG_NAME}_TP${TP}_dtype${DTYPE}_bs${bs}_input${IN}_output${OUT}
 mkdir -p ${RES_PATH}
 python3 ../../benchmark_throughput.py \
     --distributed-executor-backend mp \
