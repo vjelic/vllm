@@ -21,7 +21,8 @@ def set_environment_variables():
     from datetime import datetime
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     profile_dir = f"{current_time}_profile"
-    os.environ["VLLM_TORCH_PROFILER_DIR"] = profile_dir
+    ori_path = os.environ["VLLM_TORCH_PROFILER_DIR"]
+    profile_dir = os.path.join(ori_path, profile_dir)
 
     os.makedirs(profile_dir, exist_ok=True)
     print(f"Profile directory created: {profile_dir}")

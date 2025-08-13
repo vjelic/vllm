@@ -10,7 +10,7 @@ LOG_NAME=llama3.1-8B
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
@@ -24,7 +24,7 @@ LOG_NAME=llama3.3-70B
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
@@ -37,7 +37,7 @@ LOG_NAME=llama3.3-70B
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
@@ -50,7 +50,7 @@ LOG_NAME=Qwen3-32B
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
@@ -63,7 +63,7 @@ LOG_NAME=Qwen3-32B-FP8
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
@@ -76,7 +76,7 @@ LOG_NAME=Qwen3-32B-FP8
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
         for OUT in ${array_out[@]}; do
-            bash throughput.benchmark.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
+            bash benchmark_throughput.sh $MODEL $TP $Dtype $bs $IN $OUT $LOG_NAME
         done
     done
 done
