@@ -97,6 +97,7 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
     llm = LLM(model,
               enforce_eager=True,
               compilation_config=compile_config,
+              gpu_memory_utilization=0.5,
               max_model_len=2048)
 
     sampling_params = SamplingParams(temperature=0.0,
@@ -129,6 +130,7 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
     llm2 = LLM(model,
                enforce_eager=True,
                compilation_config=compile_config,
+               gpu_memory_utilization=0.5,
                max_model_len=2048)
 
     # check outputs
@@ -203,7 +205,10 @@ def test_attention_fusion_v1(example_prompts, monkeypatch, model: str,
     }
     with set_current_vllm_config(vllm_config):
         backend = TestBackend()  # also force disable caches
-        llm = LLM(model, compilation_config=compile_config, max_model_len=2048)
+        llm = LLM(model,
+                  compilation_config=compile_config,
+                  gpu_memory_utilization=0.5,
+                  max_model_len=2048)
         sampling_params = SamplingParams(temperature=0.0,
                                          max_tokens=10,
                                          top_p=0.95)
@@ -237,6 +242,7 @@ def test_attention_fusion_v1(example_prompts, monkeypatch, model: str,
                 quant_key=quant_key,
                 compile_config=get_current_vllm_config().compilation_config))
         llm2 = LLM(model,
+                   gpu_memory_utilization=0.5,
                    compilation_config=compile_config,
                    max_model_len=2048)
 
