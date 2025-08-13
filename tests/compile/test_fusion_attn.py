@@ -2,11 +2,14 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import functools
+
+import functools
 from typing import Optional
 
 import pytest
 import torch._dynamo
 
+from tests.compile.backend import LazyInitPass, TestBackend, TestPassManager
 from tests.compile.backend import LazyInitPass, TestBackend, TestPassManager
 from tests.models.utils import check_outputs_equal
 from vllm import LLM, SamplingParams
@@ -14,6 +17,10 @@ from vllm.compilation.fusion import QUANT_OPS, QuantKey, kFp8StaticTensorSym
 from vllm.compilation.fusion_attn import ATTN_OP, AttnFusionPass
 from vllm.compilation.fx_utils import find_op_nodes
 from vllm.compilation.noop_elimination import NoOpEliminationPass
+from vllm.compilation.vllm_inductor_pass import PrinterInductorPass
+from vllm.config import (CompilationConfig, CompilationLevel, ModelConfig,
+                         PassConfig, VllmConfig, get_current_vllm_config,
+                         set_current_vllm_config)
 from vllm.compilation.vllm_inductor_pass import PrinterInductorPass
 from vllm.config import (CompilationConfig, CompilationLevel, ModelConfig,
                          PassConfig, VllmConfig, get_current_vllm_config,
@@ -73,6 +80,7 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
     global backend, backend_unfused
 
     monkeypatch.setenv("VLLM_USE_V1", "0")
+    monkeypatch.setenv("VLLM_USE_V1", "0")
     monkeypatch.setenv("VLLM_USE_TRITON_FLASH_ATTN", str(int(use_triton_fa)))
 
     # Prompt 4 seems too open-ended, differs between fused and unfused
@@ -86,6 +94,9 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
         backend="tests.compile.test_fusion_attn.backend_unfused",
         custom_ops=["+quant_fp8"],
     )
+    model_config = ModelConfig(model=model, dtype="bfloat16")
+    vllm_config = VllmConfig(compilation_config=compile_config,
+                             model_config=model_config)
     model_config = ModelConfig(model=model, dtype="bfloat16")
     vllm_config = VllmConfig(compilation_config=compile_config,
                              model_config=model_config)
@@ -112,6 +123,8 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
         backend="tests.compile.test_fusion_attn.backend",
         custom_ops=["+quant_fp8"],
     )
+    vllm_config = VllmConfig(compilation_config=compile_config,
+                             model_config=model_config)
     vllm_config = VllmConfig(compilation_config=compile_config,
                              model_config=model_config)
 
@@ -143,6 +156,7 @@ def test_attention_fusion_v0(example_prompts, monkeypatch, model: str,
         name_0="unfused",
         name_1="fused",
     )
+    del llm2
     del llm2
     # Clean Dynamo cache to avoid polluting other case(s)
     torch._dynamo.reset()

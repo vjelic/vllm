@@ -10,8 +10,10 @@
 import torch
 
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 from vllm.platforms import current_platform
+import math
 
 logger = init_logger(__name__)
 float8_info = torch.finfo(current_platform.fp8_dtype())
@@ -54,10 +56,11 @@ def kernel_unified_attention_2d(
     query_ptr,  # [num_tokens, num_query_heads, head_size]
     key_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
     value_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
+    sink_ptr,  # [num_query_heads]
     block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
     seq_lens_ptr,  # [num_seqs]
     alibi_slopes_ptr,  # [num_query_heads]
-        qq_bias_ptr,  # [num_query_tokens, num_query_tokens]
+    qq_bias_ptr,  # [num_query_tokens, num_query_tokens]
     scale,  # float32
     k_scale,  # float32
     v_scale,  # float32
@@ -70,13 +73,14 @@ def kernel_unified_attention_2d(
     query_stride_1: tl.int64,  # int, should be equal to head_size
     output_stride_0: tl.int64,  # int
     output_stride_1: tl.int64,  # int, should be equal to head_size
-        qq_bias_stride_0: tl.int64,  # int
+    qq_bias_stride_0: tl.int64,  # int
     BLOCK_SIZE: tl.constexpr,  # int
     HEAD_SIZE: tl.constexpr,  # int
     HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
     USE_ALIBI_SLOPES: tl.constexpr,  # bool
-        USE_QQ_BIAS: tl.constexpr,  # bool
+    USE_QQ_BIAS: tl.constexpr,  # bool
     USE_SOFTCAP: tl.constexpr,  # bool
+    USE_SINKS: tl.constexpr,  # bool
     SLIDING_WINDOW: tl.constexpr,  # int
     stride_k_cache_0: tl.int64,  # int
     stride_k_cache_1: tl.int64,  # int
@@ -93,9 +97,24 @@ def kernel_unified_attention_2d(
     USE_FP8: tl.constexpr,  # bool
     FP8_MIN: tl.constexpr = float8_info.min,
     FP8_MAX: tl.constexpr = float8_info.max,
+    ALL_DECODE: tl.constexpr = False,
 ):
-    q_block_global_idx = tl.program_id(0)
-    kv_head_idx = tl.program_id(1)
+    kv_head_idx = tl.program_id(0)
+    q_block_global_idx = tl.program_id(1)
+
+    tl.assume(kv_head_idx >= 0)
+    tl.assume(q_block_global_idx >= 0)
+    tl.assume(block_table_stride > 0)
+    tl.assume(query_stride_0 > 0)
+    tl.assume(query_stride_1 > 0)
+    tl.assume(output_stride_0 > 0)
+    tl.assume(output_stride_1 > 0)
+    tl.assume(stride_k_cache_0 > 0)
+    tl.assume(stride_k_cache_1 > 0)
+    tl.assume(stride_k_cache_2 > 0)
+    tl.assume(stride_v_cache_0 > 0)
+    tl.assume(stride_v_cache_1 > 0)
+    tl.assume(stride_v_cache_2 > 0)
 
     seq_idx = find_seq_idx(query_start_len_ptr, q_block_global_idx, num_seqs,
                            BLOCK_Q, True)
@@ -125,19 +144,33 @@ def kernel_unified_attention_2d(
                     query_offset_1[:, None] * query_stride_1 + offs_d[None, :])
 
     dim_mask = tl.where(offs_d < HEAD_SIZE, 1, 0).to(tl.int1)
-    query_mask_0 = tl.where(query_pos < cur_batch_query_len, 1, 0).to(tl.int1)
-    query_mask_1 = tl.where(query_offset_1 < num_query_heads, 1, 0).to(tl.int1)
+    query_mask_0 = query_pos < cur_batch_query_len
+    query_mask_1 = query_offset_1 < num_query_heads
+
+    if ALL_DECODE or BLOCK_M >= num_query_heads:
+        Q_cache_modifier: tl.constexpr = ".cg"
+    else:
+        Q_cache_modifier: tl.constexpr = ""
 
     # Q : (BLOCK_M, HEAD_SIZE_PADDED)
     Q = tl.load(
         query_ptr + query_offset,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
         other=0.0,
+        cache_modifier=Q_cache_modifier,
     )
 
     block_table_offset = seq_idx * block_table_stride
 
-    M = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
+    if not USE_SINKS:
+        M = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
+    else:
+        M = tl.load(
+            sink_ptr + query_offset_1,
+            mask=query_mask_1,
+            other=float("-inf"),
+        ).to(dtype=tl.float32)
+
     L = tl.full([BLOCK_M], 1.0, dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, HEAD_SIZE_PADDED], dtype=tl.float32)
 
@@ -171,9 +204,16 @@ def kernel_unified_attention_2d(
     # cover the longest sequence prefix (due to causal masking, blocks beyond
     # this prefix can be skipped)
     num_blocks = cdiv_fn(max_seq_prefix_len, BLOCK_SIZE)
-
+    if SLIDING_WINDOW > 0:
+        num_blocks_start = (
+            max_seq_prefix_len - SLIDING_WINDOW - BLOCK_Q - 1
+        ) // BLOCK_SIZE
+        num_blocks_start = max(0, num_blocks_start)
+    else:
+        num_blocks_start = 0
+    KV_cache_modifier: tl.constexpr = ".cg" if ALL_DECODE else ""
     # iterate through tiles
-    for j in range(0, num_blocks):
+    for j in range(num_blocks_start, num_blocks):
 
         physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
@@ -190,9 +230,12 @@ def kernel_unified_attention_2d(
                     offs_n[None, :] * stride_k_cache_1)
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset,
-                         mask=dim_mask[:, None],
-                         other=0.0)
+        K_load = tl.load(
+            key_cache_ptr + k_offset,
+            mask=dim_mask[:, None],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -203,9 +246,12 @@ def kernel_unified_attention_2d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset,
-                         mask=dim_mask[None, :],
-                         other=0.0)
+        V_load = tl.load(
+            value_cache_ptr + v_offset,
+            mask=dim_mask[None, :],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -276,9 +322,10 @@ def kernel_unified_attention_2d(
         acc += tl.dot(P.to(V.dtype), V)
 
     # epilogue
-    acc = acc / L[:, None]
+    one_over_L = 1.0 / L[:, None]
+    acc = acc * one_over_L
     if USE_FP8:
-        acc = acc / tl.load(out_scale)
+        acc = acc * tl.load(out_scale)
         acc = tl.clamp(acc, FP8_MIN, FP8_MAX)
 
     output_offset = (query_offset_0[:, None] * output_stride_0 +
@@ -301,6 +348,7 @@ def kernel_unified_attention_3d(
         query_ptr,  # [num_tokens, num_query_heads, head_size]
         key_cache_ptr,  # [num_blks, num_kv_heads, head_size // x, blk_size, x]
         value_cache_ptr,  # [num_blks, num_kv_heads, head_size, blk_size]
+        sink_ptr,  # [num_query_heads]
         block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
         seq_lens_ptr,  # [num_seqs]
         alibi_slopes_ptr,  # [num_query_heads]
@@ -321,6 +369,7 @@ def kernel_unified_attention_3d(
         USE_ALIBI_SLOPES: tl.constexpr,  # bool
         USE_QQ_BIAS: tl.constexpr,  # bool
         USE_SOFTCAP: tl.constexpr,  # bool
+        USE_SINKS: tl.constexpr,  # bool
         SLIDING_WINDOW: tl.constexpr,  # int
         stride_k_cache_0: tl.int64,  # int
         stride_k_cache_1: tl.int64,  # int
@@ -335,10 +384,25 @@ def kernel_unified_attention_3d(
         num_seqs: tl.int32,
         BLOCK_M: tl.constexpr,  # int
         NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
+        ALL_DECODE: tl.constexpr,
 ):
     q_block_global_idx = tl.program_id(0)
     kv_head_idx = tl.program_id(1)
     segm_idx = tl.program_id(2)
+
+    tl.assume(kv_head_idx >= 0)
+    tl.assume(q_block_global_idx >= 0)
+    tl.assume(segm_idx >= 0)
+
+    tl.assume(block_table_stride > 0)
+    tl.assume(query_stride_0 > 0)
+    tl.assume(query_stride_1 > 0)
+    tl.assume(stride_k_cache_0 > 0)
+    tl.assume(stride_k_cache_1 > 0)
+    tl.assume(stride_k_cache_2 > 0)
+    tl.assume(stride_v_cache_0 > 0)
+    tl.assume(stride_v_cache_1 > 0)
+    tl.assume(stride_v_cache_2 > 0)
 
     seq_idx = find_seq_idx(query_start_len_ptr, q_block_global_idx, num_seqs,
                            BLOCK_Q, True)
@@ -383,6 +447,8 @@ def kernel_unified_attention_3d(
     query_mask_0 = tl.where(query_pos < cur_batch_query_len, 1, 0).to(tl.int1)
     query_mask_1 = tl.where(query_offset_1 < num_query_heads, 1, 0).to(tl.int1)
 
+    KV_cache_modifier: tl.constexpr = ".cg" if ALL_DECODE else ""
+
     # Q : (BLOCK_M, HEAD_SIZE_PADDED)
     Q = tl.load(
         query_ptr + query_offset,
@@ -392,7 +458,18 @@ def kernel_unified_attention_3d(
 
     block_table_offset = seq_idx * block_table_stride
 
-    M = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
+    if USE_SINKS:
+        if segm_idx == 0:
+            M = tl.load(
+                sink_ptr + query_offset_1,
+                mask=query_mask_1,
+                other=float("-inf"),
+            ).to(dtype=tl.float32)
+        else:
+            M = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
+    else:
+        M = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
+
     L = tl.full([BLOCK_M], 1.0, dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, HEAD_SIZE_PADDED], dtype=tl.float32)
 
@@ -432,9 +509,12 @@ def kernel_unified_attention_3d(
                     offs_n[None, :] * stride_k_cache_1)
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset,
-                         mask=dim_mask[:, None],
-                         other=0.0)
+        K_load = tl.load(
+            key_cache_ptr + k_offset,
+            mask=dim_mask[:, None],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -445,9 +525,12 @@ def kernel_unified_attention_3d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset,
-                         mask=dim_mask[None, :],
-                         other=0.0)
+        V_load = tl.load(
+            value_cache_ptr + v_offset,
+            mask=dim_mask[None, :],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -577,8 +660,7 @@ def reduce_segments(
     act_num_segments = cdiv_fn(seq_len, blocks_per_segment * BLOCK_SIZE)
     segm_mask = tl.arange(0, NUM_SEGMENTS_PER_SEQ) < tl.full(
         [NUM_SEGMENTS_PER_SEQ], act_num_segments, dtype=tl.int32)
-    dim_mask = tl.where(tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE, 1,
-                        0).to(tl.int1)
+    dim_mask = tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE
 
     # load segment maxima
     segm_offset = (query_token_idx.to(tl.int64) *
@@ -643,8 +725,11 @@ def unified_attention(
     k_descale,
     v_descale,
     alibi_slopes=None,
+    output_scale=None,
     qq_bias=None,
     output_scale=None,
+    # Optional tensor for sinks
+    sinks=None,
 ):
     assert causal, "Only causal attention is supported"
     assert q_descale is None, "Q scales not supported"
@@ -653,9 +738,13 @@ def unified_attention(
     assert q.element_size() >= 2 or block_size >= 32, \
         "Block size must be at least 32 for fp8"
 
+    if sinks is not None:
+        assert sinks.shape[0] == q.shape[1], \
+        "Sinks must be num_query_heads size"
+
     use_alibi_slopes = alibi_slopes is not None
     use_qq_bias = qq_bias is not None
-
+    SLIDING_WINDOW = 1 + window_size[0]
     block_size = v.shape[1]
     num_seqs = len(seqused_k)
     num_query_heads = q.shape[1]
@@ -676,17 +765,48 @@ def unified_attention(
     #   <= floor(\sum_i(query_len[i]) / BLOCK_Q) + num_seqs
     #    = floor(q.shape[0] / BLOCK_Q) + num_seqs
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+    cu_count = current_platform.get_cu_count()
+    target_num_prgms = cu_count * 4
+    num_2d_prgms = total_num_q_blocks * num_kv_heads
+    ALL_DECODE = max_seqlen_q == 1
 
-    # if batch contains a prefill
-    if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
+    # call 2d if sliding window is used
+    if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
+        if ALL_DECODE == False:
+            num_stages_2d = 4
+            num_warps = 4
+        else:
+            num_stages_2d = 3
+            num_warps = 2
+        # make the block_m bigger if we already have enough parallelism
+        if num_2d_prgms >= 2 * target_num_prgms:
+            if num_2d_prgms <= 4 * target_num_prgms:
+                BLOCK_M = 64
+                num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
+            elif num_2d_prgms <= 8 * target_num_prgms:
+                BLOCK_M = 64
+                num_stages_2d = 1 if SLIDING_WINDOW > 0 else 2
+            else:
+                BLOCK_M = 64
+                num_stages_2d = 1
+            BLOCK_Q = BLOCK_M // num_queries_per_kv
+            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+
+        if max_seqlen_q >= 512 and block_size == 64:
+            BLOCK_M = 128
+            num_stages_2d = 1
+            num_warps = 4
+            BLOCK_Q = BLOCK_M // num_queries_per_kv
+            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         kernel_unified_attention_2d[(
-            total_num_q_blocks,
             num_kv_heads,
+            total_num_q_blocks,
         )](
             output_ptr=out,
             query_ptr=q,
             key_cache_ptr=k,
             value_cache_ptr=v,
+            sink_ptr=sinks,
             block_tables_ptr=block_table,
             seq_lens_ptr=seqused_k,
             alibi_slopes_ptr=alibi_slopes,
@@ -710,7 +830,8 @@ def unified_attention(
             USE_ALIBI_SLOPES=use_alibi_slopes,
             USE_QQ_BIAS=use_qq_bias,
             USE_SOFTCAP=(softcap > 0),
-            SLIDING_WINDOW=(1 + window_size[0]),
+            USE_SINKS=(sinks is not None),
+            SLIDING_WINDOW=SLIDING_WINDOW,
             stride_k_cache_0=k.stride(0),
             stride_k_cache_1=k.stride(1),
             stride_k_cache_2=k.stride(2),
@@ -724,11 +845,19 @@ def unified_attention(
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
             USE_FP8=output_scale is not None,
+            ALL_DECODE=ALL_DECODE,
+            waves_per_eu=2,
+            num_warps=num_warps,
+            num_stages=num_stages_2d,
         )
     else:
         # for initial version, NUM_SEGMENTS = 16 is chosen as a default
         # value that showed good performance in tests
-        NUM_SEGMENTS = 16
+        NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
+        NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
+        MIN_SEGMENTS = 16 if block_size <= 16 else 8
+        NUM_SEGMENTS = max(NUM_SEGMENTS, MIN_SEGMENTS)
 
         segm_output = torch.empty(
             q.shape[0],
@@ -761,6 +890,7 @@ def unified_attention(
                 query_ptr=q,
                 key_cache_ptr=k,
                 value_cache_ptr=v,
+                sink_ptr=sinks,
                 block_tables_ptr=block_table,
                 seq_lens_ptr=seqused_k,
                 alibi_slopes_ptr=alibi_slopes,
@@ -781,6 +911,7 @@ def unified_attention(
                 USE_ALIBI_SLOPES=use_alibi_slopes,
                 USE_QQ_BIAS=use_qq_bias,
                 USE_SOFTCAP=(softcap > 0),
+                USE_SINKS=(sinks is not None),
                 SLIDING_WINDOW=(1 + window_size[0]),
                 stride_k_cache_0=k.stride(0),
                 stride_k_cache_1=k.stride(1),
@@ -795,6 +926,7 @@ def unified_attention(
                 num_seqs=num_seqs,
                 BLOCK_M=BLOCK_M,
                 NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
+                ALL_DECODE=ALL_DECODE,
             )
 
         reduce_segments[(q.shape[0], num_query_heads)](

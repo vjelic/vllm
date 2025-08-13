@@ -611,6 +611,7 @@ class FlashInferImpl(AttentionImpl):
         logits_soft_cap: Optional[float] = None,
         attn_type: AttentionType = AttentionType.DECODER,
         kv_sharing_target_layer_name: Optional[int] = None,
+        sinks: Optional[torch.Tensor] = None,
     ) -> None:
         self.num_heads = num_heads
         self.head_size = head_size
@@ -634,6 +635,19 @@ class FlashInferImpl(AttentionImpl):
                                       "encoder/decoder cross-attention "
                                       "are not implemented for "
                                       "FlashInferImpl")
+
+        self.sinks: Optional[torch.Tensor] = None
+        if sinks is not None:
+            if sinks.shape[0] != num_heads:
+                raise ValueError(
+                    "Sinks must have the same number of heads as the number of "
+                    f"heads in the layer. Expected {num_heads}, but got "
+                    f"{sinks.shape[0]}."
+                )
+            if sinks.dtype != torch.float32:
+                raise ValueError("Sinks must be of type float32, but got "
+                                 f"{sinks.dtype}.")
+            self.sinks = sinks
 
     def forward(
         self,
