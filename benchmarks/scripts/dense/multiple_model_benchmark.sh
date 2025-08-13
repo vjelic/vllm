@@ -5,7 +5,7 @@ array_out=(1024)
 #llama3.3 8B FP8 TP1
 MODEL=/home/zejchen/models/amd/Llama-3.1-8B-Instruct-FP8-KV
 TP=1
-Dtype=FP16
+Dtype=bfloat16
 LOG_NAME=llama3.1-8B
 for bs in ${array_bs[@]}; do
     for IN in ${array_in[@]}; do
