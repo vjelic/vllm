@@ -6,6 +6,7 @@ export VLLM_ROCM_USE_AITER=1
 export VLLM_ROCM_USE_AITER_MHA=0 
 export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1 
 export VLLM_DISABLE_COMPILE_CACHE=1 
+#ROCR_VISIBLE_DEVICES=1
 
 MODEL=$1
 TP=$2
@@ -20,6 +21,7 @@ vllm serve $MODEL \
     --max-seq-len-to-capture 131072 \
     --max-num-batched-tokens 131072 \
     --compilation-config '{"full_cuda_graph": true}' \
+    --no-enable-prefix-caching \
     --dtype $DTYPE \
     --port 1119
 
