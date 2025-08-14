@@ -5,10 +5,9 @@ NUM=$2
 IN=$3
 OUT=$4
 
-python3 ../../benchmark_serving.py 
-    --base-url http://0.0.0.0:1119 \
-    --model $MODEL \
+python3 ../../benchmark_serving.py \
     --backend vllm \
+    --model $MODEL \
     --dataset-name random \
     --num-prompts ${NUM} \
     --random-input-len ${IN} \
