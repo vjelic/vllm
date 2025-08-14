@@ -9,7 +9,10 @@ NUM=$(expr $CONCUR \* 10)
 result_filename=CON${CONCUR}_IN${IN}_OUT${OUT}.json
 result_log=CON${CONCUR}_IN${IN}_OUT${OUT}.log
 
-mkdir bench_results
+if [ ! -d "bench_results" ]; then
+    mkdir bench_results
+fi
+
 python3 ../../benchmark_serving.py \
     --backend vllm \
     --host 0.0.0.0 \
