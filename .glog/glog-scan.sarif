@@ -1,0 +1,1012 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Glog.AI",
+          "organization": "Glog.AI",
+          "fullName": "Glog, Making software more secure",
+          "version": "1.0.0",
+          "semanticVersion": "1.0.0",
+          "informationUri": "https://www.glog.ai",
+          "rules": [
+            {
+              "id": "glog-d6dd3862-2496-4b40-8e10-a7356b304bcc",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nA Potential Interface Binding Vulnerability in Python occurs when a service is started or bound to an insecure interface, such as \"0.0.0.0\". This can expose the service to unauthorized access from any remote address, leading to potential security risks such as data breaches or remote code execution.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to bind services to secure interfaces, such as \"127.0.0.1\" for local access only. If remote access is required, ensure that appropriate access controls and authentication mechanisms are in place.\n\n## Source Code Fix Recommendation\n\nInstead of binding the service to \"0.0.0.0\", bind it to \"127.0.0.1\" or another secure interface. For example:\n\n```python\nt = start_service_discovery(\"127.0.0.1\", 30001)\n```\n\n## Library Dependencies\n\nThe specific library dependencies required by the code example would depend on the implementation of the `start_service_discovery` function. However, it's likely that the `socket` library would be required for network communication.\n\n## References\n\n- [CWE-923: Improper Restriction of Communication Channel to Intended Endpoints](https://cwe.mitre.org/data/definitions/923.html)\n\nPlease note that the links provided are active and accessible to anonymous users at the time of writing."
+              },
+              "properties": {
+                "tags": [
+                  "B104"
+                ]
+              }
+            },
+            {
+              "id": "glog-13c5ce29-b41c-487d-8853-eef9cac2ebd8",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\n\"All Interfaces Binding Vulnerability\" in Python refers to a situation where a web application is configured to listen on all available network interfaces (0.0.0.0). This means that the application is accessible from any IP address that can route to the host, potentially exposing the application to unwanted network traffic, and making it a target for exploitation.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, the application should be configured to listen only on the network interfaces it needs to operate. This is typically the localhost interface for development environments, or a specific, known IP address or addresses in production environments.\n\n## Source Code Fix Recommendation\n\nInstead of binding to all interfaces, bind to localhost (127.0.0.1) for development or a specific IP for production:\n\n```python\napp.run(host=\"127.0.0.1\", port=10001)\n```\n\n## Library Dependencies\n\nThe code example provided requires the Flask library in Python.\n\n```python\nfrom flask import Flask\napp = Flask(__name__)\n```\n\n## References\n\n- [CWE-933: OWASP Top Ten 2013 Category A5 - Security Misconfiguration](https://cwe.mitre.org/data/definitions/933.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B104"
+                ]
+              }
+            },
+            {
+              "id": "glog-debd86bd-1135-4ca3-a002-ba2e38b8cf5e",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nIn Python, the `eval()` function is used to evaluate the string expression and execute it. This function can be a security risk if it is used to evaluate a string that is provided by an untrusted user, as it can be used to execute arbitrary Python code. This vulnerability is known as \"Potential Insecure Function Use - Consider Safer ast.literal_eval.\"\n\nThe `ast.literal_eval()` function, on the other hand, safely parses and evaluates an expression for a Python literal structure by raising an exception if the input isn't a valid Python datatype, so it can't be used to execute arbitrary code.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, avoid using the `eval()` function whenever possible, especially with user-provided strings. Instead, use `ast.literal_eval()` for safely evaluating strings containing Python literals.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\nresult = eval(expression)\n```\n\nUse:\n\n```python\nimport ast\n\nresult = ast.literal_eval(expression)\n```\n\n## Library Dependencies\n\nThe code example requires the `ast` module, which is part of the Python Standard Library, so no additional library dependencies are needed.\n\n## References\n\n- [CWE-94: Improper Control of Generation of Code ('Code Injection')](https://cwe.mitre.org/data/definitions/94.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B307"
+                ]
+              }
+            },
+            {
+              "id": "glog-dd56b137-fb56-431e-a753-a10bba8b5821",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\n\"Vulnerability in URL Audit for Permitted Schemes\" is a security vulnerability in Python programming language that occurs when the application does not properly validate the schemes of the URLs. This can lead to various security issues such as remote file inclusion (RFI), local file inclusion (LFI), and server-side request forgery (SSRF). An attacker can exploit this vulnerability to read local files, interact with internal network services, or perform other malicious activities.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to:\n\n- Always validate the URL schemes before using them. Only allow the schemes that are necessary for your application.\n- Use a safe API that can handle the URL schemes properly.\n- Use a web application firewall (WAF) to block malicious requests.\n\n## Source Code Fix Recommendation\n\nHere is a simple way to validate the URL scheme in Python:\n\n```python\nfrom urllib.parse import urlparse\nfrom urllib.request import urlopen\n\ndef safe_urlopen(url):\n    scheme = urlparse(url).scheme\n    if scheme not in ['http', 'https']:\n        raise ValueError('Invalid URL scheme')\n    return urlopen(url)\n```\n\nIn this code, we first parse the URL and get its scheme. If the scheme is not 'http' or 'https', we raise a ValueError. Otherwise, we open the URL.\n\n## Library Dependencies\n\nThe code example requires the following Python standard libraries:\n\n- `urllib.parse`\n- `urllib.request`\n\n## References\n\n- [OWASP Server Side Request Forgery](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery)\n- [CWE-918: Server-Side Request Forgery (SSRF)](https://cwe.mitre.org/data/definitions/918.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B310"
+                ]
+              }
+            },
+            {
+              "id": "glog-ea4d69eb-237a-47a6-975f-3c654dd077f8",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle and Related Modules is a critical security vulnerability in Python. The `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted or unauthenticated source. The reason is that the `pickle` module is capable of executing arbitrary code during deserialization. If an attacker can control the input to `pickle.load()`, they can create a payload that executes arbitrary code when it is deserialized, leading to a Remote Code Execution (RCE) vulnerability.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, you should avoid using `pickle` or similar modules (like `cPickle`, `dill`, etc.) to deserialize data from untrusted sources. Instead, use safer alternatives like `json` or `yaml.safe_load()` for deserialization. \n\n## Source Code Fix Recommendation\n\nReplace the `pickle.load()` function with a safer alternative. For example, if you are dealing with JSON data, you can use the `json` module:\n\n```python\nimport json\n\n# ...\n\ndata = json.load(f)\n```\n\n## Library Dependencies\n\nThe code example requires the `pickle` module, which is a built-in module in Python, so no additional library dependencies are needed.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)\n\nPlease note that the links provided are active and accessible for anonymous users at the time of writing this report."
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-b960a4e4-c324-47dd-81d9-ade1a7df81f4",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nIn Python, the `eval()` function is used to evaluate the string expression and execute it. This function can be a security risk if it is used to evaluate a string that is provided by an untrusted user, as it can be used to execute arbitrary Python code. This vulnerability is known as \"Potential Insecure Function Use - Consider Safer ast.literal_eval.\"\n\nThe `ast.literal_eval()` function, on the other hand, safely parses and evaluates an expression for a Python literal structure by raising an exception if the input isn't a valid Python datatype, so it can't be used to execute arbitrary code.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, avoid using the `eval()` function whenever possible, especially with user-provided strings. Instead, use `ast.literal_eval()` for safely evaluating strings containing Python literals.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\nresult = eval(expression)\n```\n\nUse:\n\n```python\nimport ast\n\nresult = ast.literal_eval(expression)\n```\n\n## Library Dependencies\n\nThe code example requires the `ast` module, which is part of the Python Standard Library, so no additional library dependencies are needed.\n\n## References\n\n- [CWE-94: Improper Control of Generation of Code ('Code Injection')](https://cwe.mitre.org/data/definitions/94.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B307"
+                ]
+              }
+            },
+            {
+              "id": "glog-40439d90-be58-4084-bb71-c90f1a99f2cc",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle and Related Modules is a critical security vulnerability in Python. The `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted or unauthenticated source. The `pickle.loads()` function can execute arbitrary code during deserialization, which can lead to serious security vulnerabilities such as remote code execution (RCE).\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, avoid using `pickle` or similar modules (like `cPickle`, `dill`, etc.) to deserialize data from untrusted sources. Instead, use safer alternatives like `json` or `yaml` for serialization and deserialization of data. These modules do not execute arbitrary code during deserialization.\n\n## Source Code Fix Recommendation\n\nReplace the `pickle` module with a safer alternative like `json`. Here is how you can do it:\n\n```python\nimport json\n\n# Assuming `message.buffer` is a JSON string\nrequest_outputs = json.loads(message.buffer)\n```\n\n## Library Dependencies\n\nThe code example requires the `pickle` module, which is a built-in module in Python, so no additional library dependencies are needed.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-8ddf858e-cac1-4b80-ab25-32ab3f6ce280",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nThe `urlopen(url)` function in Python is used to open a network object denoted by a URL for reading. If the URL is not validated properly, it can lead to a vulnerability where an attacker can pass malicious URLs, potentially leading to various attacks such as SSRF (Server Side Request Forgery), local file inclusion, etc. This vulnerability is known as \"Vulnerability in URL Audit for Permitted Schemes\".\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to validate the URL before passing it to the `urlopen(url)` function. This validation should include checking the scheme of the URL (http, https, ftp, etc.) and ensuring it is in the list of permitted schemes. Additionally, the URL should be checked for any potentially malicious content.\n\n## Source Code Fix Recommendation\n\nHere is a simple way to validate the URL scheme before passing it to `urlopen(url)`:\n\n```python\nfrom urllib.parse import urlparse\nfrom urllib.request import urlopen\n\ndef safe_urlopen(url):\n    parsed_url = urlparse(url)\n    if parsed_url.scheme not in ['http', 'https']:\n        raise ValueError('Invalid URL scheme')\n    return urlopen(url)\n```\n\nIn this code, the `urlparse(url)` function is used to parse the URL and extract its scheme. If the scheme is not in the list of permitted schemes (`http` and `https`), a `ValueError` is raised.\n\n## Library Dependencies\n\nThe code example requires the following Python standard library modules:\n\n- `urllib.parse`\n- `urllib.request`\n\n## References\n\n- [CWE-918: Server-Side Request Forgery (SSRF)](https://cwe.mitre.org/data/definitions/918.html)\n- [CWE-23: Relative Path Traversal](https://cwe.mitre.org/data/definitions/23.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B310"
+                ]
+              }
+            },
+            {
+              "id": "glog-c455b405-6f4e-4547-800e-0876e810b324",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle Modules is a critical security vulnerability in Python. The `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that's coming from an untrusted source as it could lead to arbitrary code execution. If an attacker can supply a malicious payload to the `pickle.loads()` function, they can execute arbitrary Python commands, leading to a serious security breach.\n\n## Mitigation Advice\n\n- Avoid using `pickle` to deserialize untrusted data. If you must use serialization, consider using safer formats such as JSON.\n- If you need to use `pickle` for its ability to serialize custom classes, consider signing your serialized data and verifying the signature before deserializing it.\n- Use cryptographic methods to ensure the integrity and authenticity of the serialized data before deserializing it.\n\n## Source Code Fix Recommendation\n\nInstead of using `pickle`, use `json` for deserialization:\n\n```python\nimport json\n\nresponse = json.loads(frame.buffer)\n```\n\n## Library Dependencies\n\nThe code example requires the `pickle` library, which is included in the Python Standard Library, so no additional dependencies are needed.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-d6070361-d0d2-4e15-93d8-8111b98cd1bb",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nThe vulnerability in question is related to the deserialization of untrusted data using the `pickle` module in Python. The `pickle` module is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted or unauthenticated source. This is because `pickle` is capable of executing arbitrary code during deserialization, which can lead to serious security issues such as remote code execution (RCE).\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, you should avoid deserializing data from untrusted sources with `pickle`. If you need to serialize and deserialize data, consider using safer alternatives such as `json` or `yaml.safe_load()`. These modules do not execute arbitrary code during deserialization.\n\n## Source Code Fix Recommendation\n\nInstead of using `pickle.loads()`, you can use `json.loads()` or `yaml.safe_load()`. Here is an example of how you can do this:\n\n```python\nimport json\n# import yaml\n\n# Deserialize JSON data\nrequest = json.loads(frames[0].buffer)\n\n# Or deserialize YAML data\n# request = yaml.safe_load(frames[0].buffer)\n```\n\n## Library Dependencies\n\nThe code example requires the following library dependencies:\n\n- `pickle` (built-in with Python)\n- `json` (built-in with Python)\n- `yaml` (can be installed with `pip install pyyaml`)\n\n## OWASP and CWE Resources\n\n- [OWASP Deserialization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-a6f49627-a7d4-4525-a96f-affcb24025ae",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nThe vulnerability \"Vulnerability in URL Audit for Permitted Schemes\" in Python refers to the potential for an attacker to exploit the `urlretrieve` function in the `urllib` library to access, modify, or delete files on the server. This is possible if the application does not properly validate the URL scheme (e.g., http, https, ftp) before passing it to the `urlretrieve` function. An attacker could use a file scheme (e.g., file://) to access local files on the server.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to:\n\n1. Always validate the URL scheme before passing it to the `urlretrieve` function. Only allow safe schemes such as http and https.\n2. Use a secure function that does not allow file scheme if possible.\n3. Limit the permissions of the application to minimize the potential damage if an attacker manages to exploit this vulnerability.\n\n## Source Code Fix Recommendation\n\nHere is a simple fix for the vulnerability. Before calling `urlretrieve`, check if the scheme of the URL is in a list of permitted schemes.\n\n```python\nfrom urllib.parse import urlparse\nimport urllib.request\n\n# Define permitted schemes\npermitted_schemes = ['http', 'https']\n\n# Parse the URL\nparsed_url = urlparse(wheel_location)\n\n# Check if the scheme is permitted\nif parsed_url.scheme not in permitted_schemes:\n    raise ValueError('Invalid URL scheme')\n\n# If the scheme is permitted, proceed with urlretrieve\nurllib.request.urlretrieve(wheel_location, filename = wheel_path)\n```\n\n## Library Dependencies\n\nThe code example requires the following Python standard library:\n\n- `urllib`\n\n## References\n\n- [CWE-918: Server-Side Request Forgery (SSRF)](https://cwe.mitre.org/data/definitions/918.html)\n\nPlease note that the links provided are accessible to anonymous users at the time of writing this report."
+              },
+              "properties": {
+                "tags": [
+                  "B310"
+                ]
+              }
+            },
+            {
+              "id": "glog-2ba20137-81b2-4366-b08a-b514f46892cf",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\n\"All Interfaces Binding Vulnerability\" in Python refers to a situation where a server is set up to listen on all available network interfaces (0.0.0.0), which can expose the server to unnecessary risk. This can potentially allow unauthorized users to interact with the server, leading to a variety of security issues such as data breaches, denial of service attacks, and remote code execution.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to bind the server to the localhost (127.0.0.1) or a specific IP address that is intended for use. This restricts the server's exposure to the local machine or the specified network, reducing the potential attack surface.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\naddr) else addr or \"0.0.0.0\"\n```\n\nUse:\n\n```python\naddr) else addr or \"127.0.0.1\"\n```\n\nOr bind to a specific IP address:\n\n```python\naddr) else addr or \"192.168.1.1\"  # replace with your specific IP\n```\n\n## Library Dependencies\n\nThe code snippet provided does not indicate any specific library dependencies.\n\n## References\n\n- [CWE-284: Improper Access Control](https://cwe.mitre.org/data/definitions/284.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B104"
+                ]
+              }
+            },
+            {
+              "id": "glog-055793e9-b91a-4a74-a045-e4da8fcce04d",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle and Related Modules is a critical security vulnerability in Python. The `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted or unauthenticated source. This is because the `pickle` module is capable of executing arbitrary code during deserialization, which can lead to serious security issues such as remote code execution (RCE).\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, you should avoid using `pickle` or similar modules (like `cPickle`, `dill`, etc.) to deserialize data from untrusted sources. Instead, use safer alternatives like `json` or `yaml` for serialization and deserialization of data. These modules do not execute arbitrary code during deserialization.\n\n## Source Code Fix Recommendation\n\nReplace the `pickle` module with a safer alternative like `json`. Here is how you can do it:\n\n```python\nimport json\n\n# Serialize\ndata = json.dumps(obj)\n\n# Deserialize\nobj = json.loads(data)\n```\n\n## Library Dependencies\n\nThe code example requires the `pickle` module, which is a built-in module in Python and does not need to be installed separately.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-c1a1a1ad-9600-477a-ac4c-91e44cc1ddf6",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle Modules is a critical security vulnerability in Python programming language. The vulnerability occurs when an application deserializes data from an untrusted source without proper validation. The `pickle` module in Python is used for serializing and deserializing objects, which can be exploited by an attacker to execute arbitrary code, if the data being deserialized is from an untrusted source.\n\nIn the given code example, the application is deserializing data from a message buffer without validating the source or content of the data:\n\n```python\nrequest: RPCStartupRequest = pickle.loads(message.buffer)\n```\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to avoid using `pickle` module to deserialize data from untrusted sources. If it is necessary to use `pickle`, ensure that the data is coming from a trusted source and is properly validated before deserialization.\n\n## Source Code Fix Recommendation\n\nA safer alternative to `pickle` is to use built-in Python libraries like `json` for serialization and deserialization. Here is how you can modify the given code example:\n\n```python\nimport json\n\nrequest: RPCStartupRequest = json.loads(message.buffer)\n```\n\n## Library Dependencies\n\nThe given code example requires the `pickle` module, which is a built-in Python library, so no additional library dependencies are required.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)\n\nPlease note that the links provided are active and accessible to anonymous users at the time of writing this report."
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-984e2fee-4904-44e6-8466-670a29b0f90e",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle and Related Modules is a critical security vulnerability in Python. The `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted or unauthenticated source. The reason is that the `pickle` module is capable of executing arbitrary code during deserialization. If an attacker can control the input to `pickle.load()`, they can create a payload that executes arbitrary code when it is deserialized, leading to a Remote Code Execution (RCE) vulnerability.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, you should avoid deserializing data from untrusted sources. If you must deserialize data, use a safe serialization format like JSON or XML. If you must use `pickle`, ensure that the data is coming from a trusted source and that it is properly authenticated and encrypted.\n\n## Source Code Fix Recommendation\n\nInstead of using `pickle.load()`, you can use `json.load()` which is a safer alternative. Here is how you can do it:\n\n```python\nimport json\n\ndef load_data(f):\n    return json.load(f)\n```\n\n## Library Dependencies\n\nThe code example requires the `pickle` module which is a built-in module in Python, so no additional library dependencies are needed.\n\n## References\n\n- [OWASP Python Security - Deserialization](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html#python)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-ef524373-ec1e-4740-8ebd-ce24d803d905",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\n\"All Interfaces Binding Vulnerability\" in Python refers to a situation where a server is set up to listen on all available network interfaces (0.0.0.0), which can expose the server to unnecessary risks. This can potentially allow unauthorized users to exploit the server, especially if there are vulnerabilities in the server software.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to bind the server to localhost (127.0.0.1) or a specific IP address that is intended for the server. This will limit the exposure of the server to the outside world and reduce the attack surface.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\ndefault=\"0.0.0.0\"\n```\n\nUse:\n\n```python\ndefault=\"127.0.0.1\"\n```\n\nOr:\n\n```python\ndefault=\"<specific-ip-address>\"\n```\n\nReplace `<specific-ip-address>` with the actual IP address that you want the server to listen on.\n\n## Library Dependencies\n\nThere are no specific library dependencies for this code example as it is a configuration setting.\n\n## References\n\n- [CWE-284: Improper Access Control](https://cwe.mitre.org/data/definitions/284.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B104"
+                ]
+              }
+            },
+            {
+              "id": "glog-1a4ec4ab-60fb-4b97-8c4d-bb7f33c32ba9",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nIn Python, the `eval()` function is used to evaluate the Python expression which is passed to it as a string. However, it is considered insecure because it allows the execution of arbitrary Python code. This can lead to serious security issues if an attacker is able to pass a malicious string to `eval()`, leading to code injection attacks.\n\nThe `ast.literal_eval()` function, on the other hand, safely parses and evaluates an expression for Python literals (strings, bytes, numbers, tuples, lists, dicts, sets, booleans, and None). It does not evaluate complex expressions, such as function calls or operations, making it safer than `eval()`.\n\n## Mitigation Advice\n\nAvoid using `eval()` whenever possible. If you need to evaluate simple Python data types, use `ast.literal_eval()` instead. Always validate and sanitize input before passing it to these functions.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\nconverted_value = eval(param_value)\n```\n\nUse:\n\n```python\nimport ast\n\nconverted_value = ast.literal_eval(param_value)\n```\n\n## Library Dependencies\n\nThe `ast` module is part of the Python Standard Library, so no additional library dependencies are required.\n\n## References\n\n- [Common Weakness Enumeration (CWE-94): Improper Control of Generation of Code ('Code Injection')](https://cwe.mitre.org/data/definitions/94.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B307"
+                ]
+              }
+            },
+            {
+              "id": "glog-c218f56d-7d90-4652-af64-822151431ae7",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nThe \"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\" is a security vulnerability in Python programming language that occurs when an application deserializes data from an untrusted source without proper validation. This can lead to arbitrary code execution, denial of service, or other security vulnerabilities.\n\nThe `pickle` module in Python is used for serializing and deserializing Python object structures. However, it is not safe to deserialize data that comes from an untrusted source as it could lead to execution of arbitrary code during deserialization.\n\nIn the provided code example, the application is reading data from the standard input and deserializing it using `pickle.loads()`. If an attacker can control the input, they can craft a malicious payload that leads to arbitrary code execution when it is deserialized.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, you should avoid deserializing data from untrusted sources. If you must deserialize data, use a safe serialization format like JSON or XML, and validate the data before deserializing it.\n\n## Source Code Fix Recommendation\n\nInstead of using `pickle`, you can use `json` module which is safer. Here is how you can modify the code:\n\n```python\nimport json\nimport sys\n\nfn, output_file = json.loads(sys.stdin.buffer.read())\n```\n\n## Library Dependencies\n\nThe code example requires the following Python standard library modules:\n\n- `pickle`\n- `sys`\n\n## References\n\n- [OWASP Deserialization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            },
+            {
+              "id": "glog-d84f3deb-8dcf-4db1-a5d0-322685d5267e",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\n\"All Interfaces Binding Vulnerability\" in Python refers to a situation where a server is configured to listen on all available network interfaces (0.0.0.0), which can expose the server to unnecessary risk. This configuration allows connections from any remote IP address, which can lead to potential unauthorized access or attacks.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to bind the server to a specific IP address or localhost (127.0.0.1) if the server is only intended for local use. This restricts the access to the server and reduces the attack surface.\n\n## Source Code Fix Recommendation\n\nInstead of:\n\n```python\nreturn \"0.0.0.0\"\n```\n\nYou should bind to a specific IP address or localhost:\n\n```python\nreturn \"127.0.0.1\"\n```\n\nOr:\n\n```python\nreturn \"<specific-ip-address>\"\n```\n\n## Library Dependencies\n\nThe code example provided does not require any specific library dependencies to execute properly.\n\n## References\n\n- [CWE-284: Improper Access Control](https://cwe.mitre.org/data/definitions/284.html)\n\nPlease note that the links provided are active and accessible for anonymous users at the time of writing this report."
+              },
+              "properties": {
+                "tags": [
+                  "B104"
+                ]
+              }
+            },
+            {
+              "id": "glog-66dcd0b0-843e-41c4-88fc-554daecce4cf",
+              "help": {
+                "text": "",
+                "markdown": "## Description\n\nUntrusted Data Deserialization Vulnerability in Pickle Modules is a critical security vulnerability in Python programming language. The vulnerability occurs when an application deserializes data from an untrusted source without proper validation. The `pickle` module in Python is used for serializing and deserializing objects, which can be exploited by an attacker to execute arbitrary code, if the data being deserialized is from an untrusted source.\n\n## Mitigation Advice\n\nTo mitigate this vulnerability, it is recommended to avoid deserializing data from untrusted sources. If it is necessary to deserialize data, use safe, built-in Python libraries like `json` or `yaml` that do not allow arbitrary code execution. Always validate and sanitize input data before processing it.\n\n## Source Code Fix Recommendation\n\nInstead of using `pickle.loads(data)`, use `json.loads(data)` or `yaml.safe_load(data)`. Here is an example:\n\n```python\nimport json\n\ndef deserialize(data):\n    return json.loads(data)\n```\n\n## Library Dependencies\n\nThe code example requires the `json` library, which is a built-in library in Python and does not need to be installed separately.\n\n## References\n\n- [OWASP Deserialization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html)\n- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)"
+              },
+              "properties": {
+                "tags": [
+                  "B301"
+                ]
+              }
+            }
+          ],
+          "language": "en-US",
+          "contents": [
+            "localizedData",
+            "nonLocalizedData"
+          ],
+          "isComprehensive": false
+        }
+      },
+      "language": "en-US",
+      "results": [
+        {
+          "ruleId": "glog-d6dd3862-2496-4b40-8e10-a7356b304bcc",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Potential Interface Binding Vulnerability"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "examples/online_serving/disaggregated_serving_p2p_nccl_xpyd/disagg_proxy_p2p_nccl_xpyd.py"
+                },
+                "region": {
+                  "startLine": 185,
+                  "startColumn": 33,
+                  "endLine": 185,
+                  "endColumn": 42,
+                  "snippet": {
+                    "text": "    t = start_service_discovery(\"0.0.0.0\", 30001)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 184,
+                  "endLine": 186,
+                  "snippet": {
+                    "text": "if __name__ == \"__main__\":\n    t = start_service_discovery(\"0.0.0.0\", 30001)\n    app.run(host=\"0.0.0.0\", port=10001)\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "glog-13c5ce29-b41c-487d-8853-eef9cac2ebd8",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "All Interfaces Binding Vulnerability"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "examples/online_serving/disaggregated_serving_p2p_nccl_xpyd/disagg_proxy_p2p_nccl_xpyd.py"
+                },
+                "region": {
+                  "startLine": 186,
+                  "startColumn": 18,
+                  "endLine": 186,
+                  "endColumn": 27,
+                  "snippet": {
+                    "text": "    app.run(host=\"0.0.0.0\", port=10001)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 185,
+                  "endLine": 187,
+                  "snippet": {
+                    "text": "    t = start_service_discovery(\"0.0.0.0\", 30001)\n    app.run(host=\"0.0.0.0\", port=10001)\n    t.join()\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "glog-debd86bd-1135-4ca3-a002-ba2e38b8cf5e",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Potential Insecure Function Use - Consider Safer ast.literal_eval."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "examples/online_serving/openai_chat_completion_client_with_tools_xlam_streaming.py"
+                },
+                "region": {
+                  "startLine": 34,
+                  "startColumn": 18,
+                  "endLine": 34,
+                  "endColumn": 34,
+                  "snippet": {
+                    "text": "        result = eval(expression)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 33,
+                  "endLine": 35,
+                  "snippet": {
+                    "text": "    try:\n        result = eval(expression)\n        return f\"The result of {expression} is {result}\"\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-dd56b137-fb56-431e-a753-a10bba8b5821",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Vulnerability in URL Audit for Permitted Schemes\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "examples/offline_inference/qwen_1m.py"
+                },
+                "region": {
+                  "startLine": 20,
+                  "startColumn": 10,
+                  "endLine": 21,
+                  "endColumn": 6,
+                  "snippet": {
+                    "text": "    with urlopen(\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 19,
+                  "endLine": 24,
+                  "snippet": {
+                    "text": "\n    with urlopen(\n        \"https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-1M/test-data/600k.txt\",\n        timeout=5,\n    ) as response:\n        prompt = response.read().decode(\"utf-8\")\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-ea4d69eb-237a-47a6-975f-3c654dd077f8",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "benchmarks/kernels/graph_machete_bench.py"
+                },
+                "region": {
+                  "startLine": 26,
+                  "startColumn": 16,
+                  "endLine": 26,
+                  "endColumn": 30,
+                  "snippet": {
+                    "text": "        data = pickle.load(f)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 25,
+                  "endLine": 27,
+                  "snippet": {
+                    "text": "    with open(args.filename, \"rb\") as f:\n        data = pickle.load(f)\n        raw_results: list[TMeasurement] = data[\"results\"]\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-b960a4e4-c324-47dd-81d9-ade1a7df81f4",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Potential Insecure Function Use - Consider Safer ast.literal_eval."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "examples/online_serving/openai_chat_completion_client_with_tools_xlam.py"
+                },
+                "region": {
+                  "startLine": 32,
+                  "startColumn": 18,
+                  "endLine": 32,
+                  "endColumn": 34,
+                  "snippet": {
+                    "text": "        result = eval(expression)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 31,
+                  "endLine": 33,
+                  "snippet": {
+                    "text": "    try:\n        result = eval(expression)\n        return f\"The result of {expression} is {result}\"\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-40439d90-be58-4084-bb71-c90f1a99f2cc",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/engine/multiprocessing/client.py"
+                },
+                "region": {
+                  "startLine": 206,
+                  "startColumn": 35,
+                  "endLine": 206,
+                  "endColumn": 63,
+                  "snippet": {
+                    "text": "                request_outputs = pickle.loads(message.buffer)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 205,
+                  "endLine": 207,
+                  "snippet": {
+                    "text": "                message: Frame = await self.output_socket.recv(copy=False)\n                request_outputs = pickle.loads(message.buffer)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-8ddf858e-cac1-4b80-ab25-32ab3f6ce280",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Vulnerability in URL Audit for Permitted Schemes\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "setup.py"
+                },
+                "region": {
+                  "startLine": 78,
+                  "startColumn": 14,
+                  "endLine": 78,
+                  "endColumn": 26,
+                  "snippet": {
+                    "text": "        with urlopen(url) as f:\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 77,
+                  "endLine": 79,
+                  "snippet": {
+                    "text": "    try:\n        with urlopen(url) as f:\n            status = f.status\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-c455b405-6f4e-4547-800e-0876e810b324",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/engine/multiprocessing/client.py"
+                },
+                "region": {
+                  "startLine": 368,
+                  "startColumn": 20,
+                  "endLine": 368,
+                  "endColumn": 46,
+                  "snippet": {
+                    "text": "        response = pickle.loads(frame.buffer)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 367,
+                  "endLine": 369,
+                  "snippet": {
+                    "text": "        frame = await socket.recv(copy=False)\n        response = pickle.loads(frame.buffer)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-d6070361-d0d2-4e15-93d8-8111b98cd1bb",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/engine/multiprocessing/engine.py"
+                },
+                "region": {
+                  "startLine": 259,
+                  "startColumn": 27,
+                  "endLine": 259,
+                  "endColumn": 57,
+                  "snippet": {
+                    "text": "                request = pickle.loads(frames[0].buffer)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 258,
+                  "endLine": 260,
+                  "snippet": {
+                    "text": "                frames = self.input_socket.recv_multipart(copy=False)\n                request = pickle.loads(frames[0].buffer)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-a6f49627-a7d4-4525-a96f-affcb24025ae",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Vulnerability in URL Audit for Permitted Schemes\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "setup.py"
+                },
+                "region": {
+                  "startLine": 366,
+                  "startColumn": 17,
+                  "endLine": 366,
+                  "endColumn": 65,
+                  "snippet": {
+                    "text": "                urlretrieve(wheel_location, filename=wheel_path)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 365,
+                  "endLine": 367,
+                  "snippet": {
+                    "text": "            try:\n                urlretrieve(wheel_location, filename=wheel_path)\n            except Exception as e:\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-2ba20137-81b2-4366-b08a-b514f46892cf",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"All Interfaces Binding Vulnerability\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/entrypoints/openai/api_server.py"
+                },
+                "region": {
+                  "startLine": 1801,
+                  "startColumn": 28,
+                  "endLine": 1801,
+                  "endColumn": 37,
+                  "snippet": {
+                    "text": "        addr) else addr or \"0.0.0.0\"\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 1800,
+                  "endLine": 1802,
+                  "snippet": {
+                    "text": "    host_part = f\"[{addr}]\" if is_valid_ipv6_address(\n        addr) else addr or \"0.0.0.0\"\n    listen_address = f\"http{'s' if is_ssl else ''}://{host_part}:{port}\"\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "glog-055793e9-b91a-4a74-a045-e4da8fcce04d",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/engine/multiprocessing/client.py"
+                },
+                "region": {
+                  "startLine": 329,
+                  "startColumn": 16,
+                  "endLine": 329,
+                  "endColumn": 42,
+                  "snippet": {
+                    "text": "        data = pickle.loads(frame.buffer)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 328,
+                  "endLine": 330,
+                  "snippet": {
+                    "text": "        frame = await socket.recv(copy=False)\n        data = pickle.loads(frame.buffer)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-c1a1a1ad-9600-477a-ac4c-91e44cc1ddf6",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Untrusted Data Deserialization Vulnerability in Pickle Modules"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/engine/multiprocessing/engine.py"
+                },
+                "region": {
+                  "startLine": 195,
+                  "startColumn": 46,
+                  "endLine": 195,
+                  "endColumn": 74,
+                  "snippet": {
+                    "text": "                request: RPCStartupRequest = pickle.loads(message.buffer)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 194,
+                  "endLine": 196,
+                  "snippet": {
+                    "text": "                identity, message = socket.recv_multipart(copy=False)\n                request: RPCStartupRequest = pickle.loads(message.buffer)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-984e2fee-4904-44e6-8466-670a29b0f90e",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/model_executor/models/registry.py"
+                },
+                "region": {
+                  "startLine": 827,
+                  "startColumn": 20,
+                  "endLine": 827,
+                  "endColumn": 34,
+                  "snippet": {
+                    "text": "            return pickle.load(f)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 826,
+                  "endLine": 828,
+                  "snippet": {
+                    "text": "        with open(output_filepath, \"rb\") as f:\n            return pickle.load(f)\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-ef524373-ec1e-4740-8ebd-ce24d803d905",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"All Interfaces Binding Vulnerability\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/entrypoints/openai/run_batch.py"
+                },
+                "region": {
+                  "startLine": 90,
+                  "startColumn": 17,
+                  "endLine": 90,
+                  "endColumn": 26,
+                  "snippet": {
+                    "text": "        default=\"0.0.0.0\",\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 89,
+                  "endLine": 91,
+                  "snippet": {
+                    "text": "        type=str,\n        default=\"0.0.0.0\",\n        help=\"URL to the Prometheus metrics server \"\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "glog-1a4ec4ab-60fb-4b97-8c4d-bb7f33c32ba9",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Potential Insecure Function Use - Consider Safer ast.literal_eval."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/entrypoints/openai/tool_parsers/qwen3coder_tool_parser.py"
+                },
+                "region": {
+                  "startLine": 212,
+                  "startColumn": 39,
+                  "endLine": 212,
+                  "endColumn": 56,
+                  "snippet": {
+                    "text": "                    converted_value = eval(param_value)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 211,
+                  "endLine": 213,
+                  "snippet": {
+                    "text": "                try:\n                    converted_value = eval(param_value)\n                    return converted_value\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-c218f56d-7d90-4652-af64-822151431ae7",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "\"Untrusted Data Deserialization Vulnerability in Pickle and Related Modules\""
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/model_executor/models/registry.py"
+                },
+                "region": {
+                  "startLine": 835,
+                  "startColumn": 23,
+                  "endLine": 835,
+                  "endColumn": 60,
+                  "snippet": {
+                    "text": "    fn, output_file = pickle.loads(sys.stdin.buffer.read())\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 834,
+                  "endLine": 836,
+                  "snippet": {
+                    "text": "\n    fn, output_file = pickle.loads(sys.stdin.buffer.read())\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        },
+        {
+          "ruleId": "glog-d84f3deb-8dcf-4db1-a5d0-322685d5267e",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "All Interfaces Binding Vulnerability"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/utils/__init__.py"
+                },
+                "region": {
+                  "startLine": 810,
+                  "startColumn": 12,
+                  "endLine": 810,
+                  "endColumn": 21,
+                  "snippet": {
+                    "text": "    return \"0.0.0.0\"\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 809,
+                  "endLine": 811,
+                  "snippet": {
+                    "text": "        stacklevel=2)\n    return \"0.0.0.0\"\n\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "MEDIUM"
+          }
+        },
+        {
+          "ruleId": "glog-66dcd0b0-843e-41c4-88fc-554daecce4cf",
+          "kind": "fail",
+          "level": "warning",
+          "message": {
+            "text": "Untrusted Data Deserialization Vulnerability in Pickle Modules"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vllm/v1/serial_utils.py"
+                },
+                "region": {
+                  "startLine": 310,
+                  "startColumn": 24,
+                  "endLine": 310,
+                  "endColumn": 42,
+                  "snippet": {
+                    "text": "                return pickle.loads(data)\n"
+                  }
+                },
+                "contextRegion": {
+                  "startLine": 309,
+                  "endLine": 311,
+                  "snippet": {
+                    "text": "            if code == CUSTOM_TYPE_PICKLE:\n                return pickle.loads(data)\n            if code == CUSTOM_TYPE_CLOUDPICKLE:\n"
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "issue_severity": "MEDIUM",
+            "issue_confidence": "HIGH"
+          }
+        }
+      ],
+      "newlineSequences": [
+        "\r\n",
+        "\n"
+      ]
+    }
+  ]
+}
